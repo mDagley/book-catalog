@@ -6,24 +6,32 @@ import { useRouter } from "next/navigation";
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setIsSubmitting(true);
 
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
 
-    if (res.ok) {
-      router.push("/");
-      router.refresh();
-    } else {
-      const data = await res.json();
-      setError(data.error ?? "Login failed");
+      if (res.ok) {
+        router.push("/");
+        router.refresh();
+      } else {
+        const data = await res.json();
+        setError(data.error ?? "Login failed");
+      }
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -39,12 +47,14 @@ export default function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
+          aria-label="Password"
           className="w-full rounded border p-2"
           autoFocus
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button
           type="submit"
+          disabled={isSubmitting}
           className="w-full rounded bg-black p-2 text-white"
         >
           Log in
