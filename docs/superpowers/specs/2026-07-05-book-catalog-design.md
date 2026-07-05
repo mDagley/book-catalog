@@ -247,6 +247,24 @@ interactively.
   `SESSION_SECRET`) lives in a `.env` file, matching the pattern already
   used in `audiobook-compare/.env`.
 
+## Deferred / Future Ideas
+
+Explicitly not designed in detail for v1 — captured here so they're not
+lost, and because none of them require v1 architecture changes to add
+later:
+
+- **Filtering** (e.g. by format, owned status) on the search/browse views.
+- **Read status** and **ratings** per book.
+- **Series tracking** — view all books in a series, in order.
+- **TBR shelves split by desired format** (e.g. separate Goodreads shelves
+  like `tbr-physical` / `tbr-ebook` instead of one `to-read`) — a future
+  extension of the Goodreads sync job, not a v1 concern.
+- **Overall library stats** (counts/breakdowns) — a read-only view over
+  existing data.
+- **Cataloging books not personally intended to be read** — already
+  supported today: the Add flow has no "reading interest" concept, it just
+  creates a `Book`/`PhysicalCopy` regardless of intent.
+
 ## Testing
 
 - **Fuzzy-matching port**: since this is a direct port of already-tested
