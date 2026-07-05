@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Book {
+  id        String         @id @default(cuid())
+  title     String
+  author    String?
+  isbn      String?
+  createdAt DateTime       @default(now())
+  copies    PhysicalCopy[]
+}
+
+model PhysicalCopy {
+  id             String   @id @default(cuid())
+  bookId         String
+  book           Book     @relation(fields: [bookId], references: [id])
+  format         Format
+  publisher      String?
+  publishYear    Int?
+  specialNotes   String?
+  coverImagePath String?
+  createdAt      DateTime @default(now())
+}
+
+enum Format {
+  HARDCOVER
+  PAPERBACK
+  MASS_MARKET
+  OTHER
+}
+
+model AbsCacheItem {
+  id           String    @id @default(cuid())
+  absItemId    String    @unique
+  title        String
+  author       String?
+  isbn         String?
+  mediaType    MediaType
+  lastSyncedAt DateTime  @default(now())
+}
+
+enum MediaType {
+  EBOOK
+  AUDIOBOOK
+}
+
+model GoodreadsTbrItem {
+  id           String   @id @default(cuid())
+  title        String
+  author       String?
+  isbn         String?
+  lastSyncedAt DateTime @default(now())
+}
