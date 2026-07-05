@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
+export interface BookFormState {
+  error?: string;
+}
+
 export const VALID_FORMATS = ["HARDCOVER", "PAPERBACK", "MASS_MARKET", "OTHER"] as const;
 export type BookFormat = (typeof VALID_FORMATS)[number];
 
