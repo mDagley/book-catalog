@@ -29,6 +29,17 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Generating APP_PASSWORD_HASH
+
+```bash
+node -e "console.log(require('bcryptjs').hashSync(process.argv[1], 10))" '<your-password>'
+```
+
+Every `$` in the resulting hash must be escaped as `\$` when pasted into
+`.env` (e.g. `\$2b\$10\$...`), since Next.js's env loader does shell-style
+`${VAR}` interpolation and will otherwise silently corrupt the hash (see
+`.env.example`).
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

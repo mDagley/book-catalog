@@ -4,7 +4,15 @@ import { sessionOptions, SessionData } from "@/lib/session";
 import { verifyPassword } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
-  const { password } = await request.json();
+  let password: unknown;
+  try {
+    ({ password } = await request.json());
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 },
+    );
+  }
 
   if (typeof password !== "string" || password.length === 0) {
     return NextResponse.json({ error: "Password required" }, { status: 400 });
