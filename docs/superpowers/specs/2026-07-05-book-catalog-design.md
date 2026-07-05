@@ -14,6 +14,10 @@ edition. Unifies two existing sources:
   Goodreads for inventory purposes; Goodreads can still be used separately
   for reading history/reviews if desired, but is not a data source here).
 
+It also surfaces a **TBR gap view**: books on the user's Goodreads "to-read"
+shelf that aren't owned in any format (physical, ebook, or audiobook) —
+i.e., books they want to read but haven't yet acquired.
+
 Goodreads and Libib were both considered for the physical-book side. Neither
 offers a live read API for personal catalogs (Libib's REST API is
 patron/circulation-only; LibraryThing has no personal-catalog API due to
@@ -30,8 +34,8 @@ service.
   if the user keeps using it for that).
 - No condition/shelf-location tracking for physical copies (explicitly out
   of scope per user).
-- No live ABS querying on every search — ABS data is cached and refreshed
-  periodically (see Sync Job).
+- No live ABS or Goodreads querying on every search/view — both are cached
+  and refreshed periodically (see Sync Jobs).
 
 ## Architecture
 
@@ -43,7 +47,7 @@ PostgreSQL container.
   this?" check, and an "Add a book" flow with camera-based barcode scanning.
 - **Backend**: Next.js API routes handle catalog CRUD, ISBN metadata lookups
   (server-side proxy to Open Library, avoiding browser CORS issues), and the
-  ABS cache sync job.
+  ABS and Goodreads cache sync jobs.
 - **Auth**: a login page gating the whole app behind a single shared
   password.
 - **Barcode scanning**: client-side, via `@zxing/library` decoding the phone
@@ -99,6 +103,14 @@ enum MediaType {
   EBOOK
   AUDIOBOOK
 }
+
+model GoodreadsTbrItem {
+  id           String   @id @default(cuid())
+  title        String
+  author       String?
+  isbn         String?
+  lastSyncedAt DateTime @default(now())
+}
 ```
 
 Notes:
@@ -108,9 +120,12 @@ Notes:
   (e.g., "this one's signed") attach to just one copy.
 - `AbsCacheItem.mediaType` is derived from which ABS library
   (Panda EBooks vs. Panda Audiobooks) the item came from during sync.
-- Matching "is this the same book" across `Book`/`PhysicalCopy` and
-  `AbsCacheItem` at search time is NOT stored — it's computed on the fly
-  using the fuzzy-title-matching logic ported from the existing
+- `GoodreadsTbrItem` mirrors the shape of the existing Goodreads RSS fetch
+  (title/author/isbn), refreshed the same way as `AbsCacheItem` (see Sync
+  Jobs).
+- Matching "is this the same book" across `Book`/`PhysicalCopy`,
+  `AbsCacheItem`, and `GoodreadsTbrItem` is NOT stored — it's computed on
+  the fly using the fuzzy-title-matching logic ported from the existing
   `audiobook-compare/compare_audiobooks.py` (`normalize_title`,
   `_title_forms`, series/subtitle stripping), translated from Python to
   TypeScript. That logic is already tuned against this user's real
@@ -169,11 +184,24 @@ search for "Mistborn" returns one entry: cover thumbnail, "Physical
 disconnected rows. Tapping an entry with multiple physical copies expands to
 show each copy's format/publisher/notes/cover individually.
 
-## ABS Sync Job
+## TBR Gap View
 
-A `node-cron` job inside the Next.js server process itself (no separate
+A separate page/tab (distinct from the search box, since it's a browseable
+list rather than a lookup) listing every `GoodreadsTbrItem` that does NOT
+fuzzy-match any entry in `Book`/`PhysicalCopy` or `AbsCacheItem` — i.e.,
+books on the user's "to-read" shelf not yet owned in any format. This
+reuses the same matching logic as the search page, just inverted: instead
+of "find what I own," it's "find what's on my TBR with no match in what I
+own." Each entry shows title/author so the user can quickly decide whether
+to buy/borrow it.
+
+## Sync Jobs
+
+Two `node-cron` jobs inside the Next.js server process itself (no separate
 cron container — the Next.js standalone server is already a long-running
-process), running every 30–60 minutes:
+process), each running every 30–60 minutes:
+
+**ABS sync:**
 
 1. `GET /api/libraries` on the ABS instance, filtered to "Panda EBooks" and
    "Panda Audiobooks" (same approach as `audiobook-compare/list_libraries.py`).
@@ -183,13 +211,24 @@ process), running every 30–60 minutes:
    `mediaType` from which library it came from and updating
    `lastSyncedAt`.
 
-A manual "refresh now" button in the UI triggers the same sync route
-on-demand (useful right after a big upload batch, so the catalog reflects
-new ebooks/audiobooks immediately instead of waiting for the next scheduled
-run).
+**Goodreads TBR sync:**
 
-**Error handling**: if the ABS instance is unreachable during a sync run,
-the job logs the failure and leaves the existing cache untouched (stale
+1. Fetch the public "to-read" shelf RSS feed
+   (`https://www.goodreads.com/review/list_rss/{user_id}?shelf=to-read`),
+   paginating the same way as `compare_audiobooks.py`'s
+   `fetch_all_goodreads_books`, ported to TypeScript.
+2. Replace the contents of `GoodreadsTbrItem` with the fetched set (a full
+   replace rather than an upsert-by-id, since Goodreads RSS doesn't expose
+   a stable per-item id to key on — books removed from the shelf should
+   disappear from the gap view too).
+
+A manual "refresh now" button in the UI triggers both sync routes
+on-demand (useful right after a big upload batch or after editing Goodreads
+shelves, so the catalog/TBR view reflects changes immediately instead of
+waiting for the next scheduled run).
+
+**Error handling**: if ABS or Goodreads is unreachable during a sync run,
+that job logs the failure and leaves its existing cache untouched (stale
 data is preferable to wiping the cache on a transient network blip). The
 manual refresh button surfaces the error to the user directly if triggered
 interactively.
@@ -215,13 +254,16 @@ interactively.
   port should carry over equivalent unit tests (title normalization,
   series-suffix stripping, cross-form matching) to confirm behavior parity.
 - **API routes**: unit/integration tests for the ISBN lookup proxy (mocking
-  Open Library responses, including the "no data found" case) and the ABS
+  Open Library responses, including the "no data found" case), the ABS
   sync upsert logic (mocking ABS API responses, including pagination and
-  the unreachable-instance case).
+  the unreachable-instance case), and the Goodreads TBR sync (mocking the
+  RSS feed, including the empty-shelf and non-XML-response cases already
+  covered in `compare_audiobooks.py`'s existing tests).
 - **Barcode scanning / camera**: not practical to unit test (hardware- and
   browser-dependent) — verified manually on both an iOS and an Android
   device during implementation.
 - **Manual QA checklist**: add a book via scan (with and without Open
   Library data), add a book manually, add a second copy of an existing
   book, search and confirm merged results across physical/ebook/audiobook,
-  trigger manual ABS refresh, log in/out.
+  trigger manual ABS/Goodreads refresh, confirm the TBR gap view excludes
+  books owned in any format and includes ones that aren't, log in/out.
