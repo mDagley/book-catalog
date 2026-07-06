@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,9 @@ export default async function HomePage() {
     <main className="flex min-h-screen flex-col items-center justify-center p-4">
       <h1 className="text-2xl font-semibold">Book Catalog</h1>
       <p className="mt-2 text-gray-600">{bookCount} books in catalog</p>
+      <Link href="/books" className="mt-4 rounded bg-black px-4 py-2 text-white">
+        View Physical Books
+      </Link>
       <form action="/api/logout" method="post" className="mt-6">
         <button type="submit" className="text-sm underline">
           Log out
