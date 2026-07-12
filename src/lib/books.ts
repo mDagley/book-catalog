@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { saveCoverImage } from "@/lib/coverStorage";
 
 export interface BookFormState {
   error?: string;
@@ -84,6 +85,14 @@ export async function createBookWithCopyData(
   });
 
   return { bookId: book.id };
+}
+
+export async function saveCoverFromUrl(url: string): Promise<string> {
+  const response = await fetch(url);
+  const arrayBuffer = await response.arrayBuffer();
+  const contentType = response.headers.get("content-type") ?? "image/jpeg";
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  return saveCoverImage(`data:${contentType};base64,${base64}`);
 }
 
 export async function updateBookData(
