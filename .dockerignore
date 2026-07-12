@@ -6,7 +6,8 @@ node_modules
 docs
 coverage
 *.md
-.env
-.env.local
+.env*
+!.env.example
+!.env.production.example
 uploads/*
 !uploads/.gitkeep

@@ -21,7 +21,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# ---- runner: minimal production image ----
+# ---- runner: production image (full node_modules — see note below on why) ----
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -31,7 +31,8 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 --ingroup nodejs nextjs
 
-# Next.js standalone output: pruned node_modules + minimal server.js.
+# Next.js standalone output: server.js + an initial pruned node_modules,
+# which is superseded wholesale by the full copy below.
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
