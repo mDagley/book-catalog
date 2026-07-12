@@ -27,7 +27,7 @@ export default async function BooksPage({
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Physical Books</h1>
-        <Link href="/books/new" className="rounded bg-black px-3 py-2 text-sm text-white">
+        <Link href="/books/scan" className="rounded bg-black px-3 py-2 text-sm text-white">
           + Add a book
         </Link>
       </div>

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
 
 export interface BookFormState {
   error?: string;
@@ -19,6 +20,15 @@ interface ParsedCopyFields {
   publisher: string | null;
   publishYear: number | null;
   specialNotes: string | null;
+}
+
+// Normalizes an ISBN for storage/comparison: strips everything except digits
+// and the ISBN-10 check digit "X", and uppercases it. This lets a manually
+// typed, hyphenated ISBN (e.g. "978-0-7653-2635-5") dedup-match a bare digit
+// string decoded from a barcode scan (e.g. "9780765326355"). This does not
+// affect how an ISBN is displayed anywhere.
+export function normalizeIsbn(raw: string): string {
+  return raw.replace(/[^0-9Xx]/g, "").toUpperCase();
 }
 
 export function parseCopyFields(
@@ -45,28 +55,93 @@ export function parseCopyFields(
 }
 
 export async function createBookWithCopyData(
-  input: { title: string; author: string; isbn: string } & CopyFieldsInput,
+  input: { title: string; author: string; isbn: string; coverImagePath?: string } & CopyFieldsInput,
 ): Promise<{ bookId: string } | { error: string }> {
   const title = input.title.trim();
-  if (!title) {
-    return { error: "Title is required" };
-  }
+  const isbn = normalizeIsbn(input.isbn) || null;
 
   const parsedCopy = parseCopyFields(input);
   if ("error" in parsedCopy) {
     return parsedCopy;
   }
 
+  const coverImagePath = input.coverImagePath?.trim() || null;
+  if (coverImagePath && !SAFE_COVER_FILENAME.test(coverImagePath)) {
+    return { error: "Invalid cover image reference" };
+  }
+
+  const copyData = { ...parsedCopy, coverImagePath };
+
+  // Check for an ISBN match before validating the title: a rescan that attaches
+  // a new copy to an already-existing book must not require a title, since the
+  // existing book's title is authoritative and is never overwritten here.
+  if (isbn) {
+    // Book.isbn has no unique constraint, so if duplicate rows ever share an
+    // ISBN, order deterministically (oldest first) rather than letting the
+    // DB pick an arbitrary match.
+    const existingBook = await prisma.book.findFirst({
+      where: { isbn },
+      orderBy: { createdAt: "asc" },
+    });
+    if (existingBook) {
+      await prisma.physicalCopy.create({
+        data: { ...copyData, bookId: existingBook.id },
+      });
+      return { bookId: existingBook.id };
+    }
+  }
+
+  if (!title) {
+    return { error: "Title is required" };
+  }
+
   const book = await prisma.book.create({
     data: {
       title,
       author: input.author.trim() || null,
-      isbn: input.isbn.trim() || null,
-      copies: { create: parsedCopy },
+      isbn,
+      copies: { create: copyData },
     },
   });
 
   return { bookId: book.id };
+}
+
+// Open Library is the only source CoverPicker ever populates selectedCoverDataUrl
+// from when selectedCoverSource is "url" (see src/lib/isbnLookup.ts). Since the
+// form field is just a plain hidden input, a request submitted outside the normal
+// UI (devtools/curl) could otherwise point the server at an arbitrary URL, so we
+// restrict fetches to Open Library's covers CDN to avoid SSRF.
+const ALLOWED_COVER_HOSTS = ["covers.openlibrary.org"];
+
+export async function saveCoverFromUrl(
+  url: string,
+): Promise<{ coverImagePath: string } | { error: string }> {
+  try {
+    const { hostname, protocol } = new URL(url);
+    if (protocol !== "https:" || !ALLOWED_COVER_HOSTS.includes(hostname)) {
+      return { error: "Unsupported cover image host" };
+    }
+
+    // Don't follow redirects: a URL that passes the hostname check above could
+    // otherwise redirect to an off-allowlist host and still be fetched.
+    const response = await fetch(url, { redirect: "manual" });
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      return { error: "Failed to fetch cover image" };
+    }
+    if (!response.ok) {
+      return { error: "Failed to fetch cover image" };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
+    const contentType = rawContentType.split(";")[0].trim();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
+    return { coverImagePath };
+  } catch {
+    return { error: "Failed to fetch cover image" };
+  }
 }
 
 export async function updateBookData(
@@ -83,7 +158,7 @@ export async function updateBookData(
     data: {
       title,
       author: input.author.trim() || null,
-      isbn: input.isbn.trim() || null,
+      isbn: normalizeIsbn(input.isbn) || null,
     },
   });
 
