@@ -12,6 +12,11 @@ const MIME_TO_EXT: Record<string, string> = {
 
 const DATA_URL_PATTERN = /^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/;
 
+// Generous headroom above what a downscaled 800px JPEG (client-captured cover
+// photo) or a typical Open Library cover would ever produce, while still
+// blocking pathological inputs.
+const MAX_COVER_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
 // Valid stored cover filenames are always a UUID plus a known extension (see
 // saveCoverImage below). Shared with the /api/covers/[filename] route (which
 // uses it to reject path traversal before reading from disk) and with
@@ -31,10 +36,14 @@ export async function saveCoverImage(dataUrl: string): Promise<string> {
     throw new Error(`Unsupported image type: ${mimeType}`);
   }
 
+  const buffer = Buffer.from(base64Data, "base64");
+  if (buffer.length > MAX_COVER_IMAGE_BYTES) {
+    throw new Error("Cover image is too large");
+  }
+
   await mkdir(UPLOADS_DIR, { recursive: true });
 
   const filename = `${randomUUID()}.${ext}`;
-  const buffer = Buffer.from(base64Data, "base64");
   await writeFile(path.join(UPLOADS_DIR, filename), buffer);
 
   return filename;
@@ -42,10 +51,16 @@ export async function saveCoverImage(dataUrl: string): Promise<string> {
 
 export async function deleteCoverImage(filename: string): Promise<void> {
   // Best-effort cleanup only: an invalid/unsafe filename (e.g. containing
-  // path traversal) is silently ignored rather than thrown, consistent with
-  // { force: true } already making a missing-file case silent.
+  // path traversal) is silently ignored, and any error thrown by `rm`
+  // (permission issues, unexpected file types, etc. — { force: true } only
+  // suppresses a missing-file/ENOENT error) is swallowed, so this function
+  // never throws.
   if (!SAFE_COVER_FILENAME.test(filename)) {
     return;
   }
-  await rm(path.join(UPLOADS_DIR, filename), { force: true });
+  try {
+    await rm(path.join(UPLOADS_DIR, filename), { force: true });
+  } catch {
+    // Ignore — cleanup is best-effort only.
+  }
 }

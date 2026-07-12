@@ -35,6 +35,14 @@ describe("saveCoverImage", () => {
   it("rejects a malformed data URL", async () => {
     await expect(saveCoverImage("not-a-data-url")).rejects.toThrow(/invalid data url/i);
   });
+
+  it("rejects a payload larger than the max cover image size", async () => {
+    // One byte over the 10MB limit, once base64-decoded.
+    const oversizedBuffer = Buffer.alloc(10 * 1024 * 1024 + 1, 1);
+    const dataUrl = `data:image/png;base64,${oversizedBuffer.toString("base64")}`;
+
+    await expect(saveCoverImage(dataUrl)).rejects.toThrow(/too large/i);
+  });
 });
 
 describe("deleteCoverImage", () => {
@@ -65,6 +73,23 @@ describe("deleteCoverImage", () => {
       expect(stillThere).toBe("sensitive contents");
     } finally {
       await rm(siblingDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not throw even when the underlying rm call fails", async () => {
+    // A non-empty directory sitting at a name that matches SAFE_COVER_FILENAME.
+    // fs.rm without { recursive: true } fails on this (EISDIR/ENOTEMPTY),
+    // which is exactly the kind of non-ENOENT error { force: true } does NOT
+    // suppress on its own.
+    const dirName = "deadbeef-dead-beef-dead-beefdeadbeef.png";
+    const dirPath = path.join(uploadsDir, dirName);
+    await mkdir(dirPath, { recursive: true });
+    await writeFile(path.join(dirPath, "nested-file"), "contents");
+
+    try {
+      await expect(deleteCoverImage(dirName)).resolves.toBeUndefined();
+    } finally {
+      await rm(dirPath, { recursive: true, force: true });
     }
   });
 });
