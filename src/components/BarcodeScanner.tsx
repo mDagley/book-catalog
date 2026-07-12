@@ -37,6 +37,7 @@ export function BarcodeScanner({ onDecode }: BarcodeScannerProps) {
             const dataUrl = canvas.toDataURL("image/png");
 
             hasDecodedRef.current = true;
+            reader.reset();
             onDecode(isbn, dataUrl);
           } else if (err && !(err instanceof NotFoundException)) {
             setError(err.message);
