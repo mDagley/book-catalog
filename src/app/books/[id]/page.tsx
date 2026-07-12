@@ -49,6 +49,14 @@ export default async function BookDetailPage({
             {copy.publisher && <p className="text-sm text-gray-600">{copy.publisher}</p>}
             {copy.publishYear && <p className="text-sm text-gray-600">{copy.publishYear}</p>}
             {copy.specialNotes && <p className="text-sm text-gray-600">{copy.specialNotes}</p>}
+            {copy.coverImagePath && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/api/covers/${copy.coverImagePath}`}
+                alt="Cover"
+                className="mt-2 h-32 w-24 rounded object-cover"
+              />
+            )}
             <div className="mt-2 flex gap-2">
               <Link
                 href={`/books/${book.id}/copies/${copy.id}/edit`}
