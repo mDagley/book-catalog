@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { saveCoverImage } from "@/lib/coverStorage";
+import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
 
 export interface BookFormState {
   error?: string;
@@ -56,7 +56,12 @@ export async function createBookWithCopyData(
     return parsedCopy;
   }
 
-  const copyData = { ...parsedCopy, coverImagePath: input.coverImagePath?.trim() || null };
+  const coverImagePath = input.coverImagePath?.trim() || null;
+  if (coverImagePath && !SAFE_COVER_FILENAME.test(coverImagePath)) {
+    return { error: "Invalid cover image reference" };
+  }
+
+  const copyData = { ...parsedCopy, coverImagePath };
 
   // Check for an ISBN match before validating the title: a rescan that attaches
   // a new copy to an already-existing book must not require a title, since the

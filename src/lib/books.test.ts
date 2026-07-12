@@ -133,6 +133,21 @@ describe("createBookWithCopyData", () => {
     expect(book.copies[0].coverImagePath).toBe("abc123.png");
   });
 
+  it("rejects a coverImagePath that doesn't match the safe filename format", async () => {
+    const result = await createBookWithCopyData({
+      title: "Path Traversal Book",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+      coverImagePath: "../../../etc/passwd",
+    });
+
+    expect(result).toEqual({ error: "Invalid cover image reference" });
+  });
+
   it("normalizes an empty-string coverImagePath to null", async () => {
     const result = await createBookWithCopyData({
       title: "Empty Cover Path Book",

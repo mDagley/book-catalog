@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { SAFE_COVER_FILENAME } from "@/lib/coverStorage";
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? "./uploads";
 
@@ -18,7 +19,7 @@ export async function GET(
 
   // Reject any path-traversal attempt or unexpected characters up front —
   // valid filenames are always a UUID plus a known extension (see saveCoverImage).
-  if (!/^[a-f0-9-]+\.(png|jpg|webp)$/.test(filename)) {
+  if (!SAFE_COVER_FILENAME.test(filename)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

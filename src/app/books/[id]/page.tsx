@@ -52,7 +52,7 @@ export default async function BookDetailPage({
             {copy.coverImagePath && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`/api/covers/${copy.coverImagePath}`}
+                src={`/api/covers/${encodeURIComponent(copy.coverImagePath)}`}
                 alt="Cover"
                 className="mt-2 h-32 w-24 rounded object-cover"
               />
