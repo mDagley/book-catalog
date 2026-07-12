@@ -232,6 +232,44 @@ describe("createBookWithCopyData", () => {
     expect(result.bookId).toBe(older.id);
   });
 
+  it("dedups a hyphenated ISBN against a bare-digit ISBN for the same book", async () => {
+    const first = await createBookWithCopyData({
+      title: "Normalization Test Book",
+      author: "Original Author",
+      isbn: "978-0-7653-2635-5",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in first).toBe(false);
+    if ("error" in first) return;
+    createdBookIds.push(first.bookId);
+
+    const firstBook = await prisma.book.findUniqueOrThrow({ where: { id: first.bookId } });
+    expect(firstBook.isbn).toBe("9780765326355");
+
+    const second = await createBookWithCopyData({
+      title: "Normalization Test Book (Scanned Copy)",
+      author: "",
+      isbn: "9780765326355",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in second).toBe(false);
+    if ("error" in second) return;
+
+    expect(second.bookId).toBe(first.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: first.bookId },
+      include: { copies: true },
+    });
+    expect(book.copies).toHaveLength(2);
+  });
+
   it("creates a new book when the ISBN doesn't match any existing book", async () => {
     const first = await createBookWithCopyData({
       title: "No Match Book One",

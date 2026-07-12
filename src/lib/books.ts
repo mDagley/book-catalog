@@ -22,6 +22,15 @@ interface ParsedCopyFields {
   specialNotes: string | null;
 }
 
+// Normalizes an ISBN for storage/comparison: strips everything except digits
+// and the ISBN-10 check digit "X", and uppercases it. This lets a manually
+// typed, hyphenated ISBN (e.g. "978-0-7653-2635-5") dedup-match a bare digit
+// string decoded from a barcode scan (e.g. "9780765326355"). This does not
+// affect how an ISBN is displayed anywhere.
+export function normalizeIsbn(raw: string): string {
+  return raw.replace(/[^0-9Xx]/g, "").toUpperCase();
+}
+
 export function parseCopyFields(
   input: CopyFieldsInput,
 ): ParsedCopyFields | { error: string } {
@@ -49,7 +58,7 @@ export async function createBookWithCopyData(
   input: { title: string; author: string; isbn: string; coverImagePath?: string } & CopyFieldsInput,
 ): Promise<{ bookId: string } | { error: string }> {
   const title = input.title.trim();
-  const isbn = input.isbn.trim() || null;
+  const isbn = normalizeIsbn(input.isbn) || null;
 
   const parsedCopy = parseCopyFields(input);
   if ("error" in parsedCopy) {
@@ -149,7 +158,7 @@ export async function updateBookData(
     data: {
       title,
       author: input.author.trim() || null,
-      isbn: input.isbn.trim() || null,
+      isbn: normalizeIsbn(input.isbn) || null,
     },
   });
 

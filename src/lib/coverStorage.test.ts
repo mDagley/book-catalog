@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
@@ -50,5 +50,21 @@ describe("deleteCoverImage", () => {
 
   it("does not throw when the file does not exist", async () => {
     await expect(deleteCoverImage("does-not-exist.png")).resolves.toBeUndefined();
+  });
+
+  it("does not delete a file outside the uploads directory given a path-traversal-shaped filename", async () => {
+    const siblingDir = path.join(uploadsDir, "..", "cover-storage-test-sibling");
+    const victimPath = path.join(siblingDir, "victim-file.png");
+    await mkdir(siblingDir, { recursive: true });
+    await writeFile(victimPath, "sensitive contents");
+
+    try {
+      await deleteCoverImage("../cover-storage-test-sibling/victim-file.png");
+
+      const stillThere = await readFile(victimPath, "utf8");
+      expect(stillThere).toBe("sensitive contents");
+    } finally {
+      await rm(siblingDir, { recursive: true, force: true });
+    }
   });
 });

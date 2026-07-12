@@ -41,5 +41,11 @@ export async function saveCoverImage(dataUrl: string): Promise<string> {
 }
 
 export async function deleteCoverImage(filename: string): Promise<void> {
+  // Best-effort cleanup only: an invalid/unsafe filename (e.g. containing
+  // path traversal) is silently ignored rather than thrown, consistent with
+  // { force: true } already making a missing-file case silent.
+  if (!SAFE_COVER_FILENAME.test(filename)) {
+    return;
+  }
   await rm(path.join(UPLOADS_DIR, filename), { force: true });
 }
