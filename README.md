@@ -74,12 +74,12 @@ docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
   -e SESSION_SECRET="..." \
   -e APP_PASSWORD_HASH="..." \
-  -e UPLOADS_DIR="./uploads" \
+  -e UPLOADS_DIR="/app/uploads" \
   -v book-catalog-uploads:/app/uploads \
   book-catalog
 ```
 
-### Deploy on Vercel
+## Deploy on Vercel
 
 Vercel's serverless filesystem is ephemeral, so it's incompatible with this
 app's local-disk cover-image storage (`UPLOADS_DIR`) as-is — cover images
