@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.claude
+.playwright-mcp
+docs
+coverage
+*.md
+.env
+.env.local
+uploads/*
+!uploads/.gitkeep
