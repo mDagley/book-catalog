@@ -37,6 +37,7 @@ export function CoverPicker({
           <button
             type="button"
             onClick={() => setSelected("captured")}
+            aria-pressed={selected === "captured"}
             className={`rounded border-2 p-1 ${selected === "captured" ? "border-black" : "border-transparent"}`}
           >
             <img src={capturedImageDataUrl} alt="Your photo" className="h-32 w-24 object-cover" />
@@ -47,6 +48,7 @@ export function CoverPicker({
           <button
             type="button"
             onClick={() => setSelected("openLibrary")}
+            aria-pressed={selected === "openLibrary"}
             className={`rounded border-2 p-1 ${selected === "openLibrary" ? "border-black" : "border-transparent"}`}
           >
             <img src={openLibraryCoverUrl} alt="Open Library cover" className="h-32 w-24 object-cover" />
