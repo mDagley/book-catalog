@@ -45,24 +45,38 @@ export function parseCopyFields(
 }
 
 export async function createBookWithCopyData(
-  input: { title: string; author: string; isbn: string } & CopyFieldsInput,
+  input: { title: string; author: string; isbn: string; coverImagePath?: string } & CopyFieldsInput,
 ): Promise<{ bookId: string } | { error: string }> {
   const title = input.title.trim();
-  if (!title) {
-    return { error: "Title is required" };
-  }
+  const isbn = input.isbn.trim() || null;
 
   const parsedCopy = parseCopyFields(input);
   if ("error" in parsedCopy) {
     return parsedCopy;
   }
 
+  const copyData = { ...parsedCopy, coverImagePath: input.coverImagePath ?? null };
+
+  if (isbn) {
+    const existingBook = await prisma.book.findFirst({ where: { isbn } });
+    if (existingBook) {
+      await prisma.physicalCopy.create({
+        data: { ...copyData, bookId: existingBook.id },
+      });
+      return { bookId: existingBook.id };
+    }
+  }
+
+  if (!title) {
+    return { error: "Title is required" };
+  }
+
   const book = await prisma.book.create({
     data: {
       title,
       author: input.author.trim() || null,
-      isbn: input.isbn.trim() || null,
-      copies: { create: parsedCopy },
+      isbn,
+      copies: { create: copyData },
     },
   });
 

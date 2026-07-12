@@ -8,6 +8,8 @@ export async function createBookWithCopy(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
+  const coverImagePath = formData.get("coverImagePath")?.toString();
+
   const result = await createBookWithCopyData({
     title: (formData.get("title") as string) ?? "",
     author: (formData.get("author") as string) ?? "",
@@ -16,6 +18,7 @@ export async function createBookWithCopy(
     publisher: (formData.get("publisher") as string) ?? "",
     publishYear: (formData.get("publishYear") as string) ?? "",
     specialNotes: (formData.get("specialNotes") as string) ?? "",
+    coverImagePath: coverImagePath || undefined,
   });
 
   if ("error" in result) {

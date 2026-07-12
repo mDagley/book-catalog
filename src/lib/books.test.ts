@@ -107,6 +107,95 @@ describe("createBookWithCopyData", () => {
     });
     expect(result).toEqual({ error: "Publish year must be a number" });
   });
+
+  it("accepts an optional coverImagePath and stores it on the copy", async () => {
+    const result = await createBookWithCopyData({
+      title: "Cover Test Book",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+      coverImagePath: "abc123.png",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: result.bookId },
+      include: { copies: true },
+    });
+    expect(book.copies[0].coverImagePath).toBe("abc123.png");
+  });
+
+  it("attaches a new copy to an existing book with the same ISBN instead of creating a duplicate", async () => {
+    const first = await createBookWithCopyData({
+      title: "Dedup Test Book",
+      author: "Original Author",
+      isbn: "9999999999999",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in first).toBe(false);
+    if ("error" in first) return;
+    createdBookIds.push(first.bookId);
+
+    const second = await createBookWithCopyData({
+      title: "Dedup Test Book (Reissue Title Ignored)",
+      author: "",
+      isbn: "9999999999999",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in second).toBe(false);
+    if ("error" in second) return;
+
+    expect(second.bookId).toBe(first.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: first.bookId },
+      include: { copies: true },
+    });
+    expect(book.copies).toHaveLength(2);
+    expect(book.title).toBe("Dedup Test Book"); // original title preserved, not overwritten
+  });
+
+  it("creates a new book when the ISBN doesn't match any existing book", async () => {
+    const first = await createBookWithCopyData({
+      title: "No Match Book One",
+      author: "",
+      isbn: "1111111111111",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in first).toBe(false);
+    if ("error" in first) return;
+    createdBookIds.push(first.bookId);
+
+    const second = await createBookWithCopyData({
+      title: "No Match Book Two",
+      author: "",
+      isbn: "2222222222222",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    expect("error" in second).toBe(false);
+    if ("error" in second) return;
+    createdBookIds.push(second.bookId);
+
+    expect(second.bookId).not.toBe(first.bookId);
+  });
 });
 
 describe("updateBookData", () => {
