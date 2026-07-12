@@ -87,12 +87,35 @@ export async function createBookWithCopyData(
   return { bookId: book.id };
 }
 
-export async function saveCoverFromUrl(url: string): Promise<string> {
-  const response = await fetch(url);
-  const arrayBuffer = await response.arrayBuffer();
-  const contentType = response.headers.get("content-type") ?? "image/jpeg";
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  return saveCoverImage(`data:${contentType};base64,${base64}`);
+// Open Library is the only source CoverPicker ever populates selectedCoverDataUrl
+// from when selectedCoverSource is "url" (see src/lib/isbnLookup.ts). Since the
+// form field is just a plain hidden input, a request submitted outside the normal
+// UI (devtools/curl) could otherwise point the server at an arbitrary URL, so we
+// restrict fetches to Open Library's covers CDN to avoid SSRF.
+const ALLOWED_COVER_HOSTS = ["covers.openlibrary.org"];
+
+export async function saveCoverFromUrl(
+  url: string,
+): Promise<{ coverImagePath: string } | { error: string }> {
+  try {
+    const { hostname } = new URL(url);
+    if (!ALLOWED_COVER_HOSTS.includes(hostname)) {
+      return { error: "Unsupported cover image host" };
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return { error: "Failed to fetch cover image" };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get("content-type") ?? "image/jpeg";
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
+    return { coverImagePath };
+  } catch {
+    return { error: "Failed to fetch cover image" };
+  }
 }
 
 export async function updateBookData(

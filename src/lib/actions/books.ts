@@ -42,10 +42,15 @@ export async function createBookFromScan(
 
   let coverImagePath: string | undefined;
   if (selectedCoverDataUrl) {
-    coverImagePath =
-      selectedCoverSource === "url"
-        ? await saveCoverFromUrl(selectedCoverDataUrl)
-        : await saveCoverImage(selectedCoverDataUrl);
+    if (selectedCoverSource === "url") {
+      const coverResult = await saveCoverFromUrl(selectedCoverDataUrl);
+      if ("error" in coverResult) {
+        return { error: coverResult.error };
+      }
+      coverImagePath = coverResult.coverImagePath;
+    } else {
+      coverImagePath = await saveCoverImage(selectedCoverDataUrl);
+    }
   }
 
   const result = await createBookWithCopyData({
