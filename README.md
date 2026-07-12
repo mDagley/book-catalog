@@ -74,6 +74,7 @@ docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
   -e SESSION_SECRET="..." \
   -e APP_PASSWORD_HASH="..." \
+  -e UPLOADS_DIR="./uploads" \
   -v book-catalog-uploads:/app/uploads \
   book-catalog
 ```

@@ -2,8 +2,9 @@
 set -e
 
 # Applies any pending migrations (idempotent — safe to run on every start,
-# a no-op if the DB is already up to date). Runs before the server starts so
-# the app never serves against a stale schema.
+# a no-op if the DB is already up to date). Always runs first, regardless of
+# what command is ultimately being exec'd below, so the app (or any ad-hoc
+# command) never runs against a stale schema.
 #
 # Invoked via its real entry point (node_modules/prisma/build/index.js)
 # rather than node_modules/.bin/prisma: that bin file is normally a symlink
@@ -12,4 +13,6 @@ set -e
 # which breaks it.
 node node_modules/prisma/build/index.js migrate deploy
 
-exec node server.js
+# Run whatever command was passed as CMD/args (defaults to `node server.js`
+# per the Dockerfile's CMD, but can be overridden at `docker run` time).
+exec "$@"

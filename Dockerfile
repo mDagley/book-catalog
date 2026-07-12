@@ -43,16 +43,17 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # the unrelated `effect` package). Rather than chase transitive deps one
 # ENOENT at a time, replace the standalone output's pruned node_modules
 # with the full one from the builder stage, which is guaranteed complete.
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
-COPY docker-entrypoint.sh ./
+COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh \
     && mkdir -p uploads \
-    && chown -R nextjs:nodejs /app
+    && chown nextjs:nodejs uploads
 
 USER nextjs
 EXPOSE 3000
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["node", "server.js"]
