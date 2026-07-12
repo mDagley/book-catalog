@@ -8,7 +8,7 @@ import {
   updateBookData,
   type BookFormState,
 } from "@/lib/books";
-import { saveCoverImage } from "@/lib/coverStorage";
+import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
 export async function createBookWithCopy(
   _prevState: BookFormState,
@@ -71,6 +71,9 @@ export async function createBookFromScan(
   });
 
   if ("error" in result) {
+    if (coverImagePath) {
+      await deleteCoverImage(coverImagePath);
+    }
     return { error: result.error };
   }
 

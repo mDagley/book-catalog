@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { saveCoverImage } from "@/lib/coverStorage";
+import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
 const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const savedPaths: string[] = [];
@@ -34,5 +34,21 @@ describe("saveCoverImage", () => {
 
   it("rejects a malformed data URL", async () => {
     await expect(saveCoverImage("not-a-data-url")).rejects.toThrow(/invalid data url/i);
+  });
+});
+
+describe("deleteCoverImage", () => {
+  it("removes a file that exists", async () => {
+    const dataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const relPath = await saveCoverImage(dataUrl);
+
+    await deleteCoverImage(relPath);
+
+    await expect(readFile(path.join(uploadsDir, relPath))).rejects.toThrow();
+  });
+
+  it("does not throw when the file does not exist", async () => {
+    await expect(deleteCoverImage("does-not-exist.png")).resolves.toBeUndefined();
   });
 });

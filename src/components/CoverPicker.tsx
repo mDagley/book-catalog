@@ -40,6 +40,7 @@ export function CoverPicker({
             aria-pressed={selected === "captured"}
             className={`rounded border-2 p-1 ${selected === "captured" ? "border-black" : "border-transparent"}`}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={capturedImageDataUrl} alt="Your photo" className="h-32 w-24 object-cover" />
             <p className="text-center text-xs">Your photo</p>
           </button>
@@ -51,6 +52,7 @@ export function CoverPicker({
             aria-pressed={selected === "openLibrary"}
             className={`rounded border-2 p-1 ${selected === "openLibrary" ? "border-black" : "border-transparent"}`}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={openLibraryCoverUrl} alt="Open Library cover" className="h-32 w-24 object-cover" />
             <p className="text-center text-xs">Open Library</p>
           </button>

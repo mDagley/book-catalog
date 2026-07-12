@@ -104,8 +104,8 @@ export async function saveCoverFromUrl(
   url: string,
 ): Promise<{ coverImagePath: string } | { error: string }> {
   try {
-    const { hostname } = new URL(url);
-    if (!ALLOWED_COVER_HOSTS.includes(hostname)) {
+    const { hostname, protocol } = new URL(url);
+    if (protocol !== "https:" || !ALLOWED_COVER_HOSTS.includes(hostname)) {
       return { error: "Unsupported cover image host" };
     }
 

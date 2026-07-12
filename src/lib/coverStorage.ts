@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -31,4 +31,8 @@ export async function saveCoverImage(dataUrl: string): Promise<string> {
   await writeFile(path.join(UPLOADS_DIR, filename), buffer);
 
   return filename;
+}
+
+export async function deleteCoverImage(filename: string): Promise<void> {
+  await rm(path.join(UPLOADS_DIR, filename), { force: true });
 }
