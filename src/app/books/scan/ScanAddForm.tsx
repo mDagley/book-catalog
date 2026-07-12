@@ -72,7 +72,6 @@ export function ScanAddForm() {
         <input
           id="title"
           name="title"
-          required
           defaultValue={lookup?.title}
           className="mt-1 w-full rounded border p-2"
         />

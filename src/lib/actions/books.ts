@@ -48,8 +48,14 @@ export async function createBookFromScan(
         return { error: coverResult.error };
       }
       coverImagePath = coverResult.coverImagePath;
+    } else if (selectedCoverSource === "dataUrl") {
+      try {
+        coverImagePath = await saveCoverImage(selectedCoverDataUrl);
+      } catch {
+        return { error: "Invalid cover image" };
+      }
     } else {
-      coverImagePath = await saveCoverImage(selectedCoverDataUrl);
+      return { error: "Invalid cover selection" };
     }
   }
 

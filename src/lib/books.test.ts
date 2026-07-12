@@ -192,6 +192,31 @@ describe("createBookWithCopyData", () => {
     expect(book.title).toBe("Dedup Test Book"); // original title preserved, not overwritten
   });
 
+  it("matches the oldest existing book deterministically when multiple books share an ISBN", async () => {
+    // Book.isbn has no unique constraint, so simulate a pre-existing duplicate
+    // by creating two books with the same ISBN directly, bypassing the dedup
+    // path (which would otherwise prevent this from ever happening via the
+    // public API).
+    const older = await prisma.book.create({ data: { title: "Older Duplicate", isbn: "5555555555555" } });
+    createdBookIds.push(older.id);
+    const newer = await prisma.book.create({ data: { title: "Newer Duplicate", isbn: "5555555555555" } });
+    createdBookIds.push(newer.id);
+
+    const result = await createBookWithCopyData({
+      title: "",
+      author: "",
+      isbn: "5555555555555",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.bookId).toBe(older.id);
+  });
+
   it("creates a new book when the ISBN doesn't match any existing book", async () => {
     const first = await createBookWithCopyData({
       title: "No Match Book One",
@@ -317,5 +342,41 @@ describe("saveCoverFromUrl", () => {
     const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/99999-M.jpg");
 
     expect("error" in result).toBe(true);
+  });
+
+  it("does not follow redirects, and rejects a redirect response instead of fetching it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "opaqueredirect",
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Failed to fetch cover image" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://covers.openlibrary.org/b/id/12345-M.jpg",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+  });
+
+  it("strips content-type parameters before matching against supported image types", async () => {
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      type: "basic",
+      headers: new Headers({ "content-type": "image/png; charset=binary" }),
+      arrayBuffer: async () => Buffer.from(pngBase64, "base64"),
+    } as unknown as Response);
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    savedPaths.push(result.coverImagePath);
+    expect(result.coverImagePath).toMatch(/^[a-f0-9-]+\.png$/);
   });
 });

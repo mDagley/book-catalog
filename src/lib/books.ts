@@ -62,7 +62,13 @@ export async function createBookWithCopyData(
   // a new copy to an already-existing book must not require a title, since the
   // existing book's title is authoritative and is never overwritten here.
   if (isbn) {
-    const existingBook = await prisma.book.findFirst({ where: { isbn } });
+    // Book.isbn has no unique constraint, so if duplicate rows ever share an
+    // ISBN, order deterministically (oldest first) rather than letting the
+    // DB pick an arbitrary match.
+    const existingBook = await prisma.book.findFirst({
+      where: { isbn },
+      orderBy: { createdAt: "asc" },
+    });
     if (existingBook) {
       await prisma.physicalCopy.create({
         data: { ...copyData, bookId: existingBook.id },
@@ -103,13 +109,19 @@ export async function saveCoverFromUrl(
       return { error: "Unsupported cover image host" };
     }
 
-    const response = await fetch(url);
+    // Don't follow redirects: a URL that passes the hostname check above could
+    // otherwise redirect to an off-allowlist host and still be fetched.
+    const response = await fetch(url, { redirect: "manual" });
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      return { error: "Failed to fetch cover image" };
+    }
     if (!response.ok) {
       return { error: "Failed to fetch cover image" };
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get("content-type") ?? "image/jpeg";
+    const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
+    const contentType = rawContentType.split(";")[0].trim();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
     const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
     return { coverImagePath };
