@@ -79,7 +79,7 @@ docker run -p 3000:3000 \
   book-catalog
 ```
 
-## Deploy on Vercel
+## Deploy on Vercel (not currently supported)
 
 Vercel's serverless filesystem is ephemeral, so it's incompatible with this
 app's local-disk cover-image storage (`UPLOADS_DIR`) as-is — cover images
