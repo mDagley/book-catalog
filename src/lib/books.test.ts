@@ -131,6 +131,29 @@ describe("createBookWithCopyData", () => {
     expect(book.copies[0].coverImagePath).toBe("abc123.png");
   });
 
+  it("normalizes an empty-string coverImagePath to null", async () => {
+    const result = await createBookWithCopyData({
+      title: "Empty Cover Path Book",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+      coverImagePath: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: result.bookId },
+      include: { copies: true },
+    });
+    expect(book.copies[0].coverImagePath).toBeNull();
+  });
+
   it("attaches a new copy to an existing book with the same ISBN instead of creating a duplicate", async () => {
     const first = await createBookWithCopyData({
       title: "Dedup Test Book",

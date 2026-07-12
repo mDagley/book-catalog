@@ -55,8 +55,11 @@ export async function createBookWithCopyData(
     return parsedCopy;
   }
 
-  const copyData = { ...parsedCopy, coverImagePath: input.coverImagePath ?? null };
+  const copyData = { ...parsedCopy, coverImagePath: input.coverImagePath?.trim() || null };
 
+  // Check for an ISBN match before validating the title: a rescan that attaches
+  // a new copy to an already-existing book must not require a title, since the
+  // existing book's title is authoritative and is never overwritten here.
   if (isbn) {
     const existingBook = await prisma.book.findFirst({ where: { isbn } });
     if (existingBook) {
