@@ -40,8 +40,49 @@ Every `$` in the resulting hash must be escaped as `\$` when pasted into
 `${VAR}` interpolation and will otherwise silently corrupt the hash (see
 `.env.example`).
 
-## Deploy on Vercel
+## Deploying with Docker (e.g. EasyPanel on a VPS)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The `Dockerfile` builds a self-contained production image (Next.js
+[`output: "standalone"`](https://nextjs.org/docs/app/api-reference/config/next-config-js/output))
+and runs database migrations automatically on container start via
+`docker-entrypoint.sh`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Set environment variables** in your host's UI (EasyPanel's "Environment"
+   tab, or equivalent) — see `.env.production.example` for the full list and
+   how to generate each value. Do not bake secrets into the image.
+2. **Mount a persistent volume at `/app/uploads`.** This is where scanned
+   book covers are stored; without a volume, every redeploy wipes them.
+3. **Point `DATABASE_URL` at a real Postgres** — either one hosted alongside
+   this app (e.g. an EasyPanel Postgres service, using its internal service
+   name as the host) or an external managed database.
+4. **Attach a domain with HTTPS.** The barcode-scanning camera feature
+   (`getUserMedia`) refuses to run outside a secure context — accessing the
+   app over plain HTTP or a bare IP will break scanning, even though every
+   other page works fine. EasyPanel provisions this automatically via
+   Let's Encrypt once a domain is attached.
+5. Build and run: EasyPanel (or any Docker host) just needs to build the
+   repo's `Dockerfile` and run the resulting image on port `3000`. On first
+   boot, `docker-entrypoint.sh` runs `prisma migrate deploy` (a no-op if the
+   schema's already current) before starting the server — no separate
+   migration step is needed.
+
+To build and smoke-test locally before deploying:
+
+```bash
+docker build -t book-catalog .
+docker run -p 3000:3000 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  -e SESSION_SECRET="..." \
+  -e APP_PASSWORD_HASH="..." \
+  -e UPLOADS_DIR="/app/uploads" \
+  -v book-catalog-uploads:/app/uploads \
+  book-catalog
+```
+
+## Deploy on Vercel (not currently supported)
+
+Vercel's serverless filesystem is ephemeral, so it's incompatible with this
+app's local-disk cover-image storage (`UPLOADS_DIR`) as-is — cover images
+would disappear between deploys/invocations. The Docker path above is the
+supported route for this app; Vercel would need cover storage moved to an
+object store (e.g. S3-compatible) first.
