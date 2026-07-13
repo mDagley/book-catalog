@@ -415,6 +415,26 @@ describe("saveCoverFromUrl", () => {
     );
   });
 
+  it("does not treat a 304 Not Modified as a redirect to follow, even with a Location header present", async () => {
+    // A real Location header on a 304 is unusual, but proves the point: the
+    // old blanket "300 <= status < 400" check would have matched 304 as a
+    // redirect and issued a second fetch to this URL. The fix restricts the
+    // check to actual redirect status codes, so this must resolve as a
+    // plain non-ok response after exactly one fetch call.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 304,
+      type: "default",
+      headers: new Headers({ location: "https://covers.openlibrary.org/b/id/99999-M.jpg" }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Failed to fetch cover image" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("follows a single redirect to another allowed URL and saves the image", async () => {
     const pngBase64 =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";

@@ -142,8 +142,13 @@ export async function saveCoverFromUrl(
       }
 
       const response = await fetch(currentUrl, { redirect: "manual" });
+      // Only the status codes that actually carry Location-header redirect
+      // semantics — a blanket 3xx check would also match 304 Not Modified
+      // (no Location header, different meaning entirely) and incorrectly
+      // treat it as a redirect with a missing Location, failing the fetch.
       const isRedirect =
-        response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400);
+        response.type === "opaqueredirect" ||
+        [301, 302, 303, 307, 308].includes(response.status);
 
       if (isRedirect) {
         const location = response.headers.get("location");

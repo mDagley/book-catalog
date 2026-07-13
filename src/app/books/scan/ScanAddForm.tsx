@@ -174,7 +174,12 @@ export function ScanAddForm() {
         a new one.
       */}
       {showCamera && (
-        <div className="fixed inset-0 z-10 overflow-y-auto bg-white p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Take a cover photo"
+          className="fixed inset-0 z-10 overflow-y-auto bg-white p-4"
+        >
           <CoverCamera
             onCapture={(dataUrl) => {
               setCapturedImage(dataUrl);
