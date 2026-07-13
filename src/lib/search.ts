@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isTitleMatch } from "@/lib/matching";
+import { titleMatchScore, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 import type { Format } from "@prisma/client";
 
 export interface SearchResultCopy {
@@ -32,6 +32,7 @@ export async function searchCatalog(query: string): Promise<SearchResult[]> {
         ],
       },
       include: { copies: true },
+      orderBy: { id: "asc" },
     }),
     prisma.absCacheItem.findMany({
       where: {
@@ -59,10 +60,18 @@ export async function searchCatalog(query: string): Promise<SearchResult[]> {
   }));
 
   for (const item of absItems) {
-    const existing = results.find((r) => isTitleMatch(r.title, item.title));
-    if (existing) {
-      if (item.mediaType === "EBOOK") existing.hasEbook = true;
-      if (item.mediaType === "AUDIOBOOK") existing.hasAudiobook = true;
+    let bestMatch: SearchResult | null = null;
+    let bestScore = -1;
+    for (const result of results) {
+      const score = titleMatchScore(result.title, item.title);
+      if (score >= DEFAULT_MATCH_THRESHOLD && score > bestScore) {
+        bestMatch = result;
+        bestScore = score;
+      }
+    }
+    if (bestMatch) {
+      if (item.mediaType === "EBOOK") bestMatch.hasEbook = true;
+      if (item.mediaType === "AUDIOBOOK") bestMatch.hasAudiobook = true;
     } else {
       results.push({
         title: item.title,

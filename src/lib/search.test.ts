@@ -49,6 +49,42 @@ describe("searchCatalog", () => {
     expect(results.map((r) => r.title).sort()).toEqual(["Test Search Alpha", "Test Search Beta"]);
   });
 
+  it("attaches the ebook badge to the best-scoring title match, not just the first match above threshold", async () => {
+    // "Test Search Mist" is a weak fuzzy match against the ABS item below
+    // (~89 via titleMatchScore) -- it clears DEFAULT_MATCH_THRESHOLD (85) but
+    // is not the true match. It is created FIRST so it sorts first under the
+    // `orderBy: { id: "asc" }` added to the Book query.
+    const weakBook = await prisma.book.create({
+      data: { title: "Test Search Mist", author: "Brandon Sanderson" },
+    });
+    // "Test Search Mistborn: The Final Empire" is the true, exact-title match
+    // for the ABS item (100 via titleMatchScore). Created SECOND, so under
+    // the old `results.find(isTitleMatch(...))` first-match logic it would
+    // never be reached once the weaker match above threshold was found first.
+    const exactBook = await prisma.book.create({
+      data: { title: "Test Search Mistborn: The Final Empire", author: "Brandon Sanderson" },
+    });
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-mistborn-best-match-ebook",
+        title: "Test Search Mistborn: The Final Empire",
+        author: "Brandon Sanderson",
+        mediaType: "EBOOK",
+      },
+    });
+
+    const results = await searchCatalog("Test Search");
+
+    const weakResult = results.find((r) => r.title === "Test Search Mist");
+    const exactResult = results.find((r) => r.title === "Test Search Mistborn: The Final Empire");
+
+    expect(exactResult?.hasEbook).toBe(true);
+    expect(weakResult?.hasEbook).toBe(false);
+
+    await prisma.book.delete({ where: { id: weakBook.id } });
+    await prisma.book.delete({ where: { id: exactBook.id } });
+  });
+
   it("returns an empty array for a query matching nothing", async () => {
     const results = await searchCatalog("Test Search Nonexistent Zzzzz");
     expect(results).toEqual([]);
