@@ -170,8 +170,8 @@ describe("sequenceMatcherRatio", () => {
     expect(sequenceMatcherRatio("abc", "axc")).toBeCloseTo(2 / 3, 4);
   });
 
-  it("matches Python difflib.SequenceMatcher(None, 'hello world', 'hello there').ratio() == 0.5455", () => {
-    expect(sequenceMatcherRatio("hello world", "hello there")).toBeCloseTo(0.545454545, 4);
+  it("matches Python difflib.SequenceMatcher(None, 'hello world', 'hello there').ratio() == 0.6364", () => {
+    expect(sequenceMatcherRatio("hello world", "hello there")).toBeCloseTo(0.636363636, 4);
   });
 });
 
