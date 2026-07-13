@@ -1,0 +1,17 @@
+name: Deploy to EasyPanel
+
+on:
+  push:
+    branches:
+      - master
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: easypanel-deploy
+    steps:
+      - name: Trigger EasyPanel deploy
+        run: curl -fsS --max-time 30 -X POST "${{ secrets.EASYPANEL_DEPLOY_URL }}"
