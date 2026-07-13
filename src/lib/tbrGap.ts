@@ -42,28 +42,18 @@ const getCachedTbrGap = unstable_cache(computeTbrGap, ["tbr-gap"], {
 });
 
 export async function getTbrGap(): Promise<TbrGapItem[]> {
-  // unstable_cache requires an active Next.js request/render context: it
-  // looks up an incrementalCache via async storage (or a globalThis
-  // fallback) and throws an "incrementalCache missing" invariant error if
-  // neither is present. That's the case when this function is called
-  // directly from a Vitest unit test in a plain Node process (no Next.js
-  // server involved). Fall back to computing directly in that situation,
-  // but ONLY under NODE_ENV=test (which Vitest sets automatically) — the
-  // error-message check alone can't distinguish "expected test context" from
-  // "real caching misconfiguration in production", and a real failure should
-  // surface loudly (as a thrown error / failed page load) rather than
-  // silently degrade into a ~20-second uncached computation.
-  try {
-    return await getCachedTbrGap();
-  } catch (error) {
-    const isCacheContextMissing =
-      error instanceof Error && error.message.includes("incrementalCache missing");
-    if (isCacheContextMissing && process.env.NODE_ENV === "test") {
-      console.warn(
-        "getTbrGap: unstable_cache unavailable outside a Next.js request context (expected in tests); falling back to an uncached computation.",
-      );
-      return computeTbrGap();
-    }
-    throw error;
+  // unstable_cache requires an active Next.js request/render context (it
+  // looks up an incrementalCache via async storage), which a Vitest unit
+  // test running in a plain Node process never has. Rather than calling
+  // the cached function and pattern-matching its error message to detect
+  // this (brittle across Next.js versions), check NODE_ENV up front —
+  // Vitest sets it to "test" automatically — and skip the cache entirely
+  // in that case. In any other environment, call the cached function
+  // directly with no fallback: a real caching failure should throw loudly
+  // (a failed page load) rather than silently degrade into a slow,
+  // uncached computation.
+  if (process.env.NODE_ENV === "test") {
+    return computeTbrGap();
   }
+  return getCachedTbrGap();
 }

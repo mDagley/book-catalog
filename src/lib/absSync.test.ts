@@ -111,6 +111,27 @@ describe("fetchAbsLibraryItems", () => {
     ]);
   });
 
+  it("coerces a numeric ISBN to a string instead of throwing", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: "item-1",
+            media: { metadata: { title: "Some Book", authorName: "Some Author", isbn: 9780765326355 } },
+          },
+        ],
+        total: 1,
+      }),
+    } as Response);
+
+    const items = await fetchAbsLibraryItems("https://abs.example.com", "token", "lib1");
+
+    expect(items).toEqual([
+      { absItemId: "item-1", title: "Some Book", author: "Some Author", isbn: "9780765326355" },
+    ]);
+  });
+
   it("skips items with a blank or missing title instead of storing an empty string", async () => {
     global.fetch = vi
       .fn()

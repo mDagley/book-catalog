@@ -66,7 +66,10 @@ export async function fetchAbsLibraryItems(
         absItemId: item.id,
         title,
         author: metadata.authorName ?? null,
-        isbn: metadata.isbn ? normalizeIsbn(metadata.isbn) || null : null,
+        isbn:
+          typeof metadata.isbn === "string" || typeof metadata.isbn === "number"
+            ? normalizeIsbn(String(metadata.isbn)) || null
+            : null,
       });
     }
 
