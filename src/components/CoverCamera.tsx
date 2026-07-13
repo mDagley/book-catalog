@@ -22,6 +22,11 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether the video actually has a frame to capture yet — a tap on
+  // "Take Photo" before this (e.g. an eager tap right as the stream starts)
+  // would otherwise read videoWidth/videoHeight as 0 and produce a blank or
+  // invalid captured image.
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let stopped = false;
@@ -50,9 +55,11 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
 
   function handleCapture() {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !isReady) return;
 
     const { videoWidth, videoHeight } = video;
+    if (videoWidth === 0 || videoHeight === 0) return;
+
     const scale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(videoWidth, videoHeight));
     const canvas = document.createElement("canvas");
     canvas.width = videoWidth * scale;
@@ -71,12 +78,19 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
           Camera error: {error}.{onSkip && " You can still skip this step."}
         </p>
       )}
-      <video ref={videoRef} className="w-full rounded" muted playsInline autoPlay />
+      <video
+        ref={videoRef}
+        className="w-full rounded"
+        muted
+        playsInline
+        autoPlay
+        onLoadedMetadata={() => setIsReady(true)}
+      />
       <div className="mt-2 flex gap-3">
         <button
           type="button"
           onClick={handleCapture}
-          disabled={!!error}
+          disabled={!!error || !isReady}
           className="flex-1 rounded bg-black p-2 text-white disabled:opacity-50"
         >
           Take Photo
