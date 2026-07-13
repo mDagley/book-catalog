@@ -150,30 +150,37 @@ export function ScanAddForm() {
     return <p>Looking up ISBN {isbn}...</p>;
   }
 
-  // Re-opened by "Retake photo" (CoverPicker) without touching isbn/lookup —
-  // the whole scan/lookup doesn't need to be redone just to retake a photo.
-  if (showCamera) {
-    return (
-      <CoverCamera
-        onCapture={(dataUrl) => {
-          setCapturedImage(dataUrl);
-          setShowCamera(false);
-        }}
-        onSkip={() => setShowCamera(false)}
-      />
-    );
-  }
-
   return (
-    <ScanBookForm
-      key={isbn}
-      isbn={isbn}
-      capturedImage={capturedImage}
-      lookup={lookup}
-      onRetake={() => {
-        setCapturedImage(null);
-        setShowCamera(true);
-      }}
-    />
+    <div className="relative">
+      <ScanBookForm
+        key={isbn}
+        isbn={isbn}
+        capturedImage={capturedImage}
+        lookup={lookup}
+        onRetake={() => {
+          setCapturedImage(null);
+          setShowCamera(true);
+        }}
+      />
+      {/*
+        Rendered as an overlay (not swapped in for the form) so that
+        "Retake photo"/"Add a photo" — reopening this — never unmounts
+        ScanBookForm. If it did, any in-progress edits to title/format/etc.
+        the user had already typed (uncontrolled inputs, not yet submitted)
+        would be lost when the form remounted with only the original lookup
+        defaults.
+      */}
+      {showCamera && (
+        <div className="fixed inset-0 z-10 overflow-y-auto bg-white p-4">
+          <CoverCamera
+            onCapture={(dataUrl) => {
+              setCapturedImage(dataUrl);
+              setShowCamera(false);
+            }}
+            onSkip={() => setShowCamera(false)}
+          />
+        </div>
+      )}
+    </div>
   );
 }
