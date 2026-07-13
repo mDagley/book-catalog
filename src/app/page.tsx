@@ -1,18 +1,81 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { searchCatalog } from "@/lib/search";
+import { FORMAT_LABELS } from "@/components/CopyFormFields";
+import { RefreshSyncButton } from "@/components/RefreshSyncButton";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  const bookCount = await prisma.book.count();
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
+  const query = q?.trim() ?? "";
+  const results = query ? await searchCatalog(query) : [];
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-4">
-      <h1 className="text-2xl font-semibold">Book Catalog</h1>
-      <p className="mt-2 text-gray-600">{bookCount} books in catalog</p>
-      <Link href="/books" className="mt-4 rounded bg-black px-4 py-2 text-white">
-        View Physical Books
-      </Link>
+    <main className="mx-auto max-w-2xl p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Book Catalog</h1>
+        <RefreshSyncButton />
+      </div>
+
+      <form action="/" method="get" className="mb-4">
+        <input
+          type="text"
+          name="q"
+          defaultValue={query}
+          placeholder="Do I already own this?"
+          className="w-full rounded border p-2"
+        />
+      </form>
+
+      <div className="mb-4 flex gap-4 text-sm">
+        <Link href="/books" className="underline">
+          Manage physical books
+        </Link>
+        <Link href="/tbr" className="underline">
+          TBR gap view
+        </Link>
+      </div>
+
+      {query && results.length === 0 && <p className="text-gray-600">No matches found.</p>}
+
+      {results.length > 0 && (
+        <ul className="space-y-3">
+          {results.map((result) => (
+            <li key={result.bookId ?? result.title} className="rounded border p-3">
+              <p className="font-medium">{result.title}</p>
+              {result.author && <p className="text-sm text-gray-600">{result.author}</p>}
+              <div className="mt-1 flex flex-wrap gap-2 text-sm">
+                {result.physicalCopies.map((copy) => (
+                  <span key={copy.id} className="rounded bg-gray-100 px-2 py-0.5">
+                    Physical ({FORMAT_LABELS[copy.format]}
+                    {copy.publisher ? `, ${copy.publisher}` : ""}
+                    {copy.publishYear ? ` ${copy.publishYear}` : ""})
+                  </span>
+                ))}
+                {result.hasEbook && (
+                  <span className="rounded bg-gray-100 px-2 py-0.5">Ebook ✓</span>
+                )}
+                {result.hasAudiobook && (
+                  <span className="rounded bg-gray-100 px-2 py-0.5">Audiobook ✓</span>
+                )}
+              </div>
+              {result.bookId && (
+                <Link
+                  href={`/books/${result.bookId}`}
+                  className="mt-1 inline-block text-sm underline"
+                >
+                  View details
+                </Link>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
       <form action="/api/logout" method="post" className="mt-6">
         <button type="submit" className="text-sm underline">
           Log out
