@@ -44,6 +44,7 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
         }
       })
       .catch((err: Error) => {
+        if (stopped) return;
         setError(err.message);
       });
 

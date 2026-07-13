@@ -157,10 +157,7 @@ export function ScanAddForm() {
         isbn={isbn}
         capturedImage={capturedImage}
         lookup={lookup}
-        onRetake={() => {
-          setCapturedImage(null);
-          setShowCamera(true);
-        }}
+        onRetake={() => setShowCamera(true)}
       />
       {/*
         Rendered as an overlay (not swapped in for the form) so that
@@ -169,6 +166,12 @@ export function ScanAddForm() {
         the user had already typed (uncontrolled inputs, not yet submitted)
         would be lost when the form remounted with only the original lookup
         defaults.
+
+        onRetake deliberately does NOT clear capturedImage up front: it's
+        only replaced if CoverCamera's onCapture actually fires with a new
+        photo below. Clearing it eagerly would lose an already-good photo
+        if the user opens this overlay and then hits Skip instead of taking
+        a new one.
       */}
       {showCamera && (
         <div className="fixed inset-0 z-10 overflow-y-auto bg-white p-4">
