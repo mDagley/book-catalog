@@ -8,7 +8,7 @@ export async function POST() {
 
   if (!userId) {
     return NextResponse.json(
-      { error: "Server misconfigured: GOODREADS_USER_ID not set" },
+      { success: false, error: "Server misconfigured: GOODREADS_USER_ID not set" },
       { status: 500 },
     );
   }

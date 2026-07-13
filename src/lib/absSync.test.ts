@@ -87,6 +87,53 @@ describe("fetchAbsLibraryItems", () => {
 
     expect(items).toEqual([]);
   });
+
+  it("normalizes a hyphenated, lowercase-x ISBN the same way Book rows are normalized", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: "item-1",
+            media: {
+              metadata: { title: "Some Book", authorName: "Some Author", isbn: "0-439-65548-x" },
+            },
+          },
+        ],
+        total: 1,
+      }),
+    } as Response);
+
+    const items = await fetchAbsLibraryItems("https://abs.example.com", "token", "lib1");
+
+    expect(items).toEqual([
+      { absItemId: "item-1", title: "Some Book", author: "Some Author", isbn: "043965548X" },
+    ]);
+  });
+
+  it("skips items with a blank or missing title instead of storing an empty string", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            { id: "item-blank", media: { metadata: { title: "   ", authorName: "A" } } },
+            { id: "item-missing", media: { metadata: { authorName: "B" } } },
+            { id: "item-ok", media: { metadata: { title: "Real Title" } } },
+          ],
+          total: 3,
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ results: [] }),
+      } as Response);
+
+    const items = await fetchAbsLibraryItems("https://abs.example.com", "token", "lib1");
+
+    expect(items.map((i) => i.absItemId)).toEqual(["item-ok"]);
+  });
 });
 
 describe("syncAbsCache", () => {

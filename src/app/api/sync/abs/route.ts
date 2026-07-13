@@ -9,7 +9,7 @@ export async function POST() {
 
   if (!absUrl || !absToken) {
     return NextResponse.json(
-      { error: "Server misconfigured: ABS_URL/ABS_TOKEN not set" },
+      { success: false, error: "Server misconfigured: ABS_URL/ABS_TOKEN not set" },
       { status: 500 },
     );
   }

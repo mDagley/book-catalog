@@ -1,6 +1,7 @@
 // src/lib/absSync.ts
 import { prisma } from "@/lib/prisma";
 import type { MediaType } from "@prisma/client";
+import { normalizeIsbn } from "@/lib/books";
 
 export interface AbsLibrary {
   id: string;
@@ -59,11 +60,13 @@ export async function fetchAbsLibraryItems(
 
     for (const item of results) {
       const metadata = item.media?.metadata ?? {};
+      const title = typeof metadata.title === "string" ? metadata.title.trim() : "";
+      if (!title) continue;
       allItems.push({
         absItemId: item.id,
-        title: metadata.title ?? "",
+        title,
         author: metadata.authorName ?? null,
-        isbn: metadata.isbn ?? null,
+        isbn: metadata.isbn ? normalizeIsbn(metadata.isbn) || null : null,
       });
     }
 

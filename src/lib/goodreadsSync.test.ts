@@ -42,6 +42,18 @@ const LEADING_ZERO_ISBN_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
   </channel>
 </rss>`;
 
+const LOWERCASE_X_ISBN_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Some Book With An X Check Digit</title>
+      <author_name>Some Author</author_name>
+      <isbn>043965548x</isbn>
+      <isbn13></isbn13>
+    </item>
+  </channel>
+</rss>`;
+
 describe("fetchGoodreadsPage", () => {
   it("parses title/author/isbn from an RSS page", async () => {
     global.fetch = vi.fn().mockResolvedValue({
@@ -67,6 +79,19 @@ describe("fetchGoodreadsPage", () => {
 
     expect(books).toEqual([
       { title: "The Way of Kings", author: "Brandon Sanderson", isbn: "0765326353" },
+    ]);
+  });
+
+  it("uppercases a lowercase ISBN-10 check digit, matching Book row normalization", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => LOWERCASE_X_ISBN_RSS_PAGE,
+    } as Response);
+
+    const books = await fetchGoodreadsPage("1993628", 1);
+
+    expect(books).toEqual([
+      { title: "Some Book With An X Check Digit", author: "Some Author", isbn: "043965548X" },
     ]);
   });
 

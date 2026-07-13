@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { prisma } from "@/lib/prisma";
+import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
 
 export interface GoodreadsBook {
   title: string;
@@ -14,8 +15,8 @@ const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false });
 
 function normalizeIsbn(raw: unknown): string | null {
   const s = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : "";
-  const digits = s.replace(/[^0-9Xx]/g, "");
-  return digits || null;
+  const normalized = normalizeIsbnShared(s);
+  return normalized || null;
 }
 
 export async function fetchGoodreadsPage(userId: string, page: number): Promise<GoodreadsBook[]> {

@@ -47,13 +47,18 @@ export async function getTbrGap(): Promise<TbrGapItem[]> {
   // fallback) and throws an "incrementalCache missing" invariant error if
   // neither is present. That's the case when this function is called
   // directly from a Vitest unit test in a plain Node process (no Next.js
-  // server involved). Fall back to computing directly in that situation
-  // rather than letting the error propagate, so getTbrGap's public contract
-  // (identical behavior for any caller) holds regardless of context.
+  // server involved). Fall back to computing directly in that situation,
+  // but ONLY under NODE_ENV=test (which Vitest sets automatically) — the
+  // error-message check alone can't distinguish "expected test context" from
+  // "real caching misconfiguration in production", and a real failure should
+  // surface loudly (as a thrown error / failed page load) rather than
+  // silently degrade into a ~20-second uncached computation.
   try {
     return await getCachedTbrGap();
   } catch (error) {
-    if (error instanceof Error && error.message.includes("incrementalCache missing")) {
+    const isCacheContextMissing =
+      error instanceof Error && error.message.includes("incrementalCache missing");
+    if (isCacheContextMissing && process.env.NODE_ENV === "test") {
       console.warn(
         "getTbrGap: unstable_cache unavailable outside a Next.js request context (expected in tests); falling back to an uncached computation.",
       );
