@@ -27,8 +27,15 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
 
 // Cache the expensive fuzzy-matching computation rather than re-running it on
 // every page load. Revalidated on-demand via revalidateTag(TBR_GAP_CACHE_TAG)
-// when a sync completes, with a 30-minute time-based safety net matching the
-// cron sync interval in case an invalidation is ever missed.
+// when a manual sync completes via the /api/sync/* route handlers. The
+// scheduled cron syncs in src/instrumentation.ts do NOT call revalidateTag —
+// revalidateTag requires an active Next.js request/action context and throws
+// when called from a node-cron callback, which runs outside any such context
+// — so this 30-minute revalidate window is not just a rare safety net, it's
+// the only invalidation path for cron-triggered syncs. Up to ~30 minutes of
+// staleness after an automatic sync is expected and accepted, matching the
+// cron interval itself; only the manual "Refresh now" path gets immediate
+// freshness.
 const getCachedTbrGap = unstable_cache(computeTbrGap, ["tbr-gap"], {
   tags: [TBR_GAP_CACHE_TAG],
   revalidate: 1800,
@@ -47,6 +54,9 @@ export async function getTbrGap(): Promise<TbrGapItem[]> {
     return await getCachedTbrGap();
   } catch (error) {
     if (error instanceof Error && error.message.includes("incrementalCache missing")) {
+      console.warn(
+        "getTbrGap: unstable_cache unavailable outside a Next.js request context (expected in tests); falling back to an uncached computation.",
+      );
       return computeTbrGap();
     }
     throw error;
