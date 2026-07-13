@@ -49,7 +49,9 @@ export async function fetchAbsLibraryItems(
     const url = `${baseUrl}/api/libraries/${libraryId}/items?limit=${PAGE_LIMIT}&page=${page}`;
     const response = await fetch(url, { headers });
     if (!response.ok) {
-      throw new Error(`Failed to fetch ABS library items: HTTP ${response.status}`);
+      throw new Error(
+        `Failed to fetch ABS library items (library ${libraryId}, page ${page}): HTTP ${response.status}`,
+      );
     }
     const data = await response.json();
     const results = data.results ?? [];
