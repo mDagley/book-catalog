@@ -26,7 +26,8 @@ export function RefreshSyncButton() {
 
       if (errors.length > 0) {
         setError(errors.join("; "));
-      } else {
+      }
+      if (absData.success || goodreadsData.success) {
         router.refresh();
       }
     } catch {
