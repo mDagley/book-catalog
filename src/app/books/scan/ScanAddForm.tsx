@@ -2,13 +2,13 @@
 
 import { useActionState, useState } from "react";
 import Link from "next/link";
-import { createBookFromScan } from "@/lib/actions/books";
-import type { BookFormState } from "@/lib/books";
+import { createBookFromScan, type ScanFormState } from "@/lib/actions/books";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
+import { CoverCamera } from "@/components/CoverCamera";
 import { CoverPicker } from "@/components/CoverPicker";
 import { CopyFormFields } from "@/components/CopyFormFields";
 
-const initialState: BookFormState = {};
+const initialState: ScanFormState = {};
 
 interface LookupData {
   title: string;
@@ -25,10 +25,13 @@ interface ScanBookFormProps {
   onRetake: () => void;
 }
 
-// Rendered with `key={isbn}` by ScanAddForm so that a fresh scan (or a
-// "Retake photo") fully remounts this component, resetting its
-// useActionState state — otherwise a stale error from a previous failed
-// submission would persist across retakes/rescans.
+// Rendered with `key={isbn}` by ScanAddForm so that a fresh scan fully
+// remounts this component, resetting its useActionState state — otherwise a
+// stale error from a previous failed submission would persist across
+// rescans. A failed submission on the SAME isbn does not remount this
+// component; `state.values` (returned by the action on error) covers that
+// case by re-supplying whatever was last submitted as each field's
+// defaultValue.
 function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormProps) {
   const [state, formAction, isPending] = useActionState(createBookFromScan, initialState);
 
@@ -42,7 +45,7 @@ function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormPro
         <input
           id="title"
           name="title"
-          defaultValue={lookup?.title}
+          defaultValue={state.values?.title ?? lookup?.title}
           className="mt-1 w-full rounded border p-2"
         />
       </div>
@@ -53,7 +56,7 @@ function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormPro
         <input
           id="author"
           name="author"
-          defaultValue={lookup?.author}
+          defaultValue={state.values?.author ?? lookup?.author}
           className="mt-1 w-full rounded border p-2"
         />
       </div>
@@ -62,7 +65,23 @@ function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormPro
         openLibraryCoverUrl={lookup?.coverUrl ?? null}
         onRetake={onRetake}
       />
-      <CopyFormFields defaultPublisher={lookup?.publisher} defaultPublishYear={lookup?.publishYear} />
+      {/*
+        Keyed by the resolved values so a failed submission remounts these
+        fields with the just-submitted values as their fresh defaults.
+        This isn't just belt-and-suspenders: React's <select> caches its
+        *first-ever* mount-time default and silently re-applies that cached
+        value on every later render, ignoring a subsequently-updated
+        defaultFormat prop — plain <input>/<textarea> don't have this
+        quirk, but without remounting, the format dropdown would reset to
+        blank after every failed save regardless of what defaultFormat says.
+      */}
+      <CopyFormFields
+        key={JSON.stringify(state.values)}
+        defaultFormat={state.values?.format}
+        defaultPublisher={state.values?.publisher ?? lookup?.publisher}
+        defaultPublishYear={state.values?.publishYear ?? lookup?.publishYear}
+        defaultSpecialNotes={state.values?.specialNotes}
+      />
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       <div className="flex gap-3">
         <button
@@ -89,12 +108,14 @@ function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormPro
 export function ScanAddForm() {
   const [isbn, setIsbn] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [showCamera, setShowCamera] = useState(true);
   const [lookup, setLookup] = useState<LookupData | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
 
-  async function handleDecode(decodedIsbn: string, coverImageDataUrl: string) {
+  async function handleDecode(decodedIsbn: string) {
     setIsbn(decodedIsbn);
-    setCapturedImage(coverImageDataUrl);
+    setCapturedImage(null);
+    setShowCamera(true);
     setIsLookingUp(true);
 
     try {
@@ -129,6 +150,20 @@ export function ScanAddForm() {
     return <p>Looking up ISBN {isbn}...</p>;
   }
 
+  // Re-opened by "Retake photo" (CoverPicker) without touching isbn/lookup —
+  // the whole scan/lookup doesn't need to be redone just to retake a photo.
+  if (showCamera) {
+    return (
+      <CoverCamera
+        onCapture={(dataUrl) => {
+          setCapturedImage(dataUrl);
+          setShowCamera(false);
+        }}
+        onSkip={() => setShowCamera(false)}
+      />
+    );
+  }
+
   return (
     <ScanBookForm
       key={isbn}
@@ -136,9 +171,8 @@ export function ScanAddForm() {
       capturedImage={capturedImage}
       lookup={lookup}
       onRetake={() => {
-        setIsbn(null);
         setCapturedImage(null);
-        setLookup(null);
+        setShowCamera(true);
       }}
     />
   );

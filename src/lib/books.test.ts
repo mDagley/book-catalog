@@ -397,11 +397,12 @@ describe("saveCoverFromUrl", () => {
     expect("error" in result).toBe(true);
   });
 
-  it("does not follow redirects, and rejects a redirect response instead of fetching it", async () => {
+  it("rejects a redirect response with no Location header", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 302,
       type: "opaqueredirect",
+      headers: new Headers(),
     } as unknown as Response);
     global.fetch = fetchMock;
 
@@ -412,6 +413,69 @@ describe("saveCoverFromUrl", () => {
       "https://covers.openlibrary.org/b/id/12345-M.jpg",
       expect.objectContaining({ redirect: "manual" }),
     );
+  });
+
+  it("follows a single redirect to another allowed URL and saves the image", async () => {
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        type: "basic",
+        headers: new Headers({ location: "https://covers.openlibrary.org/b/id/99999-M.jpg" }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        type: "basic",
+        headers: new Headers({ "content-type": "image/png" }),
+        arrayBuffer: async () => Buffer.from(pngBase64, "base64"),
+      } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    savedPaths.push(result.coverImagePath);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://covers.openlibrary.org/b/id/99999-M.jpg",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+  });
+
+  it("rejects a redirect that points off the allowlist, without fetching it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "basic",
+      headers: new Headers({ location: "https://evil.example.com/steal-metadata.jpg" }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Unsupported cover image host" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a second redirect rather than following an unbounded chain", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "basic",
+      headers: new Headers({ location: "https://covers.openlibrary.org/b/id/99999-M.jpg" }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Failed to fetch cover image" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("strips content-type parameters before matching against supported image types", async () => {

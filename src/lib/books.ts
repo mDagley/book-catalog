@@ -114,31 +114,57 @@ export async function createBookWithCopyData(
 // restrict fetches to Open Library's covers CDN to avoid SSRF.
 const ALLOWED_COVER_HOSTS = ["covers.openlibrary.org"];
 
+// Open Library's covers CDN occasionally redirects a given size/path to a
+// different URL (e.g. a specific edge shard) — reported in practice as a
+// "failed to fetch cover image" error even for real, working ISBNs. Follow
+// up to one hop, re-validating the destination against the same allowlist
+// each time, rather than flatly rejecting any redirect.
+const MAX_COVER_FETCH_REDIRECTS = 1;
+
+function isAllowedCoverUrl(url: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(url);
+    return protocol === "https:" && ALLOWED_COVER_HOSTS.includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
 export async function saveCoverFromUrl(
   url: string,
 ): Promise<{ coverImagePath: string } | { error: string }> {
   try {
-    const { hostname, protocol } = new URL(url);
-    if (protocol !== "https:" || !ALLOWED_COVER_HOSTS.includes(hostname)) {
-      return { error: "Unsupported cover image host" };
-    }
+    let currentUrl = url;
 
-    // Don't follow redirects: a URL that passes the hostname check above could
-    // otherwise redirect to an off-allowlist host and still be fetched.
-    const response = await fetch(url, { redirect: "manual" });
-    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
-      return { error: "Failed to fetch cover image" };
-    }
-    if (!response.ok) {
-      return { error: "Failed to fetch cover image" };
-    }
+    for (let redirects = 0; ; redirects++) {
+      if (!isAllowedCoverUrl(currentUrl)) {
+        return { error: "Unsupported cover image host" };
+      }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
-    const contentType = rawContentType.split(";")[0].trim();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
-    return { coverImagePath };
+      const response = await fetch(currentUrl, { redirect: "manual" });
+      const isRedirect =
+        response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400);
+
+      if (isRedirect) {
+        const location = response.headers.get("location");
+        if (!location || redirects >= MAX_COVER_FETCH_REDIRECTS) {
+          return { error: "Failed to fetch cover image" };
+        }
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+
+      if (!response.ok) {
+        return { error: "Failed to fetch cover image" };
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
+      const contentType = rawContentType.split(";")[0].trim();
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
+      return { coverImagePath };
+    }
   } catch {
     return { error: "Failed to fetch cover image" };
   }

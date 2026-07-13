@@ -33,10 +33,37 @@ export async function createBookWithCopy(
   redirect(`/books/${result.bookId}`);
 }
 
+export interface ScanFormState extends BookFormState {
+  // Carries back whatever was submitted so the form can restore these as
+  // defaultValues on a failed save — a save can fail after the user has
+  // filled in fields (title/format/etc.) that aren't tied to lookup data,
+  // and re-populating from the last submission (rather than relying on
+  // the browser to preserve uncontrolled input state across the re-render)
+  // guarantees nothing has to be re-entered, regardless of exactly why a
+  // given failure path is reached.
+  values?: {
+    title: string;
+    author: string;
+    format: string;
+    publisher: string;
+    publishYear: string;
+    specialNotes: string;
+  };
+}
+
 export async function createBookFromScan(
-  _prevState: BookFormState,
+  _prevState: ScanFormState,
   formData: FormData,
-): Promise<BookFormState> {
+): Promise<ScanFormState> {
+  const values = {
+    title: formData.get("title")?.toString() ?? "",
+    author: formData.get("author")?.toString() ?? "",
+    format: formData.get("format")?.toString() ?? "",
+    publisher: formData.get("publisher")?.toString() ?? "",
+    publishYear: formData.get("publishYear")?.toString() ?? "",
+    specialNotes: formData.get("specialNotes")?.toString() ?? "",
+  };
+
   const selectedCoverDataUrl = formData.get("selectedCoverDataUrl")?.toString() ?? "";
   const selectedCoverSource = formData.get("selectedCoverSource")?.toString();
 
@@ -45,28 +72,28 @@ export async function createBookFromScan(
     if (selectedCoverSource === "url") {
       const coverResult = await saveCoverFromUrl(selectedCoverDataUrl);
       if ("error" in coverResult) {
-        return { error: coverResult.error };
+        return { error: coverResult.error, values };
       }
       coverImagePath = coverResult.coverImagePath;
     } else if (selectedCoverSource === "dataUrl") {
       try {
         coverImagePath = await saveCoverImage(selectedCoverDataUrl);
       } catch {
-        return { error: "Invalid cover image" };
+        return { error: "Invalid cover image", values };
       }
     } else {
-      return { error: "Invalid cover selection" };
+      return { error: "Invalid cover selection", values };
     }
   }
 
   const result = await createBookWithCopyData({
-    title: formData.get("title")?.toString() ?? "",
-    author: formData.get("author")?.toString() ?? "",
+    title: values.title,
+    author: values.author,
     isbn: formData.get("isbn")?.toString() ?? "",
-    format: formData.get("format")?.toString() ?? "",
-    publisher: formData.get("publisher")?.toString() ?? "",
-    publishYear: formData.get("publishYear")?.toString() ?? "",
-    specialNotes: formData.get("specialNotes")?.toString() ?? "",
+    format: values.format,
+    publisher: values.publisher,
+    publishYear: values.publishYear,
+    specialNotes: values.specialNotes,
     coverImagePath,
   });
 
@@ -74,7 +101,7 @@ export async function createBookFromScan(
     if (coverImagePath) {
       await deleteCoverImage(coverImagePath);
     }
-    return { error: result.error };
+    return { error: result.error, values };
   }
 
   const scanAnother = formData.get("scanAnother") === "true";

@@ -25,13 +25,16 @@ export function CoverPicker({
         ? openLibraryCoverUrl
         : null;
 
-  if (!capturedImageDataUrl && !openLibraryCoverUrl) {
+  if (!capturedImageDataUrl && !openLibraryCoverUrl && !onRetake) {
     return null;
   }
 
   return (
     <div>
       <p className="mb-2 text-sm font-medium">Cover Image</p>
+      {!capturedImageDataUrl && !openLibraryCoverUrl && (
+        <p className="text-sm text-gray-600">No cover selected yet.</p>
+      )}
       <div className="flex gap-3">
         {capturedImageDataUrl && (
           <button
@@ -58,9 +61,9 @@ export function CoverPicker({
           </button>
         )}
       </div>
-      {onRetake && capturedImageDataUrl && (
+      {onRetake && (
         <button type="button" onClick={onRetake} className="mt-2 text-sm underline">
-          Retake photo
+          {capturedImageDataUrl ? "Retake photo" : "Add a photo"}
         </button>
       )}
       <input
