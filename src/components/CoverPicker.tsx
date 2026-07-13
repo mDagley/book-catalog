@@ -1,7 +1,7 @@
 // src/components/CoverPicker.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface CoverPickerProps {
   capturedImageDataUrl: string | null;
@@ -17,6 +17,18 @@ export function CoverPicker({
   const [selected, setSelected] = useState<"captured" | "openLibrary" | "none">(
     capturedImageDataUrl ? "captured" : openLibraryCoverUrl ? "openLibrary" : "none",
   );
+
+  // CoverPicker now stays mounted while the cover-camera overlay is open
+  // (see ScanAddForm), so capturedImageDataUrl can go from null to a real
+  // photo well after this component's initial mount — the useState
+  // initializer above only runs once and won't pick that up on its own.
+  // Without this, a freshly (re)taken photo would silently not be selected
+  // until the user manually clicked its thumbnail.
+  useEffect(() => {
+    if (capturedImageDataUrl) {
+      setSelected("captured");
+    }
+  }, [capturedImageDataUrl]);
 
   const selectedDataUrl =
     selected === "captured"
