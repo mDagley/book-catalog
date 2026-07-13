@@ -1,7 +1,7 @@
 // src/components/CoverPicker.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface CoverPickerProps {
   capturedImageDataUrl: string | null;
@@ -18,6 +18,18 @@ export function CoverPicker({
     capturedImageDataUrl ? "captured" : openLibraryCoverUrl ? "openLibrary" : "none",
   );
 
+  // CoverPicker now stays mounted while the cover-camera overlay is open
+  // (see ScanAddForm), so capturedImageDataUrl can go from null to a real
+  // photo well after this component's initial mount — the useState
+  // initializer above only runs once and won't pick that up on its own.
+  // Without this, a freshly (re)taken photo would silently not be selected
+  // until the user manually clicked its thumbnail.
+  useEffect(() => {
+    if (capturedImageDataUrl) {
+      setSelected("captured");
+    }
+  }, [capturedImageDataUrl]);
+
   const selectedDataUrl =
     selected === "captured"
       ? capturedImageDataUrl
@@ -25,13 +37,16 @@ export function CoverPicker({
         ? openLibraryCoverUrl
         : null;
 
-  if (!capturedImageDataUrl && !openLibraryCoverUrl) {
+  if (!capturedImageDataUrl && !openLibraryCoverUrl && !onRetake) {
     return null;
   }
 
   return (
     <div>
       <p className="mb-2 text-sm font-medium">Cover Image</p>
+      {!capturedImageDataUrl && !openLibraryCoverUrl && (
+        <p className="text-sm text-gray-600">No cover selected yet.</p>
+      )}
       <div className="flex gap-3">
         {capturedImageDataUrl && (
           <button
@@ -58,9 +73,9 @@ export function CoverPicker({
           </button>
         )}
       </div>
-      {onRetake && capturedImageDataUrl && (
+      {onRetake && (
         <button type="button" onClick={onRetake} className="mt-2 text-sm underline">
-          Retake photo
+          {capturedImageDataUrl ? "Retake photo" : "Add a photo"}
         </button>
       )}
       <input
