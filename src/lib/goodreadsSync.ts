@@ -47,7 +47,7 @@ export async function fetchGoodreadsPage(userId: string, page: number): Promise<
     text = await response.text();
   } catch (err) {
     throw new Error(
-      `Failed to reach Goodreads for shelf page ${page}: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to read Goodreads response body for shelf page ${page}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 

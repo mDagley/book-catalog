@@ -17,6 +17,18 @@ export function RefreshSyncButton() {
         fetch("/api/sync/abs", { method: "POST" }),
         fetch("/api/sync/goodreads", { method: "POST" }),
       ]);
+
+      // An expired session makes middleware redirect these requests to
+      // /login, which returns the login page's HTML with a 200 status.
+      // fetch() follows that redirect transparently, but response.redirected
+      // tells us it happened — check this BEFORE calling .json(), since
+      // parsing the HTML body as JSON would throw a SyntaxError that the
+      // generic catch block below would misreport as a connectivity issue.
+      if (absResponse.redirected || goodreadsResponse.redirected) {
+        setError("Your session has expired — please log in again.");
+        return;
+      }
+
       const absData = await absResponse.json();
       const goodreadsData = await goodreadsResponse.json();
 

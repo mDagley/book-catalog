@@ -89,4 +89,27 @@ describe("searchCatalog", () => {
     const results = await searchCatalog("Test Search Nonexistent Zzzzz");
     expect(results).toEqual([]);
   });
+
+  it("matches a stored normalized ISBN when searching with a hyphenated ISBN", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search Isbn Book", isbn: "9780765326355" },
+    });
+
+    const results = await searchCatalog("978-0-7653-2635-5");
+
+    expect(results.map((r) => r.title)).toContain("Test Search Isbn Book");
+  });
+
+  it("does not match unrelated books via the ISBN clause when the query has no digits", async () => {
+    // Regression guard: normalizeIsbn() on a query with no digits/X produces
+    // "", and Prisma's `contains: ""` matches every row. Without a guard
+    // excluding the ISBN clause in that case, this query would return every
+    // book in the table instead of nothing.
+    await prisma.book.create({ data: { title: "Test Search Unrelated Alpha" } });
+    await prisma.book.create({ data: { title: "Test Search Unrelated Beta" } });
+
+    const results = await searchCatalog("Nonexistent Query With No Digits At All");
+
+    expect(results).toEqual([]);
+  });
 });

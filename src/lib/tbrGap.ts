@@ -13,7 +13,7 @@ export const TBR_GAP_CACHE_TAG = "tbr-gap";
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const [tbrItems, books, absItems] = await Promise.all([
-    prisma.goodreadsTbrItem.findMany(),
+    prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, author: true } }),
     prisma.book.findMany({ select: { title: true } }),
     prisma.absCacheItem.findMany({ select: { title: true } }),
   ]);
