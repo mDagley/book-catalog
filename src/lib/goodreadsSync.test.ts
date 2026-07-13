@@ -30,6 +30,18 @@ const SAMPLE_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
 const EMPTY_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel></channel></rss>`;
 
+const LEADING_ZERO_ISBN_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>The Way of Kings</title>
+      <author_name>Brandon Sanderson</author_name>
+      <isbn>0765326353</isbn>
+      <isbn13></isbn13>
+    </item>
+  </channel>
+</rss>`;
+
 describe("fetchGoodreadsPage", () => {
   it("parses title/author/isbn from an RSS page", async () => {
     global.fetch = vi.fn().mockResolvedValue({
@@ -42,6 +54,19 @@ describe("fetchGoodreadsPage", () => {
     expect(books).toEqual([
       { title: "The Way of Kings", author: "Brandon Sanderson", isbn: "9780765326355" },
       { title: "Mistborn", author: "Brandon Sanderson", isbn: null },
+    ]);
+  });
+
+  it("preserves a leading-zero ISBN-10 as a string when isbn13 is empty", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => LEADING_ZERO_ISBN_RSS_PAGE,
+    } as Response);
+
+    const books = await fetchGoodreadsPage("1993628", 1);
+
+    expect(books).toEqual([
+      { title: "The Way of Kings", author: "Brandon Sanderson", isbn: "0765326353" },
     ]);
   });
 

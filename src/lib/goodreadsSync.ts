@@ -10,7 +10,7 @@ export interface GoodreadsBook {
 const SHELF = "to-read";
 const MAX_PAGES = 100; // matches the audiobook-compare reference script's cap
 
-const parser = new XMLParser({ ignoreAttributes: true });
+const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false });
 
 function normalizeIsbn(raw: unknown): string | null {
   const s = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : "";
@@ -24,17 +24,32 @@ export async function fetchGoodreadsPage(userId: string, page: number): Promise<
   url.searchParams.set("per_page", "200");
   url.searchParams.set("page", String(page));
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to reach Goodreads for shelf page ${page}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch Goodreads shelf page ${page}: HTTP ${response.status}`);
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (err) {
+    throw new Error(
+      `Failed to reach Goodreads for shelf page ${page}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   let parsed;
   try {
     parsed = parser.parse(text);
@@ -74,6 +89,11 @@ export async function fetchAllGoodreadsBooks(userId: string): Promise<GoodreadsB
     const books = await fetchGoodreadsPage(userId, page);
     if (books.length === 0) break;
     allBooks.push(...books);
+    if (page === MAX_PAGES) {
+      console.warn(
+        `Goodreads sync hit the ${MAX_PAGES}-page cap for user ${userId} with page ${MAX_PAGES} still non-empty — results may be truncated.`,
+      );
+    }
   }
   return allBooks;
 }
