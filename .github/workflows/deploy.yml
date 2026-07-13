@@ -11,4 +11,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger EasyPanel deploy
-        run: curl -fsS -X POST "${{ secrets.EASYPANEL_DEPLOY_URL }}"
+        run: curl -fsS --max-time 30 --retry 3 -X POST "${{ secrets.EASYPANEL_DEPLOY_URL }}"
