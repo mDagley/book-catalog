@@ -224,6 +224,48 @@ describe("syncAbsCache", () => {
     expect(audiobook.isbn).toBeNull();
   });
 
+  it("matches a target library by case-insensitive substring, not exact name", async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/api/libraries")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            libraries: [
+              { id: "ebook-lib", name: "PANDA EBOOKS (Archive)" },
+              { id: "other-lib", name: "Someone Else's Comics" },
+            ],
+          }),
+        } as Response);
+      }
+      if (url.includes("ebook-lib")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            results: [
+              {
+                id: "test-substring-1",
+                media: { metadata: { title: "An Ebook", authorName: "E. Author" } },
+              },
+            ],
+            total: 1,
+          }),
+        } as Response);
+      }
+      if (url.includes("other-lib")) {
+        return Promise.resolve({ ok: true, json: async () => ({ results: [] }) } as Response);
+      }
+      throw new Error(`Unexpected URL in test: ${url}`);
+    });
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 1 });
+    const item = await prisma.absCacheItem.findUniqueOrThrow({
+      where: { absItemId: "test-substring-1" },
+    });
+    expect(item.mediaType).toBe("EBOOK");
+  });
+
   it("updates lastSyncedAt and metadata on a second sync of the same item", async () => {
     global.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/api/libraries")) {

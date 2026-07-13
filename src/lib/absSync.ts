@@ -19,10 +19,22 @@ const MAX_PAGES = 500; // 500 * 100 = 50,000 items per library, matching the
 // audiobook-compare reference script's own safety cap.
 const PAGE_LIMIT = 100;
 
-const LIBRARY_MEDIA_TYPES: Record<string, MediaType> = {
-  "panda ebooks": "EBOOK",
-  "panda audiobooks": "AUDIOBOOK",
-};
+const LIBRARY_NAME_SUBSTRINGS: [string, MediaType][] = [
+  ["panda ebooks", "EBOOK"],
+  ["panda audiobooks", "AUDIOBOOK"],
+];
+
+// Case-insensitive SUBSTRING match, not exact match — mirrors the reference
+// audiobook-compare/list_libraries.py script's own name-filtering behavior,
+// so a library named e.g. "Panda EBooks (Archive)" still syncs rather than
+// being silently skipped over a naming variation.
+function getMediaTypeForLibrary(libraryName: string): MediaType | null {
+  const lower = libraryName.toLowerCase();
+  for (const [substring, mediaType] of LIBRARY_NAME_SUBSTRINGS) {
+    if (lower.includes(substring)) return mediaType;
+  }
+  return null;
+}
 
 export async function fetchAbsLibraries(baseUrl: string, token: string): Promise<AbsLibrary[]> {
   const response = await fetch(`${baseUrl}/api/libraries`, {
@@ -91,7 +103,7 @@ export async function syncAbsCache(
   let synced = 0;
 
   for (const library of libraries) {
-    const mediaType = LIBRARY_MEDIA_TYPES[library.name.toLowerCase()];
+    const mediaType = getMediaTypeForLibrary(library.name);
     if (!mediaType) continue;
 
     const items = await fetchAbsLibraryItems(baseUrl, token, library.id);
