@@ -130,7 +130,12 @@ describe("searchCatalog", () => {
   });
 
   it("supports standalone browse by ownership type with no query text", async () => {
-    await prisma.book.create({ data: { title: "Test Search Physical Only Book" } });
+    await prisma.book.create({
+      data: {
+        title: "Test Search Physical Only Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
     await prisma.absCacheItem.create({
       data: {
         absItemId: "search-test-ebook-only",
@@ -210,7 +215,12 @@ describe("searchCatalog", () => {
   });
 
   it("combines a text query with a type filter", async () => {
-    await prisma.book.create({ data: { title: "Test Search Combo Book" } });
+    await prisma.book.create({
+      data: {
+        title: "Test Search Combo Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
     await prisma.absCacheItem.create({
       data: {
         absItemId: "search-test-combo-ebook",
@@ -337,6 +347,18 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const includeEbook = !types || types.includes("ebook");
   const includeAudiobook = !types || types.includes("audiobook");
 
+  // Only require an existing physical copy when the user actively asked for
+  // a physical-ownership view (an explicit "physical" type filter, or a
+  // format filter) -- NOT for a fully unfiltered/default search. A copyless
+  // Book row is a real, reachable state (see the zero-copy note above), and
+  // for a plain unfiltered query it should still surface bare (no physical
+  // badge, since its copies array is empty) exactly as it did before this
+  // feature existed -- it's only wrong to include it under an EXPLICIT
+  // physical-ownership filter, which is a stronger claim ("you own this
+  // physically") that a copyless book can't back up.
+  const explicitPhysicalFilterActive =
+    format !== undefined || (types !== undefined && types.includes("physical"));
+
   const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(trimmed);
   const normalizedIsbnQuery = trimmed && looksLikeIsbnQuery ? normalizeIsbn(trimmed) : "";
 
@@ -366,7 +388,9 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
                   ],
                 }
               : {}),
-            copies: format ? { some: { format } } : { some: {} },
+            ...(explicitPhysicalFilterActive
+              ? { copies: format ? { some: { format } } : { some: {} } }
+              : {}),
           },
           include: {
             copies: { where: format ? { format } : undefined },
