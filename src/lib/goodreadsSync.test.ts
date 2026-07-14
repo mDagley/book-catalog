@@ -170,10 +170,18 @@ describe("syncGoodreadsTbr", () => {
   });
 
   afterEach(async () => {
-    await prisma.goodreadsTbrItem.deleteMany();
+    // Wrapped in a transaction, matching syncGoodreadsTbr's own production
+    // delete+recreate pattern -- if createMany ever threw (e.g. a future
+    // required field, or a transient DB error), an unwrapped delete would
+    // already be committed, wiping real data with nothing restored.
     if (realDataSnapshot.length > 0) {
-      await prisma.goodreadsTbrItem.createMany({ data: realDataSnapshot });
+      await prisma.$transaction([
+        prisma.goodreadsTbrItem.deleteMany(),
+        prisma.goodreadsTbrItem.createMany({ data: realDataSnapshot }),
+      ]);
+      return;
     }
+    await prisma.goodreadsTbrItem.deleteMany();
   });
 
   it("fully replaces GoodreadsTbrItem with the freshly fetched set", async () => {
