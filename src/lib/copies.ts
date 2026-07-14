@@ -58,8 +58,17 @@ export async function deleteCopyData(
   const remaining = await prisma.physicalCopy.count({ where: { bookId: copy.bookId } });
 
   if (remaining === 0) {
-    await prisma.book.delete({ where: { id: copy.bookId } });
-    return { bookId: copy.bookId, bookDeleted: true };
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: copy.bookId },
+      select: { hasEbook: true, hasAudiobook: true },
+    });
+    // A Book with an ebook or audiobook link is still owned even with its
+    // last physical copy gone -- only delete when nothing (physical, ebook,
+    // or audiobook) backs this row anymore.
+    if (!book.hasEbook && !book.hasAudiobook) {
+      await prisma.book.delete({ where: { id: copy.bookId } });
+      return { bookId: copy.bookId, bookDeleted: true };
+    }
   }
 
   return { bookId: copy.bookId, bookDeleted: false };

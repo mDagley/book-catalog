@@ -13,6 +13,12 @@ model Book {
   isbn      String?
   createdAt DateTime       @default(now())
   copies    PhysicalCopy[]
+
+  hasEbook            Boolean   @default(false)
+  hasAudiobook        Boolean   @default(false)
+  absEbookItemIds     String[]  @default([])
+  absAudiobookItemIds String[]  @default([])
+  lastAbsSyncedAt     DateTime?
 }
 
 model PhysicalCopy {
@@ -32,21 +38,6 @@ enum Format {
   PAPERBACK
   MASS_MARKET
   OTHER
-}
-
-model AbsCacheItem {
-  id           String    @id @default(cuid())
-  absItemId    String    @unique
-  title        String
-  author       String?
-  isbn         String?
-  mediaType    MediaType
-  lastSyncedAt DateTime  @default(now())
-}
-
-enum MediaType {
-  EBOOK
-  AUDIOBOOK
 }
 
 model GoodreadsTbrItem {

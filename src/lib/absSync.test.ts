@@ -2,13 +2,17 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
+import { searchCatalog } from "@/lib/search";
 
 const originalFetch = global.fetch;
 
 afterEach(async () => {
   global.fetch = originalFetch;
   vi.restoreAllMocks();
-  await prisma.absCacheItem.deleteMany({ where: { absItemId: { startsWith: "test-" } } });
+  await prisma.physicalCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Abs Sync" } } },
+  });
+  await prisma.book.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
 });
 
 describe("fetchAbsLibraries", () => {
@@ -118,7 +122,9 @@ describe("fetchAbsLibraryItems", () => {
         results: [
           {
             id: "item-1",
-            media: { metadata: { title: "Some Book", authorName: "Some Author", isbn: 9780765326355 } },
+            media: {
+              metadata: { title: "Some Book", authorName: "Some Author", isbn: 9780765326355 },
+            },
           },
         ],
         total: 1,
@@ -157,163 +163,382 @@ describe("fetchAbsLibraryItems", () => {
   });
 });
 
+function mockLibrariesAndItems(
+  itemsByLibraryId: Record<string, unknown[]>,
+  libraries: { id: string; name: string }[],
+) {
+  global.fetch = vi.fn().mockImplementation((url: string) => {
+    if (url.endsWith("/api/libraries")) {
+      return Promise.resolve({ ok: true, json: async () => ({ libraries }) } as Response);
+    }
+    for (const [libId, results] of Object.entries(itemsByLibraryId)) {
+      if (url.includes(libId)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ results, total: results.length }),
+        } as Response);
+      }
+    }
+    throw new Error(`Unexpected URL in test: ${url}`);
+  });
+}
+
 describe("syncAbsCache", () => {
   beforeEach(async () => {
-    await prisma.absCacheItem.deleteMany({ where: { absItemId: { startsWith: "test-" } } });
+    await prisma.physicalCopy.deleteMany({
+      where: { book: { title: { startsWith: "Test Abs Sync" } } },
+    });
+    await prisma.book.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
   });
 
-  it("upserts EBOOK and AUDIOBOOK items from their respective libraries", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.endsWith("/api/libraries")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            libraries: [
-              { id: "ebook-lib", name: "Panda EBooks" },
-              { id: "audio-lib", name: "Panda Audiobooks" },
-            ],
-          }),
-        } as Response);
-      }
-      if (url.includes("ebook-lib")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            results: [
-              {
-                id: "test-ebook-1",
-                media: { metadata: { title: "An Ebook", authorName: "E. Author", isbn: "123" } },
-              },
-            ],
-            total: 1,
-          }),
-        } as Response);
-      }
-      if (url.includes("audio-lib")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            results: [
-              {
-                id: "test-audio-1",
-                media: { metadata: { title: "An Audiobook", authorName: "A. Author", isbn: null } },
-              },
-            ],
-            total: 1,
-          }),
-        } as Response);
-      }
-      throw new Error(`Unexpected URL in test: ${url}`);
+  it("skips fuzzy matching when the item's ID is already linked (fast path)", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Fast Path Book",
+        absEbookItemIds: ["test-fastpath-1"],
+        hasEbook: true,
+      },
     });
 
-    const result = await syncAbsCache("https://abs.example.com", "token");
-
-    expect(result).toEqual({ synced: 2 });
-
-    const ebook = await prisma.absCacheItem.findUniqueOrThrow({
-      where: { absItemId: "test-ebook-1" },
-    });
-    expect(ebook.mediaType).toBe("EBOOK");
-    expect(ebook.title).toBe("An Ebook");
-    expect(ebook.isbn).toBe("123");
-
-    const audiobook = await prisma.absCacheItem.findUniqueOrThrow({
-      where: { absItemId: "test-audio-1" },
-    });
-    expect(audiobook.mediaType).toBe("AUDIOBOOK");
-    expect(audiobook.isbn).toBeNull();
-  });
-
-  it("matches a target library by case-insensitive substring, not exact name", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.endsWith("/api/libraries")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            libraries: [
-              { id: "ebook-lib", name: "PANDA EBOOKS (Archive)" },
-              { id: "other-lib", name: "Someone Else's Comics" },
-            ],
-          }),
-        } as Response);
-      }
-      if (url.includes("ebook-lib")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            results: [
-              {
-                id: "test-substring-1",
-                media: { metadata: { title: "An Ebook", authorName: "E. Author" } },
-              },
-            ],
-            total: 1,
-          }),
-        } as Response);
-      }
-      if (url.includes("other-lib")) {
-        return Promise.resolve({ ok: true, json: async () => ({ results: [] }) } as Response);
-      }
-      throw new Error(`Unexpected URL in test: ${url}`);
-    });
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-fastpath-1",
+            // Deliberately a non-matching title -- if the fast path didn't
+            // short-circuit, this item would either fail to fuzzy-match
+            // (leaving it stranded) or corrupt data by matching something
+            // else. Neither should happen: the already-linked ID is
+            // recognized before any fuzzy matching is attempted.
+            media: { metadata: { title: "Completely Unrelated Title" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
 
     const result = await syncAbsCache("https://abs.example.com", "token");
 
     expect(result).toEqual({ synced: 1 });
-    const item = await prisma.absCacheItem.findUniqueOrThrow({
-      where: { absItemId: "test-substring-1" },
-    });
-    expect(item.mediaType).toBe("EBOOK");
+    const unchanged = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(unchanged.title).toBe("Test Abs Sync Fast Path Book");
+    expect(unchanged.absEbookItemIds).toEqual(["test-fastpath-1"]);
+    const total = await prisma.book.count({ where: { title: { startsWith: "Test Abs Sync" } } });
+    expect(total).toBe(1);
   });
 
-  it("updates lastSyncedAt and metadata on a second sync of the same item", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.endsWith("/api/libraries")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ libraries: [{ id: "ebook-lib", name: "Panda EBooks" }] }),
-        } as Response);
-      }
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          results: [
-            {
-              id: "test-ebook-1",
-              media: { metadata: { title: "Renamed Title", authorName: "E. Author", isbn: "123" } },
-            },
-          ],
-          total: 1,
-        }),
-      } as Response);
+  it("links a first-time fuzzy match into an existing Book without altering its title or author", async () => {
+    await prisma.book.create({
+      data: { title: "Test Abs Sync Mistborn", author: "Brandon Sanderson" },
     });
 
-    await prisma.absCacheItem.create({
-      data: {
-        absItemId: "test-ebook-1",
-        title: "Old Title",
-        author: "E. Author",
-        isbn: "123",
-        mediaType: "EBOOK",
-        lastSyncedAt: new Date(0),
+    mockLibrariesAndItems(
+      {
+        "audio-lib": [
+          {
+            id: "test-fuzzy-1",
+            media: { metadata: { title: "Test Abs Sync Mistborn", authorName: "Someone Else" } },
+          },
+        ],
       },
-    });
+      [{ id: "audio-lib", name: "Panda Audiobooks" }],
+    );
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const updated = await prisma.absCacheItem.findUniqueOrThrow({
-      where: { absItemId: "test-ebook-1" },
+    const book = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Mistborn" },
     });
-    expect(updated.title).toBe("Renamed Title");
-    expect(updated.lastSyncedAt.getTime()).toBeGreaterThan(0);
+    expect(book.author).toBe("Brandon Sanderson");
+    expect(book.hasAudiobook).toBe(true);
+    expect(book.absAudiobookItemIds).toEqual(["test-fuzzy-1"]);
+    const total = await prisma.book.count({ where: { title: { startsWith: "Test Abs Sync" } } });
+    expect(total).toBe(1);
   });
 
-  it("throws if the ABS instance is unreachable, without touching existing cache rows", async () => {
-    await prisma.absCacheItem.create({
+  it("creates a new Book when no existing title matches", async () => {
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-new-1",
+            media: {
+              metadata: {
+                title: "Test Abs Sync Brand New Book",
+                authorName: "New Author",
+                isbn: "9780765326355",
+              },
+            },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const book = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Brand New Book" },
+    });
+    expect(book.hasEbook).toBe(true);
+    expect(book.absEbookItemIds).toEqual(["test-new-1"]);
+    expect(book.author).toBe("New Author");
+    expect(book.isbn).toBe("9780765326355");
+    const copies = await prisma.physicalCopy.count({ where: { bookId: book.id } });
+    expect(copies).toBe(0);
+  });
+
+  it("links two different audiobook editions of the same title into one Book's array", async () => {
+    mockLibrariesAndItems(
+      {
+        "audio-lib": [
+          { id: "test-edition-1", media: { metadata: { title: "Test Abs Sync Two Editions" } } },
+          { id: "test-edition-2", media: { metadata: { title: "Test Abs Sync Two Editions" } } },
+        ],
+      },
+      [{ id: "audio-lib", name: "Panda Audiobooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const books = await prisma.book.findMany({ where: { title: "Test Abs Sync Two Editions" } });
+    expect(books).toHaveLength(1);
+    expect(books[0].absAudiobookItemIds.slice().sort()).toEqual([
+      "test-edition-1",
+      "test-edition-2",
+    ]);
+  });
+
+  it("matches a target library by case-insensitive substring, not exact name", async () => {
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          { id: "test-substring-1", media: { metadata: { title: "Test Abs Sync Substring Book" } } },
+        ],
+        "other-lib": [],
+      },
+      [
+        { id: "ebook-lib", name: "PANDA EBOOKS (Archive)" },
+        { id: "other-lib", name: "Someone Else's Comics" },
+      ],
+    );
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 1 });
+    const book = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Substring Book" },
+    });
+    expect(book.hasEbook).toBe(true);
+  });
+
+  it("drops a stale linked ID for one edition while keeping another still-present edition", async () => {
+    const book = await prisma.book.create({
       data: {
-        absItemId: "test-ebook-1",
-        title: "Still Here",
-        mediaType: "EBOOK",
+        title: "Test Abs Sync Partial Stale Removal",
+        absAudiobookItemIds: ["test-partial-keep", "test-partial-stale"],
+        hasAudiobook: true,
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "audio-lib": [
+          {
+            id: "test-partial-keep",
+            media: { metadata: { title: "Test Abs Sync Partial Stale Removal" } },
+          },
+        ],
+      },
+      [{ id: "audio-lib", name: "Panda Audiobooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.absAudiobookItemIds).toEqual(["test-partial-keep"]);
+    expect(updated.hasAudiobook).toBe(true);
+  });
+
+  it("deletes a Book that ends up with no ebook, audiobook, or physical copy links", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Fully Removed",
+        absEbookItemIds: ["test-remove-1"],
+        hasEbook: true,
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-remove-other",
+            media: { metadata: { title: "Test Abs Sync Unrelated Survivor" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const remaining = await prisma.book.findMany({
+      where: { title: "Test Abs Sync Fully Removed" },
+    });
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("keeps a Book that still has a physical copy even after losing every linked ABS item", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Kept With Physical Copy",
+        absEbookItemIds: ["test-keep-1"],
+        hasEbook: true,
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-keep-other",
+            media: { metadata: { title: "Test Abs Sync Unrelated Survivor Two" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.hasEbook).toBe(false);
+    expect(updated.absEbookItemIds).toEqual([]);
+  });
+
+  it("does not remove any links when a sync fetches zero items across every matching library", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Survives Empty Sync",
+        absEbookItemIds: ["test-empty-guard-1"],
+        hasEbook: true,
+      },
+    });
+
+    mockLibrariesAndItems({ "ebook-lib": [] }, [{ id: "ebook-lib", name: "Panda EBooks" }]);
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 0 });
+    const unchanged = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Survives Empty Sync" },
+    });
+    expect(unchanged.hasEbook).toBe(true);
+    expect(unchanged.absEbookItemIds).toEqual(["test-empty-guard-1"]);
+  });
+
+  it("does not remove any links when no ABS library matches the ebook/audiobook name substrings", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Survives No Matching Library",
+        absAudiobookItemIds: ["test-no-library-1"],
+        hasAudiobook: true,
+      },
+    });
+
+    mockLibrariesAndItems({}, [{ id: "other-lib", name: "Someone Else's Comics" }]);
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 0 });
+    const unchanged = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Survives No Matching Library" },
+    });
+    expect(unchanged.hasAudiobook).toBe(true);
+  });
+
+  it("does not remove audiobook links when only the ebook library returns items this pass", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Partial Type Guard",
+        absEbookItemIds: ["test-partial-type-ebook-1"],
+        hasEbook: true,
+        absAudiobookItemIds: ["test-partial-type-audio-stale"],
+        hasAudiobook: true,
+      },
+    });
+
+    // Only the ebook library appears in this sync pass -- as if the
+    // audiobook library was renamed/removed or is otherwise absent, not
+    // just returning zero items.
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-partial-type-ebook-1",
+            media: { metadata: { title: "Test Abs Sync Partial Type Guard" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-1"]);
+    expect(updated.hasEbook).toBe(true);
+    // Audiobook wasn't synced this pass at all -- its stale-looking link must
+    // survive untouched, not be wiped just because no audiobook items were seen.
+    expect(updated.absAudiobookItemIds).toEqual(["test-partial-type-audio-stale"]);
+    expect(updated.hasAudiobook).toBe(true);
+  });
+
+  it("does not remove ebook links when the audiobook library returns items but the ebook library returns none", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Partial Type Guard Two",
+        absEbookItemIds: ["test-partial-type-ebook-stale"],
+        hasEbook: true,
+      },
+    });
+
+    // Both libraries are present and matched by name, but the ebook library
+    // happens to return zero items this pass (e.g. a transient hiccup) while
+    // the audiobook library returns a real item for an unrelated book.
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [],
+        "audio-lib": [
+          {
+            id: "test-partial-type-audio-unrelated",
+            media: { metadata: { title: "Test Abs Sync Partial Type Guard Two Unrelated Audio" } },
+          },
+        ],
+      },
+      [
+        { id: "ebook-lib", name: "Panda EBooks" },
+        { id: "audio-lib", name: "Panda Audiobooks" },
+      ],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    // The ebook library matched by name but returned zero items -- ebook
+    // wasn't actually confirmed this pass, so its existing link must survive.
+    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-stale"]);
+    expect(updated.hasEbook).toBe(true);
+  });
+
+  it("throws if the ABS instance is unreachable, without touching existing Book rows", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Still Here",
+        absEbookItemIds: ["test-unreachable-1"],
+        hasEbook: true,
       },
     });
 
@@ -321,9 +546,47 @@ describe("syncAbsCache", () => {
 
     await expect(syncAbsCache("https://abs.example.com", "token")).rejects.toThrow();
 
-    const stillThere = await prisma.absCacheItem.findUniqueOrThrow({
-      where: { absItemId: "test-ebook-1" },
+    const stillThere = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Still Here" },
     });
-    expect(stillThere.title).toBe("Still Here");
+    expect(stillThere.absEbookItemIds).toEqual(["test-unreachable-1"]);
+  });
+});
+
+describe("syncAbsCache + searchCatalog integration", () => {
+  // The unit tests above cover syncAbsCache and searchCatalog in isolation;
+  // this proves the seam between them actually works end-to-end -- linking a
+  // physical book to a newly-synced ebook, then confirming search surfaces
+  // both ownership badges on the same result.
+  it("makes a physical book's newly-linked ebook show up in search with both badges", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Integration Physical And Ebook",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-integration-ebook-1",
+            media: { metadata: { title: "Test Abs Sync Integration Physical And Ebook" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const results = await searchCatalog({
+      query: "Test Abs Sync Integration Physical And Ebook",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].physicalCopies).toHaveLength(1);
+    expect(results[0].hasEbook).toBe(true);
+    expect(results[0].hasAudiobook).toBe(false);
   });
 });
