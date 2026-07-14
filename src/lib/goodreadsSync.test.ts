@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { fetchGoodreadsPage, fetchAllGoodreadsBooks, syncGoodreadsTbr } from "@/lib/goodreadsSync";
 
@@ -147,6 +147,43 @@ describe("fetchAllGoodreadsBooks", () => {
 });
 
 describe("syncGoodreadsTbr", () => {
+  // These tests exercise syncGoodreadsTbr's real full-table-replace
+  // behavior directly against the real dev Postgres (not a mock), so
+  // running them destroys whatever real synced GoodreadsTbrItem data
+  // happens to be there. Snapshot it before each test and restore it
+  // after, so a real `npm test` run doesn't silently wipe real synced
+  // data -- this was a real, observed problem (confirmed live: a stray
+  // "Still Here" fixture row from the second test below was left behind
+  // in place of hundreds of real synced rows after a prior full-suite run).
+  let realDataSnapshot: Array<{
+    id: string;
+    title: string;
+    author: string | null;
+    isbn: string | null;
+    lastSyncedAt: Date;
+  }> = [];
+
+  beforeEach(async () => {
+    realDataSnapshot = await prisma.goodreadsTbrItem.findMany({
+      select: { id: true, title: true, author: true, isbn: true, lastSyncedAt: true },
+    });
+  });
+
+  afterEach(async () => {
+    // Wrapped in a transaction, matching syncGoodreadsTbr's own production
+    // delete+recreate pattern -- if createMany ever threw (e.g. a future
+    // required field, or a transient DB error), an unwrapped delete would
+    // already be committed, wiping real data with nothing restored.
+    if (realDataSnapshot.length > 0) {
+      await prisma.$transaction([
+        prisma.goodreadsTbrItem.deleteMany(),
+        prisma.goodreadsTbrItem.createMany({ data: realDataSnapshot }),
+      ]);
+      return;
+    }
+    await prisma.goodreadsTbrItem.deleteMany();
+  });
+
   it("fully replaces GoodreadsTbrItem with the freshly fetched set", async () => {
     await prisma.goodreadsTbrItem.create({
       data: { title: "Stale Book No Longer On Shelf", author: "Someone" },
