@@ -8,7 +8,14 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A fixed literal, not ${{ github.workflow }} -- that resolves to this
+  # file's `name:` field, which just changed in this very commit ("Deploy
+  # to EasyPanel" -> "Build and Deploy to EasyPanel"). Keying on the mutable
+  # display name would mean an in-flight run under the old name and a new
+  # run under the new name land in different groups, so a rename can't
+  # cancel a run that started before it -- exactly the race this group
+  # exists to prevent.
+  group: easypanel-build-and-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
