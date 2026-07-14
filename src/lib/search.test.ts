@@ -49,6 +49,43 @@ describe("searchCatalog", () => {
     expect(results.map((r) => r.title).sort()).toEqual(["Test Search Alpha", "Test Search Beta"]);
   });
 
+  it("does not let two unmatched ABS items spuriously merge into each other", async () => {
+    // Regression test for the O(n^2) merge-loop bug: fuzzy-matching against
+    // a growing `results` array let a LATER unmatched absItem accidentally
+    // merge into an EARLIER unmatched absItem's standalone entry. Neither
+    // of these titles has any matching physical book -- "Test Search Twin
+    // Book: Special Edition" fuzzy-matches "Test Search Twin Book" (colon-
+    // prefix scoring in matching.ts scores this ~100), so under the old
+    // buggy code the second item would incorrectly attach its mediaType
+    // onto the first item's standalone entry instead of creating its own.
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-twin-ebook",
+        title: "Test Search Twin Book",
+        mediaType: "EBOOK",
+      },
+    });
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-twin-audiobook",
+        title: "Test Search Twin Book: Special Edition",
+        mediaType: "AUDIOBOOK",
+      },
+    });
+
+    const results = await searchCatalog({ query: "Test Search Twin" });
+
+    expect(results).toHaveLength(2);
+    const ebookEntry = results.find((r) => r.title === "Test Search Twin Book");
+    const audiobookEntry = results.find(
+      (r) => r.title === "Test Search Twin Book: Special Edition",
+    );
+    expect(ebookEntry?.hasEbook).toBe(true);
+    expect(ebookEntry?.hasAudiobook).toBe(false);
+    expect(audiobookEntry?.hasEbook).toBe(false);
+    expect(audiobookEntry?.hasAudiobook).toBe(true);
+  });
+
   it("attaches the ebook badge to the best-scoring title match, not just the first match above threshold", async () => {
     const weakBook = await prisma.book.create({
       data: { title: "Test Search Mist", author: "Brandon Sanderson" },
