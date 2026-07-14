@@ -186,7 +186,20 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
 // physical-only books (a Book backed by nothing shouldn't exist), except an
 // ebook/audiobook-only Book with zero physical copies is now a normal state,
 // not a defensive-only edge case.
-async function removeStaleAbsLinks(seenItemIds: Set<string>): Promise<void> {
+//
+// `syncedMediaTypes` gates pruning PER media type: a media type's array is
+// only ever filtered against `seenItemIds` if at least one item of that
+// specific type was actually fetched this pass. This protects against two
+// failure modes with one mechanism -- a library renamed/missing so it no
+// longer matches the "panda ebooks"/"panda audiobooks" substrings, AND a
+// correctly-matched library that happens to return zero items this pass
+// (e.g. a transient ABS hiccup) -- either of which would otherwise look
+// identical to "the user deleted every book of that type" and wipe real
+// ownership data for a media type that was simply never confirmed this pass.
+async function removeStaleAbsLinks(
+  seenItemIds: Set<string>,
+  syncedMediaTypes: Set<AbsMediaType>,
+): Promise<void> {
   const booksWithAbsLinks = await prisma.book.findMany({
     where: {
       OR: [{ absEbookItemIds: { isEmpty: false } }, { absAudiobookItemIds: { isEmpty: false } }],
@@ -200,8 +213,12 @@ async function removeStaleAbsLinks(seenItemIds: Set<string>): Promise<void> {
   });
 
   for (const book of booksWithAbsLinks) {
-    const remainingEbookIds = book.absEbookItemIds.filter((id) => seenItemIds.has(id));
-    const remainingAudiobookIds = book.absAudiobookItemIds.filter((id) => seenItemIds.has(id));
+    const remainingEbookIds = syncedMediaTypes.has("EBOOK")
+      ? book.absEbookItemIds.filter((id) => seenItemIds.has(id))
+      : book.absEbookItemIds;
+    const remainingAudiobookIds = syncedMediaTypes.has("AUDIOBOOK")
+      ? book.absAudiobookItemIds.filter((id) => seenItemIds.has(id))
+      : book.absAudiobookItemIds;
 
     const unchanged =
       remainingEbookIds.length === book.absEbookItemIds.length &&
@@ -223,6 +240,7 @@ async function removeStaleAbsLinks(seenItemIds: Set<string>): Promise<void> {
         absAudiobookItemIds: remainingAudiobookIds,
         hasEbook: remainingEbookIds.length > 0,
         hasAudiobook: remainingAudiobookIds.length > 0,
+        lastAbsSyncedAt: new Date(),
       },
     });
   }
@@ -288,7 +306,9 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
     synced++;
   }
 
-  await removeStaleAbsLinks(seenItemIds);
+  const syncedMediaTypes = new Set<AbsMediaType>(pendingItems.map((p) => p.mediaType));
+
+  await removeStaleAbsLinks(seenItemIds, syncedMediaTypes);
 
   return { synced };
 }

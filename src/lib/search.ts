@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
-import type { Format } from "@prisma/client";
+import type { Format, Prisma } from "@prisma/client";
 
 export interface SearchResultCopy {
   id: string;
@@ -79,9 +79,9 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   // ownership absent an explicit filter (see the old `explicitPhysicalFilterActive`
   // guard this replaces and generalizes).
   const explicitOwnershipFilterActive = types !== undefined || format !== undefined;
-  const filters: object[] = [];
+  const filters: Prisma.BookWhereInput[] = [];
   if (explicitOwnershipFilterActive) {
-    const ownershipOr: object[] = [];
+    const ownershipOr: Prisma.BookWhereInput[] = [];
     if (includePhysical) {
       ownershipOr.push({ copies: format ? { some: { format } } : { some: {} } });
     }

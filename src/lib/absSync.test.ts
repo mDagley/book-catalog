@@ -459,6 +459,80 @@ describe("syncAbsCache", () => {
     expect(unchanged.hasAudiobook).toBe(true);
   });
 
+  it("does not remove audiobook links when only the ebook library returns items this pass", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Partial Type Guard",
+        absEbookItemIds: ["test-partial-type-ebook-1"],
+        hasEbook: true,
+        absAudiobookItemIds: ["test-partial-type-audio-stale"],
+        hasAudiobook: true,
+      },
+    });
+
+    // Only the ebook library appears in this sync pass -- as if the
+    // audiobook library was renamed/removed or is otherwise absent, not
+    // just returning zero items.
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-partial-type-ebook-1",
+            media: { metadata: { title: "Test Abs Sync Partial Type Guard" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-1"]);
+    expect(updated.hasEbook).toBe(true);
+    // Audiobook wasn't synced this pass at all -- its stale-looking link must
+    // survive untouched, not be wiped just because no audiobook items were seen.
+    expect(updated.absAudiobookItemIds).toEqual(["test-partial-type-audio-stale"]);
+    expect(updated.hasAudiobook).toBe(true);
+  });
+
+  it("does not remove ebook links when the audiobook library returns items but the ebook library returns none", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Partial Type Guard Two",
+        absEbookItemIds: ["test-partial-type-ebook-stale"],
+        hasEbook: true,
+      },
+    });
+
+    // Both libraries are present and matched by name, but the ebook library
+    // happens to return zero items this pass (e.g. a transient hiccup) while
+    // the audiobook library returns a real item for an unrelated book.
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [],
+        "audio-lib": [
+          {
+            id: "test-partial-type-audio-unrelated",
+            media: { metadata: { title: "Test Abs Sync Partial Type Guard Two Unrelated Audio" } },
+          },
+        ],
+      },
+      [
+        { id: "ebook-lib", name: "Panda EBooks" },
+        { id: "audio-lib", name: "Panda Audiobooks" },
+      ],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    // The ebook library matched by name but returned zero items -- ebook
+    // wasn't actually confirmed this pass, so its existing link must survive.
+    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-stale"]);
+    expect(updated.hasEbook).toBe(true);
+  });
+
   it("throws if the ABS instance is unreachable, without touching existing Book rows", async () => {
     await prisma.book.create({
       data: {
