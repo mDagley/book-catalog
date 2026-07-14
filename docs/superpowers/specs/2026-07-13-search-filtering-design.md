@@ -78,10 +78,13 @@ Query construction:
 
 - If `types` is defined and excludes `"physical"`, skip the
   `prisma.book.findMany` call entirely (no physical results at all).
-- The `copies: { some: {} }` existence guard (excluding books with zero
-  `PhysicalCopy` rows — a reachable state today: deleting a book's only
-  copy via `src/lib/copies.ts` never cascades to delete the parent `Book`)
-  only applies when the user has **explicitly** asked for a
+- The `copies: { some: {} }` existence guard exists in case a `Book` row
+  ever ends up with zero `PhysicalCopy` rows — worth defending against even
+  though it isn't reachable through the app's own UI today: `deleteCopyData`
+  (`src/lib/copies.ts`) actually cascades to delete the parent `Book` once
+  its last copy is removed (confirmed live during capstone verification),
+  so this guard is a defensive measure, not a fix for an observed real
+  scenario. It only applies when the user has **explicitly** asked for a
   physical-ownership view — i.e. `types` is defined and includes
   `"physical"`, or `format` is set. It does NOT apply to a fully
   unfiltered/default search (`types` and `format` both undefined) — there,

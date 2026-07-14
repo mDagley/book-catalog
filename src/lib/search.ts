@@ -27,12 +27,17 @@ export interface SearchOptions {
   format?: Format;
 }
 
-const VALID_FORMATS: readonly string[] = ["HARDCOVER", "PAPERBACK", "MASS_MARKET", "OTHER"];
-const VALID_TYPES: readonly string[] = ["physical", "ebook", "audiobook"];
+// `as const satisfies` ties each literal to the real type, so a typo (e.g.
+// "PAPERBAK") fails to compile instead of silently being an always-false
+// check at runtime. Cast back to `readonly string[]` at the `.includes()`
+// call sites below, since the incoming value being checked is a generic
+// string (from a URL param), not already narrowed to the literal union.
+const VALID_FORMATS = ["HARDCOVER", "PAPERBACK", "MASS_MARKET", "OTHER"] as const satisfies readonly Format[];
+const VALID_TYPES = ["physical", "ebook", "audiobook"] as const satisfies readonly OwnershipType[];
 
 export function parseFormatParam(value: string | undefined): Format | undefined {
   if (!value) return undefined;
-  return VALID_FORMATS.includes(value) ? (value as Format) : undefined;
+  return (VALID_FORMATS as readonly string[]).includes(value) ? (value as Format) : undefined;
 }
 
 export function parseTypesParam(
@@ -42,7 +47,7 @@ export function parseTypesParam(
   const tokens = Array.isArray(value) ? value.flatMap((v) => v.split(",")) : value.split(",");
   const parsed = tokens
     .map((t) => t.trim())
-    .filter((t): t is OwnershipType => VALID_TYPES.includes(t));
+    .filter((t): t is OwnershipType => (VALID_TYPES as readonly string[]).includes(t));
   return parsed.length > 0 ? parsed : undefined;
 }
 

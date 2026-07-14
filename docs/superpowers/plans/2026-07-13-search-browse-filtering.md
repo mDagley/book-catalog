@@ -168,8 +168,13 @@ describe("searchCatalog", () => {
   });
 
   it("excludes a book with zero physical copies from the physical type, even with no format set", async () => {
-    // Reachable in practice: deleteCopyData (src/lib/copies.ts) never cascades
-    // to delete the parent Book, so a copyless Book row is a real state.
+    // Not reachable through the app's own UI today -- deleteCopyData
+    // (src/lib/copies.ts) cascades to delete the parent Book once its last
+    // copy is gone, confirmed live during capstone verification. This
+    // directly creates the edge case instead (bypassing that cascade)
+    // purely to exercise the defensive guard, which is worth keeping in
+    // case that cascade ever changes or some other path creates a
+    // copyless Book.
     await prisma.book.create({ data: { title: "Test Search Copyless Book" } });
 
     const results = await searchCatalog({ types: ["physical"] });
@@ -350,12 +355,13 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   // Only require an existing physical copy when the user actively asked for
   // a physical-ownership view (an explicit "physical" type filter, or a
   // format filter) -- NOT for a fully unfiltered/default search. A copyless
-  // Book row is a real, reachable state (see the zero-copy note above), and
-  // for a plain unfiltered query it should still surface bare (no physical
-  // badge, since its copies array is empty) exactly as it did before this
-  // feature existed -- it's only wrong to include it under an EXPLICIT
-  // physical-ownership filter, which is a stronger claim ("you own this
-  // physically") that a copyless book can't back up.
+  // Book row isn't reachable through the app's own UI today (see the
+  // zero-copy note above), but this guard is still worth keeping
+  // defensively, and for a plain unfiltered query it should still surface
+  // bare (no physical badge, since its copies array is empty) exactly as it
+  // did before this feature existed -- it's only wrong to include it under
+  // an EXPLICIT physical-ownership filter, which is a stronger claim ("you
+  // own this physically") that a copyless book can't back up.
   const explicitPhysicalFilterActive =
     format !== undefined || (types !== undefined && types.includes("physical"));
 
