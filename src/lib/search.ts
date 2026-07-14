@@ -57,6 +57,16 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const includeEbook = !types || types.includes("ebook");
   const includeAudiobook = !types || types.includes("audiobook");
 
+  // Only require an existing physical copy when the user actively asked for
+  // a physical-ownership view (an explicit "physical" type filter, or a
+  // format filter) -- NOT for a fully unfiltered/default search. A copyless
+  // Book row is a real, reachable state (deleteCopyData never cascades to
+  // delete the parent Book), and for a plain unfiltered query it should
+  // still surface bare (no physical badge, since its copies array is
+  // empty) exactly as it did before this feature existed -- it's only
+  // wrong to include it under an EXPLICIT physical-ownership filter, which
+  // is a stronger claim ("you own this physically") a copyless book can't
+  // back up.
   const explicitPhysicalFilterActive =
     format !== undefined || (types !== undefined && types.includes("physical"));
 
