@@ -21,7 +21,7 @@ export default async function BookDetailPage({
 
   return (
     <main className="mx-auto max-w-2xl p-4">
-      <div className="mb-4 flex items-start justify-between">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">{book.title}</h1>
           {book.author && <p className="text-gray-600">{book.author}</p>}
@@ -32,7 +32,7 @@ export default async function BookDetailPage({
         </Link>
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-medium">Copies ({book.copies.length})</h2>
         <Link
           href={`/books/${book.id}/copies/new`}

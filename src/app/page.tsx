@@ -26,7 +26,7 @@ export default async function HomePage({
 
   return (
     <main className="mx-auto max-w-2xl p-4">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Book Catalog</h1>
         <RefreshSyncButton />
       </div>
