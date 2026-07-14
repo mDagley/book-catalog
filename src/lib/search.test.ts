@@ -210,6 +210,43 @@ describe("searchCatalog", () => {
 
     expect(results.map((r) => r.title)).toEqual(["Test Search Combo Book"]);
   });
+
+  it("ignores a format filter when types excludes physical entirely", async () => {
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-format-noop-ebook",
+        title: "Test Search Format Noop Ebook",
+        mediaType: "EBOOK",
+      },
+    });
+
+    const results = await searchCatalog({ types: ["ebook"], format: "PAPERBACK" });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Format Noop Ebook");
+  });
+
+  it("applies a format filter on its own, with no types specified", async () => {
+    const paperback = await prisma.book.create({
+      data: {
+        title: "Test Search Standalone Format Paperback",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+    const hardcover = await prisma.book.create({
+      data: {
+        title: "Test Search Standalone Format Hardcover",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    const results = await searchCatalog({ format: "PAPERBACK" });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Standalone Format Paperback");
+    expect(results.map((r) => r.title)).not.toContain("Test Search Standalone Format Hardcover");
+
+    await prisma.physicalCopy.deleteMany({ where: { bookId: { in: [paperback.id, hardcover.id] } } });
+    await prisma.book.deleteMany({ where: { id: { in: [paperback.id, hardcover.id] } } });
+  });
 });
 
 describe("parseFormatParam", () => {

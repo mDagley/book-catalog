@@ -46,6 +46,21 @@ export function parseTypesParam(
   return parsed.length > 0 ? parsed : undefined;
 }
 
+// Book and AbsCacheItem both have title/author/isbn string fields, so this
+// clause is shared between their two queries below rather than duplicated.
+function textQueryWhere(trimmed: string, normalizedIsbnQuery: string) {
+  if (!trimmed) return {};
+  return {
+    OR: [
+      { title: { contains: trimmed, mode: "insensitive" as const } },
+      { author: { contains: trimmed, mode: "insensitive" as const } },
+      ...(normalizedIsbnQuery
+        ? [{ isbn: { contains: normalizedIsbnQuery, mode: "insensitive" as const } }]
+        : []),
+    ],
+  };
+}
+
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
@@ -81,24 +96,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     includePhysical
       ? prisma.book.findMany({
           where: {
-            ...(trimmed
-              ? {
-                  OR: [
-                    { title: { contains: trimmed, mode: "insensitive" as const } },
-                    { author: { contains: trimmed, mode: "insensitive" as const } },
-                    ...(normalizedIsbnQuery
-                      ? [
-                          {
-                            isbn: {
-                              contains: normalizedIsbnQuery,
-                              mode: "insensitive" as const,
-                            },
-                          },
-                        ]
-                      : []),
-                  ],
-                }
-              : {}),
+            ...textQueryWhere(trimmed, normalizedIsbnQuery),
             ...(explicitPhysicalFilterActive
               ? { copies: format ? { some: { format } } : { some: {} } }
               : {}),
@@ -112,24 +110,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     mediaTypesToFetch.length > 0
       ? prisma.absCacheItem.findMany({
           where: {
-            ...(trimmed
-              ? {
-                  OR: [
-                    { title: { contains: trimmed, mode: "insensitive" as const } },
-                    { author: { contains: trimmed, mode: "insensitive" as const } },
-                    ...(normalizedIsbnQuery
-                      ? [
-                          {
-                            isbn: {
-                              contains: normalizedIsbnQuery,
-                              mode: "insensitive" as const,
-                            },
-                          },
-                        ]
-                      : []),
-                  ],
-                }
-              : {}),
+            ...textQueryWhere(trimmed, normalizedIsbnQuery),
             mediaType: { in: mediaTypesToFetch },
           },
         })
@@ -150,6 +131,17 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     hasAudiobook: false,
   }));
 
+  // Scan only the fixed-size physical-books subset (`results`) below, not a
+  // growing combined array -- absItems are only ever meant to merge into an
+  // EXISTING physical-book entry, never into another, previously-appended
+  // absItem-only entry. Appending unmatched items straight into `results`
+  // and rescanning that same (now-longer) array on every later iteration
+  // would make this loop O(n^2) in the number of unmatched absItems (which
+  // realistically dominates for a broad, mostly-text-query-free browse --
+  // e.g. filtering by format alone pulls in the whole AbsCacheItem table),
+  // and could spuriously fuzzy-match two unrelated absItem-only entries
+  // against each other, which was never intended.
+  const standaloneAbsResults: SearchResult[] = [];
   for (const item of absItems) {
     let bestMatch: SearchResult | null = null;
     let bestScore = -1;
@@ -164,7 +156,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
       if (item.mediaType === "EBOOK") bestMatch.hasEbook = true;
       if (item.mediaType === "AUDIOBOOK") bestMatch.hasAudiobook = true;
     } else {
-      results.push({
+      standaloneAbsResults.push({
         title: item.title,
         author: item.author,
         bookId: null,
@@ -175,5 +167,5 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     }
   }
 
-  return results;
+  return [...results, ...standaloneAbsResults];
 }
