@@ -114,13 +114,15 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     title: book.title,
     author: book.author,
     bookId: book.id,
-    // Forced empty (not just unfiltered) when physical isn't part of the
-    // requested view -- `types` controls which ownership badges/details
-    // show, so an ebook/audiobook-only view should never surface "Physical
-    // (...)" badges even for a book that also happens to be owned
-    // physically. Matches the pre-unification dual-query implementation's
-    // own behavior in this scenario (a book found only via its ebook/
-    // audiobook side never carried real physical-copy data either).
+    // Forced empty/false (not just unfiltered) when a given ownership type
+    // isn't part of the requested view -- `types` controls which ownership
+    // badges/details show at all, so e.g. an ebook-only view should never
+    // surface a "Physical (...)" or "Audiobook (...)" badge even for a book
+    // that also happens to be owned in those other forms. Matches the
+    // pre-unification dual-query implementation's own behavior (its
+    // ABS-item query only ever fetched items for media types actually
+    // included in the filter, so an excluded type's flag could never come
+    // back true).
     physicalCopies: includePhysical
       ? book.copies.map((copy) => ({
           id: copy.id,
@@ -129,7 +131,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
           publishYear: copy.publishYear,
         }))
       : [],
-    hasEbook: book.hasEbook,
-    hasAudiobook: book.hasAudiobook,
+    hasEbook: includeEbook ? book.hasEbook : false,
+    hasAudiobook: includeAudiobook ? book.hasAudiobook : false,
   }));
 }

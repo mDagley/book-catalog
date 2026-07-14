@@ -41,7 +41,7 @@ model Book {
 
 - `hasEbook`/`hasAudiobook` are plain booleans for simple, direct filtering (`where: { hasEbook: true }`) — no join, no fuzzy matching, at query time.
 - `absEbookItemIds`/`absAudiobookItemIds` are scalar array columns (native to Postgres and Prisma) tracking every currently-linked ABS item ID of that media type. Arrays, not single nullable fields, because it's possible to own more than one ebook or audiobook version of the same book (e.g. an abridged and unabridged audiobook, or two different editions) — all such items link to the same `Book` row. `hasEbook`/`hasAudiobook` reflect "is the corresponding array non-empty," kept in sync by the sync logic rather than computed on read (so a plain boolean filter stays cheap).
-- `lastAbsSyncedAt` records when this Book's ebook/audiobook status was last confirmed by a sync run — informational, not used for any logic in this phase.
+- `lastAbsSyncedAt` records when this Book's ebook/audiobook links were last *changed* by a sync run — set when a new item is linked/created, or when the removal pass actually changes a Book's arrays. It is NOT touched on a fast-path no-op (an already-linked item confirmed present again), to avoid an unnecessary write on every sync for every unchanged book. Informational, not used for any logic in this phase.
 
 `AbsCacheItem` (model and its enum `MediaType`, if unused elsewhere) is dropped via a real Prisma migration. `PhysicalCopy` and `GoodreadsTbrItem` are unaffected.
 

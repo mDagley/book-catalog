@@ -186,6 +186,25 @@ describe("searchCatalog", () => {
     expect(match?.physicalCopies).toEqual([]);
   });
 
+  it("hides the audiobook flag when types excludes audiobook, even for a book owned as both", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Search Both Ebook And Audiobook",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-both-ebook"],
+        hasAudiobook: true,
+        absAudiobookItemIds: ["search-test-both-audiobook"],
+      },
+    });
+
+    const results = await searchCatalog({ types: ["ebook"] });
+
+    const match = results.find((r) => r.title === "Test Search Both Ebook And Audiobook");
+    expect(match).toBeDefined();
+    expect(match?.hasEbook).toBe(true);
+    expect(match?.hasAudiobook).toBe(false);
+  });
+
   it("applies a format filter on its own, with no types specified", async () => {
     await prisma.book.create({
       data: {
