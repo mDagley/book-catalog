@@ -78,13 +78,19 @@ Query construction:
 
 - If `types` is defined and excludes `"physical"`, skip the
   `prisma.book.findMany` call entirely (no physical results at all).
-- If `physical` is included (or `types` is undefined), the `Book` query's
-  `where` clause always adds `copies: { some: {} }` — this excludes books
-  that have zero `PhysicalCopy` rows (a reachable state today: deleting a
-  book's only copy via `src/lib/copies.ts` never cascades to delete the
-  parent `Book`, so a copyless `Book` row can exist and must not be
-  reported as "owned physically"). If `format` is also set, this narrows
-  further to `copies: { some: { format } }`.
+- The `copies: { some: {} }` existence guard (excluding books with zero
+  `PhysicalCopy` rows — a reachable state today: deleting a book's only
+  copy via `src/lib/copies.ts` never cascades to delete the parent `Book`)
+  only applies when the user has **explicitly** asked for a
+  physical-ownership view — i.e. `types` is defined and includes
+  `"physical"`, or `format` is set. It does NOT apply to a fully
+  unfiltered/default search (`types` and `format` both undefined) — there,
+  a copyless book should still surface bare (empty `physicalCopies`, no
+  physical badge), exactly as it did before this feature existed. The
+  distinction matters: "no filter" isn't the same claim as "explicitly
+  filtered to physical," and only the latter is strong enough that a
+  copyless book must not be reported as satisfying it. If `format` is
+  set, the guard narrows further to `copies: { some: { format } }`.
 - The existing text-query `OR` clause (title/author/isbn `contains`) is
   only added to the `where` when `query` is non-empty; it's no longer
   unconditional.
