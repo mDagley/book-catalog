@@ -155,11 +155,17 @@ describe("syncGoodreadsTbr", () => {
   // data -- this was a real, observed problem (confirmed live: a stray
   // "Still Here" fixture row from the second test below was left behind
   // in place of hundreds of real synced rows after a prior full-suite run).
-  let realDataSnapshot: Array<{ title: string; author: string | null; isbn: string | null }> = [];
+  let realDataSnapshot: Array<{
+    id: string;
+    title: string;
+    author: string | null;
+    isbn: string | null;
+    lastSyncedAt: Date;
+  }> = [];
 
   beforeEach(async () => {
     realDataSnapshot = await prisma.goodreadsTbrItem.findMany({
-      select: { title: true, author: true, isbn: true },
+      select: { id: true, title: true, author: true, isbn: true, lastSyncedAt: true },
     });
   });
 
