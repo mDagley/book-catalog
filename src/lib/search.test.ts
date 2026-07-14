@@ -182,8 +182,12 @@ describe("searchCatalog", () => {
   });
 
   it("excludes a book with zero physical copies from the physical type, even with no format set", async () => {
-    // Reachable in practice: deleteCopyData (src/lib/copies.ts) never cascades
-    // to delete the parent Book, so a copyless Book row is a real state.
+    // Not reachable through the app's own UI today -- deleteCopyData
+    // (src/lib/copies.ts) cascades to delete the parent Book once its last
+    // copy is gone, confirmed live. This directly creates the edge case
+    // instead (bypassing that cascade) purely to exercise the defensive
+    // guard, which is worth keeping in case that cascade ever changes or
+    // some other path creates a copyless Book.
     await prisma.book.create({ data: { title: "Test Search Copyless Book" } });
 
     const results = await searchCatalog({ types: ["physical"] });

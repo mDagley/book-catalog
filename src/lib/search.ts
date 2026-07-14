@@ -75,13 +75,17 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   // Only require an existing physical copy when the user actively asked for
   // a physical-ownership view (an explicit "physical" type filter, or a
   // format filter) -- NOT for a fully unfiltered/default search. A copyless
-  // Book row is a real, reachable state (deleteCopyData never cascades to
-  // delete the parent Book), and for a plain unfiltered query it should
-  // still surface bare (no physical badge, since its copies array is
-  // empty) exactly as it did before this feature existed -- it's only
-  // wrong to include it under an EXPLICIT physical-ownership filter, which
-  // is a stronger claim ("you own this physically") a copyless book can't
-  // back up.
+  // Book row isn't reachable through the app's own UI today (deleteCopyData,
+  // src/lib/copies.ts, cascades to delete the parent Book once its last
+  // copy is gone) -- but this guard is still worth keeping defensively
+  // (e.g. against a future change to that cascade, or any other path that
+  // might leave a Book with zero copies) since including such a row under
+  // an EXPLICIT physical-ownership filter would be a stronger claim ("you
+  // own this physically") than an empty copies array can back up. For a
+  // plain unfiltered query, a hypothetical copyless book should still
+  // surface bare (no physical badge) exactly as it did before this feature
+  // existed -- that's the only reason this guard is conditional rather than
+  // unconditional.
   const explicitPhysicalFilterActive =
     format !== undefined || (types !== undefined && types.includes("physical"));
 
