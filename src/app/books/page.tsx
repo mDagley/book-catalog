@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { parseFormatParam } from "@/lib/search";
+import { normalizeIsbn } from "@/lib/books";
 import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
 
 export default async function BooksPage({
@@ -12,6 +13,14 @@ export default async function BooksPage({
   const query = q?.trim() || "";
   const format = parseFormatParam(formatParam);
 
+  // Book.isbn is always stored normalized (digits + uppercase X only, no
+  // hyphens/spaces) -- mirror the same isbn-shaped guard + normalization
+  // searchCatalog (src/lib/search.ts) already uses, so a hyphenated ISBN
+  // typed here still matches, and a query with no digits/X never
+  // spuriously matches every row via an empty-string `contains`.
+  const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(query);
+  const normalizedIsbnQuery = query && looksLikeIsbnQuery ? normalizeIsbn(query) : "";
+
   const books = await prisma.book.findMany({
     where: {
       ...(query
@@ -19,7 +28,9 @@ export default async function BooksPage({
             OR: [
               { title: { contains: query, mode: "insensitive" } },
               { author: { contains: query, mode: "insensitive" } },
-              { isbn: { contains: query, mode: "insensitive" } },
+              ...(normalizedIsbnQuery
+                ? [{ isbn: { contains: normalizedIsbnQuery, mode: "insensitive" as const } }]
+                : []),
             ],
           }
         : {}),
