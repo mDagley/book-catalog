@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
+import { searchCatalog } from "@/lib/search";
 
 const originalFetch = global.fetch;
 
@@ -468,5 +469,43 @@ describe("syncAbsCache", () => {
       where: { title: "Test Abs Sync Still Here" },
     });
     expect(stillThere.absEbookItemIds).toEqual(["test-unreachable-1"]);
+  });
+});
+
+describe("syncAbsCache + searchCatalog integration", () => {
+  // The unit tests above cover syncAbsCache and searchCatalog in isolation;
+  // this proves the seam between them actually works end-to-end -- linking a
+  // physical book to a newly-synced ebook, then confirming search surfaces
+  // both ownership badges on the same result.
+  it("makes a physical book's newly-linked ebook show up in search with both badges", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Integration Physical And Ebook",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-integration-ebook-1",
+            media: { metadata: { title: "Test Abs Sync Integration Physical And Ebook" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const results = await searchCatalog({
+      query: "Test Abs Sync Integration Physical And Ebook",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].physicalCopies).toHaveLength(1);
+    expect(results[0].hasEbook).toBe(true);
+    expect(results[0].hasAudiobook).toBe(false);
   });
 });
