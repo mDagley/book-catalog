@@ -3,26 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { searchCatalog, parseFormatParam, parseTypesParam } from "@/lib/search";
 
 afterEach(async () => {
-  await prisma.physicalCopy.deleteMany({ where: { book: { title: { startsWith: "Test Search" } } } });
+  await prisma.physicalCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Search" } } },
+  });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Search" } } });
-  await prisma.absCacheItem.deleteMany({ where: { title: { startsWith: "Test Search" } } });
 });
 
 describe("searchCatalog", () => {
-  it("returns a merged result when the same book exists as a physical copy and an ABS ebook", async () => {
-    const book = await prisma.book.create({
+  it("returns a book that has both a physical copy and an ebook flag set", async () => {
+    await prisma.book.create({
       data: {
         title: "Test Search Mistborn",
         author: "Brandon Sanderson",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-mistborn-ebook"],
         copies: { create: { format: "PAPERBACK", publisher: "Tor", publishYear: 2010 } },
-      },
-    });
-    await prisma.absCacheItem.create({
-      data: {
-        absItemId: "search-test-mistborn-ebook",
-        title: "Test Search Mistborn",
-        author: "Brandon Sanderson",
-        mediaType: "EBOOK",
       },
     });
 
@@ -33,85 +28,6 @@ describe("searchCatalog", () => {
     expect(results[0].physicalCopies).toHaveLength(1);
     expect(results[0].hasEbook).toBe(true);
     expect(results[0].hasAudiobook).toBe(false);
-
-    await prisma.physicalCopy.deleteMany({ where: { bookId: book.id } });
-    await prisma.book.delete({ where: { id: book.id } });
-  });
-
-  it("does not merge two unrelated titles into one result", async () => {
-    await prisma.book.create({ data: { title: "Test Search Alpha" } });
-    await prisma.absCacheItem.create({
-      data: { absItemId: "search-test-beta", title: "Test Search Beta", mediaType: "EBOOK" },
-    });
-
-    const results = await searchCatalog({ query: "Test Search" });
-
-    expect(results.map((r) => r.title).sort()).toEqual(["Test Search Alpha", "Test Search Beta"]);
-  });
-
-  it("does not let two unmatched ABS items spuriously merge into each other", async () => {
-    // Regression test for the O(n^2) merge-loop bug: fuzzy-matching against
-    // a growing `results` array let a LATER unmatched absItem accidentally
-    // merge into an EARLIER unmatched absItem's standalone entry. Neither
-    // of these titles has any matching physical book -- "Test Search Twin
-    // Book: Special Edition" fuzzy-matches "Test Search Twin Book" (colon-
-    // prefix scoring in matching.ts scores this ~100), so under the old
-    // buggy code the second item would incorrectly attach its mediaType
-    // onto the first item's standalone entry instead of creating its own.
-    await prisma.absCacheItem.create({
-      data: {
-        absItemId: "search-test-twin-ebook",
-        title: "Test Search Twin Book",
-        mediaType: "EBOOK",
-      },
-    });
-    await prisma.absCacheItem.create({
-      data: {
-        absItemId: "search-test-twin-audiobook",
-        title: "Test Search Twin Book: Special Edition",
-        mediaType: "AUDIOBOOK",
-      },
-    });
-
-    const results = await searchCatalog({ query: "Test Search Twin" });
-
-    expect(results).toHaveLength(2);
-    const ebookEntry = results.find((r) => r.title === "Test Search Twin Book");
-    const audiobookEntry = results.find(
-      (r) => r.title === "Test Search Twin Book: Special Edition",
-    );
-    expect(ebookEntry?.hasEbook).toBe(true);
-    expect(ebookEntry?.hasAudiobook).toBe(false);
-    expect(audiobookEntry?.hasEbook).toBe(false);
-    expect(audiobookEntry?.hasAudiobook).toBe(true);
-  });
-
-  it("attaches the ebook badge to the best-scoring title match, not just the first match above threshold", async () => {
-    const weakBook = await prisma.book.create({
-      data: { title: "Test Search Mist", author: "Brandon Sanderson" },
-    });
-    const exactBook = await prisma.book.create({
-      data: { title: "Test Search Mistborn: The Final Empire", author: "Brandon Sanderson" },
-    });
-    await prisma.absCacheItem.create({
-      data: {
-        absItemId: "search-test-mistborn-best-match-ebook",
-        title: "Test Search Mistborn: The Final Empire",
-        author: "Brandon Sanderson",
-        mediaType: "EBOOK",
-      },
-    });
-
-    const results = await searchCatalog({ query: "Test Search" });
-
-    const weakResult = results.find((r) => r.title === "Test Search Mist");
-    const exactResult = results.find((r) => r.title === "Test Search Mistborn: The Final Empire");
-
-    expect(exactResult?.hasEbook).toBe(true);
-    expect(weakResult?.hasEbook).toBe(false);
-
-    await prisma.book.delete({ where: { id: weakBook.id } });
-    await prisma.book.delete({ where: { id: exactBook.id } });
   });
 
   it("returns an empty array for a query matching nothing", async () => {
@@ -150,11 +66,11 @@ describe("searchCatalog", () => {
         copies: { create: { format: "HARDCOVER" } },
       },
     });
-    await prisma.absCacheItem.create({
+    await prisma.book.create({
       data: {
-        absItemId: "search-test-ebook-only",
         title: "Test Search Ebook Only Book",
-        mediaType: "EBOOK",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-ebook-only"],
       },
     });
 
@@ -168,11 +84,11 @@ describe("searchCatalog", () => {
   });
 
   it("excludes audiobook-only results when types omits audiobook", async () => {
-    await prisma.absCacheItem.create({
+    await prisma.book.create({
       data: {
-        absItemId: "search-test-audiobook-only",
         title: "Test Search Audiobook Only Book",
-        mediaType: "AUDIOBOOK",
+        hasAudiobook: true,
+        absAudiobookItemIds: ["search-test-audiobook-only"],
       },
     });
 
@@ -181,13 +97,7 @@ describe("searchCatalog", () => {
     expect(results.map((r) => r.title)).not.toContain("Test Search Audiobook Only Book");
   });
 
-  it("excludes a book with zero physical copies from the physical type, even with no format set", async () => {
-    // Not reachable through the app's own UI today -- deleteCopyData
-    // (src/lib/copies.ts) cascades to delete the parent Book once its last
-    // copy is gone, confirmed live. This directly creates the edge case
-    // instead (bypassing that cascade) purely to exercise the defensive
-    // guard, which is worth keeping in case that cascade ever changes or
-    // some other path creates a copyless Book.
+  it("excludes a book with zero physical copies from the physical type filter", async () => {
     await prisma.book.create({ data: { title: "Test Search Copyless Book" } });
 
     const results = await searchCatalog({ types: ["physical"] });
@@ -196,12 +106,10 @@ describe("searchCatalog", () => {
   });
 
   it("narrows both inclusion and displayed copies when a format filter is active", async () => {
-    const book = await prisma.book.create({
+    await prisma.book.create({
       data: {
         title: "Test Search Multi Format Book",
-        copies: {
-          create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }],
-        },
+        copies: { create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }] },
       },
     });
 
@@ -211,13 +119,10 @@ describe("searchCatalog", () => {
     expect(match).toBeDefined();
     expect(match?.physicalCopies).toHaveLength(1);
     expect(match?.physicalCopies[0].format).toBe("PAPERBACK");
-
-    await prisma.physicalCopy.deleteMany({ where: { bookId: book.id } });
-    await prisma.book.delete({ where: { id: book.id } });
   });
 
   it("excludes a book with no copy in the requested format", async () => {
-    const book = await prisma.book.create({
+    await prisma.book.create({
       data: {
         title: "Test Search Hardcover Only Book",
         copies: { create: { format: "HARDCOVER" } },
@@ -227,9 +132,6 @@ describe("searchCatalog", () => {
     const results = await searchCatalog({ types: ["physical"], format: "PAPERBACK" });
 
     expect(results.map((r) => r.title)).not.toContain("Test Search Hardcover Only Book");
-
-    await prisma.physicalCopy.deleteMany({ where: { bookId: book.id } });
-    await prisma.book.delete({ where: { id: book.id } });
   });
 
   it("combines a text query with a type filter", async () => {
@@ -239,11 +141,11 @@ describe("searchCatalog", () => {
         copies: { create: { format: "HARDCOVER" } },
       },
     });
-    await prisma.absCacheItem.create({
+    await prisma.book.create({
       data: {
-        absItemId: "search-test-combo-ebook",
         title: "Test Search Combo Ebook",
-        mediaType: "EBOOK",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-combo-ebook"],
       },
     });
 
@@ -253,11 +155,11 @@ describe("searchCatalog", () => {
   });
 
   it("ignores a format filter when types excludes physical entirely", async () => {
-    await prisma.absCacheItem.create({
+    await prisma.book.create({
       data: {
-        absItemId: "search-test-format-noop-ebook",
         title: "Test Search Format Noop Ebook",
-        mediaType: "EBOOK",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-format-noop-ebook"],
       },
     });
 
@@ -267,13 +169,13 @@ describe("searchCatalog", () => {
   });
 
   it("applies a format filter on its own, with no types specified", async () => {
-    const paperback = await prisma.book.create({
+    await prisma.book.create({
       data: {
         title: "Test Search Standalone Format Paperback",
         copies: { create: { format: "PAPERBACK" } },
       },
     });
-    const hardcover = await prisma.book.create({
+    await prisma.book.create({
       data: {
         title: "Test Search Standalone Format Hardcover",
         copies: { create: { format: "HARDCOVER" } },
@@ -284,9 +186,6 @@ describe("searchCatalog", () => {
 
     expect(results.map((r) => r.title)).toContain("Test Search Standalone Format Paperback");
     expect(results.map((r) => r.title)).not.toContain("Test Search Standalone Format Hardcover");
-
-    await prisma.physicalCopy.deleteMany({ where: { bookId: { in: [paperback.id, hardcover.id] } } });
-    await prisma.book.deleteMany({ where: { id: { in: [paperback.id, hardcover.id] } } });
   });
 });
 
