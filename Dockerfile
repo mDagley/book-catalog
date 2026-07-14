@@ -11,7 +11,10 @@ COPY prisma.config.ts ./
 # DATABASE_URL isn't connected to at generate/build time, but prisma.config.ts
 # loads dotenv and reads it, so set a placeholder to avoid a missing-var warning.
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-RUN npm ci
+# Cache mount persists npm's download/extraction cache across builds (not
+# part of the final image), so repeat builds reuse already-fetched packages
+# instead of re-downloading the whole dependency tree from the registry.
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # ---- builder: build the Next.js app ----
 FROM node:24-alpine AS builder
@@ -41,7 +44,7 @@ COPY prisma.config.ts ./
 # DATABASE_URL isn't connected to at generate time, but prisma.config.ts
 # loads dotenv and reads it, so set a placeholder to avoid a missing-var warning.
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
 # ---- runner: production image (production-only node_modules) ----
 FROM node:24-alpine AS runner
