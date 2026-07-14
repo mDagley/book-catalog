@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { searchCatalog } from "@/lib/search";
+import { searchCatalog, parseFormatParam, parseTypesParam } from "@/lib/search";
 
 afterEach(async () => {
   await prisma.physicalCopy.deleteMany({ where: { book: { title: { startsWith: "Test Search" } } } });
@@ -26,7 +26,7 @@ describe("searchCatalog", () => {
       },
     });
 
-    const results = await searchCatalog("Mistborn");
+    const results = await searchCatalog({ query: "Mistborn" });
 
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe("Test Search Mistborn");
@@ -44,23 +44,15 @@ describe("searchCatalog", () => {
       data: { absItemId: "search-test-beta", title: "Test Search Beta", mediaType: "EBOOK" },
     });
 
-    const results = await searchCatalog("Test Search");
+    const results = await searchCatalog({ query: "Test Search" });
 
     expect(results.map((r) => r.title).sort()).toEqual(["Test Search Alpha", "Test Search Beta"]);
   });
 
   it("attaches the ebook badge to the best-scoring title match, not just the first match above threshold", async () => {
-    // "Test Search Mist" is a weak fuzzy match against the ABS item below
-    // (~89 via titleMatchScore) -- it clears DEFAULT_MATCH_THRESHOLD (85) but
-    // is not the true match. It is created FIRST so it sorts first under the
-    // `orderBy: { id: "asc" }` added to the Book query.
     const weakBook = await prisma.book.create({
       data: { title: "Test Search Mist", author: "Brandon Sanderson" },
     });
-    // "Test Search Mistborn: The Final Empire" is the true, exact-title match
-    // for the ABS item (100 via titleMatchScore). Created SECOND, so under
-    // the old `results.find(isTitleMatch(...))` first-match logic it would
-    // never be reached once the weaker match above threshold was found first.
     const exactBook = await prisma.book.create({
       data: { title: "Test Search Mistborn: The Final Empire", author: "Brandon Sanderson" },
     });
@@ -73,7 +65,7 @@ describe("searchCatalog", () => {
       },
     });
 
-    const results = await searchCatalog("Test Search");
+    const results = await searchCatalog({ query: "Test Search" });
 
     const weakResult = results.find((r) => r.title === "Test Search Mist");
     const exactResult = results.find((r) => r.title === "Test Search Mistborn: The Final Empire");
@@ -86,7 +78,7 @@ describe("searchCatalog", () => {
   });
 
   it("returns an empty array for a query matching nothing", async () => {
-    const results = await searchCatalog("Test Search Nonexistent Zzzzz");
+    const results = await searchCatalog({ query: "Test Search Nonexistent Zzzzz" });
     expect(results).toEqual([]);
   });
 
@@ -95,21 +87,169 @@ describe("searchCatalog", () => {
       data: { title: "Test Search Isbn Book", isbn: "9780765326355" },
     });
 
-    const results = await searchCatalog("978-0-7653-2635-5");
+    const results = await searchCatalog({ query: "978-0-7653-2635-5" });
 
     expect(results.map((r) => r.title)).toContain("Test Search Isbn Book");
   });
 
   it("does not match unrelated books via the ISBN clause when the query has no digits", async () => {
-    // Regression guard: normalizeIsbn() on a query with no digits/X produces
-    // "", and Prisma's `contains: ""` matches every row. Without a guard
-    // excluding the ISBN clause in that case, this query would return every
-    // book in the table instead of nothing.
     await prisma.book.create({ data: { title: "Test Search Unrelated Alpha" } });
     await prisma.book.create({ data: { title: "Test Search Unrelated Beta" } });
 
-    const results = await searchCatalog("Nonexistent Query With No Digits At All");
+    const results = await searchCatalog({ query: "Nonexistent Query With No Digits At All" });
 
     expect(results).toEqual([]);
+  });
+
+  it("returns an empty array when there is no query and no filters", async () => {
+    const results = await searchCatalog({});
+    expect(results).toEqual([]);
+  });
+
+  it("supports standalone browse by ownership type with no query text", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Search Physical Only Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-ebook-only",
+        title: "Test Search Ebook Only Book",
+        mediaType: "EBOOK",
+      },
+    });
+
+    const ebookResults = await searchCatalog({ types: ["ebook"] });
+    expect(ebookResults.map((r) => r.title)).toContain("Test Search Ebook Only Book");
+    expect(ebookResults.map((r) => r.title)).not.toContain("Test Search Physical Only Book");
+
+    const physicalResults = await searchCatalog({ types: ["physical"] });
+    expect(physicalResults.map((r) => r.title)).toContain("Test Search Physical Only Book");
+    expect(physicalResults.map((r) => r.title)).not.toContain("Test Search Ebook Only Book");
+  });
+
+  it("excludes audiobook-only results when types omits audiobook", async () => {
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-audiobook-only",
+        title: "Test Search Audiobook Only Book",
+        mediaType: "AUDIOBOOK",
+      },
+    });
+
+    const results = await searchCatalog({ types: ["ebook"] });
+
+    expect(results.map((r) => r.title)).not.toContain("Test Search Audiobook Only Book");
+  });
+
+  it("excludes a book with zero physical copies from the physical type, even with no format set", async () => {
+    // Reachable in practice: deleteCopyData (src/lib/copies.ts) never cascades
+    // to delete the parent Book, so a copyless Book row is a real state.
+    await prisma.book.create({ data: { title: "Test Search Copyless Book" } });
+
+    const results = await searchCatalog({ types: ["physical"] });
+
+    expect(results.map((r) => r.title)).not.toContain("Test Search Copyless Book");
+  });
+
+  it("narrows both inclusion and displayed copies when a format filter is active", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Search Multi Format Book",
+        copies: {
+          create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }],
+        },
+      },
+    });
+
+    const results = await searchCatalog({ types: ["physical"], format: "PAPERBACK" });
+
+    const match = results.find((r) => r.title === "Test Search Multi Format Book");
+    expect(match).toBeDefined();
+    expect(match?.physicalCopies).toHaveLength(1);
+    expect(match?.physicalCopies[0].format).toBe("PAPERBACK");
+
+    await prisma.physicalCopy.deleteMany({ where: { bookId: book.id } });
+    await prisma.book.delete({ where: { id: book.id } });
+  });
+
+  it("excludes a book with no copy in the requested format", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Search Hardcover Only Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    const results = await searchCatalog({ types: ["physical"], format: "PAPERBACK" });
+
+    expect(results.map((r) => r.title)).not.toContain("Test Search Hardcover Only Book");
+
+    await prisma.physicalCopy.deleteMany({ where: { bookId: book.id } });
+    await prisma.book.delete({ where: { id: book.id } });
+  });
+
+  it("combines a text query with a type filter", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Search Combo Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    await prisma.absCacheItem.create({
+      data: {
+        absItemId: "search-test-combo-ebook",
+        title: "Test Search Combo Ebook",
+        mediaType: "EBOOK",
+      },
+    });
+
+    const results = await searchCatalog({ query: "Test Search Combo", types: ["physical"] });
+
+    expect(results.map((r) => r.title)).toEqual(["Test Search Combo Book"]);
+  });
+});
+
+describe("parseFormatParam", () => {
+  it("returns undefined for an undefined or empty value", () => {
+    expect(parseFormatParam(undefined)).toBeUndefined();
+    expect(parseFormatParam("")).toBeUndefined();
+  });
+
+  it("returns the value for a valid Format", () => {
+    expect(parseFormatParam("PAPERBACK")).toBe("PAPERBACK");
+  });
+
+  it("returns undefined for an unrecognized value", () => {
+    expect(parseFormatParam("NOT_A_FORMAT")).toBeUndefined();
+  });
+});
+
+describe("parseTypesParam", () => {
+  it("returns undefined for an undefined or empty value", () => {
+    expect(parseTypesParam(undefined)).toBeUndefined();
+    expect(parseTypesParam("")).toBeUndefined();
+  });
+
+  it("parses a single value", () => {
+    expect(parseTypesParam("ebook")).toEqual(["ebook"]);
+  });
+
+  it("parses a comma-separated value (manually-typed/bookmarked URL)", () => {
+    expect(parseTypesParam("ebook,audiobook")).toEqual(["ebook", "audiobook"]);
+  });
+
+  it("parses an array value (repeated same-name checkboxes)", () => {
+    expect(parseTypesParam(["ebook", "physical"])).toEqual(["ebook", "physical"]);
+  });
+
+  it("drops unrecognized tokens and keeps valid ones", () => {
+    expect(parseTypesParam("ebook,bogus,physical")).toEqual(["ebook", "physical"]);
+  });
+
+  it("returns undefined when every token is unrecognized", () => {
+    expect(parseTypesParam("bogus,alsobogus")).toBeUndefined();
   });
 });
