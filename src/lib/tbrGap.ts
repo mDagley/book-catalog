@@ -12,13 +12,12 @@ export interface TbrGapItem {
 export const TBR_GAP_CACHE_TAG = "tbr-gap";
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
-  const [tbrItems, books, absItems] = await Promise.all([
+  const [tbrItems, books] = await Promise.all([
     prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, author: true } }),
     prisma.book.findMany({ select: { title: true } }),
-    prisma.absCacheItem.findMany({ select: { title: true } }),
   ]);
 
-  const ownedTitles = [...books.map((b) => b.title), ...absItems.map((a) => a.title)];
+  const ownedTitles = books.map((b) => b.title);
 
   return tbrItems
     .filter((tbr) => !ownedTitles.some((owned) => isTitleMatch(tbr.title, owned)))
