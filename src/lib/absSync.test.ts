@@ -361,7 +361,17 @@ describe("syncAbsCache", () => {
       },
     });
 
-    mockLibrariesAndItems({ "ebook-lib": [] }, [{ id: "ebook-lib", name: "Panda EBooks" }]);
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-remove-other",
+            media: { metadata: { title: "Test Abs Sync Unrelated Survivor" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
 
     await syncAbsCache("https://abs.example.com", "token");
 
@@ -381,13 +391,64 @@ describe("syncAbsCache", () => {
       },
     });
 
-    mockLibrariesAndItems({ "ebook-lib": [] }, [{ id: "ebook-lib", name: "Panda EBooks" }]);
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-keep-other",
+            media: { metadata: { title: "Test Abs Sync Unrelated Survivor Two" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
 
     await syncAbsCache("https://abs.example.com", "token");
 
     const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
     expect(updated.hasEbook).toBe(false);
     expect(updated.absEbookItemIds).toEqual([]);
+  });
+
+  it("does not remove any links when a sync fetches zero items across every matching library", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Survives Empty Sync",
+        absEbookItemIds: ["test-empty-guard-1"],
+        hasEbook: true,
+      },
+    });
+
+    mockLibrariesAndItems({ "ebook-lib": [] }, [{ id: "ebook-lib", name: "Panda EBooks" }]);
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 0 });
+    const unchanged = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Survives Empty Sync" },
+    });
+    expect(unchanged.hasEbook).toBe(true);
+    expect(unchanged.absEbookItemIds).toEqual(["test-empty-guard-1"]);
+  });
+
+  it("does not remove any links when no ABS library matches the ebook/audiobook name substrings", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Survives No Matching Library",
+        absAudiobookItemIds: ["test-no-library-1"],
+        hasAudiobook: true,
+      },
+    });
+
+    mockLibrariesAndItems({}, [{ id: "other-lib", name: "Someone Else's Comics" }]);
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 0 });
+    const unchanged = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Survives No Matching Library" },
+    });
+    expect(unchanged.hasAudiobook).toBe(true);
   });
 
   it("throws if the ABS instance is unreachable, without touching existing Book rows", async () => {

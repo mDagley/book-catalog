@@ -249,6 +249,17 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
     }
   }
 
+  // A sync that fetched zero items at all (no matching library found, or
+  // every matching library came back empty) is treated as suspicious rather
+  // than "the user deleted their whole ABS ebook/audiobook collection" --
+  // running the removal pass here would strip every currently-linked Book's
+  // arrays and delete every ebook/audiobook-only Book in one shot, which is
+  // a much likelier sign of a misconfigured library name or a transient ABS
+  // hiccup than a real mass deletion. Skip straight to a no-op instead.
+  if (pendingItems.length === 0) {
+    return { synced: 0 };
+  }
+
   const books: SyncBook[] = await prisma.book.findMany({ select: SYNC_BOOK_SELECT });
 
   const seenItemIds = new Set<string>();
