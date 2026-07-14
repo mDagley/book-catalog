@@ -107,11 +107,6 @@ const SYNC_BOOK_SELECT = {
   absAudiobookItemIds: true,
 } as const;
 
-function isLinked(book: SyncBook, mediaType: AbsMediaType, absItemId: string): boolean {
-  const ids = mediaType === "EBOOK" ? book.absEbookItemIds : book.absAudiobookItemIds;
-  return ids.includes(absItemId);
-}
-
 function findBestTitleMatch(books: SyncBook[], title: string): SyncBook | null {
   let best: SyncBook | null = null;
   let bestScore = -1;
@@ -282,14 +277,19 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
 
   const books: SyncBook[] = await prisma.book.findMany({ select: SYNC_BOOK_SELECT });
 
+  const linkedEbookIds = new Set<string>(books.flatMap((b) => b.absEbookItemIds));
+  const linkedAudiobookIds = new Set<string>(books.flatMap((b) => b.absAudiobookItemIds));
+  const linkedIdSetFor = (mediaType: AbsMediaType): Set<string> =>
+    mediaType === "EBOOK" ? linkedEbookIds : linkedAudiobookIds;
+
   const seenItemIds = new Set<string>();
   let synced = 0;
 
   for (const { item, mediaType } of pendingItems) {
     seenItemIds.add(item.absItemId);
 
-    const alreadyLinked = books.some((book) => isLinked(book, mediaType, item.absItemId));
-    if (alreadyLinked) {
+    const linkedIds = linkedIdSetFor(mediaType);
+    if (linkedIds.has(item.absItemId)) {
       synced++;
       continue;
     }
@@ -302,6 +302,7 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
       const created = await createBookForItem(item, mediaType);
       books.push(created);
     }
+    linkedIds.add(item.absItemId);
 
     synced++;
   }

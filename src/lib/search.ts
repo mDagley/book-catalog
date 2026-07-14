@@ -73,11 +73,14 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   // This ownership OR is only applied as a required filter when the caller
   // explicitly asked for an ownership-narrowed view (a `types` filter and/or
   // a `format` filter). A plain, unfiltered text/ISBN search should still
-  // surface any matching Book regardless of ownership -- e.g. a freshly
-  // catalogued book with no copies and no ebook/audiobook flags yet -- the
-  // same as the pre-unification default browse, which never required
-  // ownership absent an explicit filter (see the old `explicitPhysicalFilterActive`
-  // guard this replaces and generalizes).
+  // surface any matching Book regardless of ownership. This isn't reachable
+  // through the app's own UI today -- every Book-creation path
+  // (createBookWithCopyData, and absSync.ts's link/create logic) always sets
+  // at least one ownership signal -- but the guard is kept defensively
+  // against a future change to those invariants, the same as the
+  // pre-unification default browse, which never required ownership absent an
+  // explicit filter (see the old `explicitPhysicalFilterActive` guard this
+  // replaces and generalizes).
   const explicitOwnershipFilterActive = types !== undefined || format !== undefined;
   const filters: Prisma.BookWhereInput[] = [];
   if (explicitOwnershipFilterActive) {
@@ -103,7 +106,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 
   const books = await prisma.book.findMany({
     where: { AND: filters },
-    include: { copies: { where: includePhysical && format ? { format } : undefined } },
+    include: { copies: { where: format ? { format } : undefined } },
     orderBy: { id: "asc" },
   });
 
@@ -111,12 +114,21 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     title: book.title,
     author: book.author,
     bookId: book.id,
-    physicalCopies: book.copies.map((copy) => ({
-      id: copy.id,
-      format: copy.format,
-      publisher: copy.publisher,
-      publishYear: copy.publishYear,
-    })),
+    // Forced empty (not just unfiltered) when physical isn't part of the
+    // requested view -- `types` controls which ownership badges/details
+    // show, so an ebook/audiobook-only view should never surface "Physical
+    // (...)" badges even for a book that also happens to be owned
+    // physically. Matches the pre-unification dual-query implementation's
+    // own behavior in this scenario (a book found only via its ebook/
+    // audiobook side never carried real physical-copy data either).
+    physicalCopies: includePhysical
+      ? book.copies.map((copy) => ({
+          id: copy.id,
+          format: copy.format,
+          publisher: copy.publisher,
+          publishYear: copy.publishYear,
+        }))
+      : [],
     hasEbook: book.hasEbook,
     hasAudiobook: book.hasAudiobook,
   }));
