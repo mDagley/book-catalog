@@ -129,4 +129,20 @@ describe("deleteCopyData", () => {
     const idx = createdBookIds.indexOf(bookId);
     if (idx !== -1) createdBookIds.splice(idx, 1);
   });
+
+  it("keeps the book when its last copy is removed but it still has an ebook link", async () => {
+    const bookId = await createTestBook();
+    await prisma.book.update({
+      where: { id: bookId },
+      data: { hasEbook: true, absEbookItemIds: ["test-copies-ebook-link"] },
+    });
+    const [onlyCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
+
+    const result = await deleteCopyData(onlyCopy.id);
+
+    expect(result).toEqual({ bookId, bookDeleted: false });
+    const book = await prisma.book.findUnique({ where: { id: bookId } });
+    expect(book).not.toBeNull();
+    expect(book?.hasEbook).toBe(true);
+  });
 });
