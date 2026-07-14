@@ -168,6 +168,24 @@ describe("searchCatalog", () => {
     expect(results.map((r) => r.title)).toContain("Test Search Format Noop Ebook");
   });
 
+  it("shows all of a book's physical copies unfiltered when physical isn't part of the requested view", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Search Ebook With Multiple Formats",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-multi-format-ebook"],
+        copies: { create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }] },
+      },
+    });
+
+    const results = await searchCatalog({ types: ["ebook"], format: "PAPERBACK" });
+
+    const match = results.find((r) => r.title === "Test Search Ebook With Multiple Formats");
+    expect(match).toBeDefined();
+    expect(match?.hasEbook).toBe(true);
+    expect(match?.physicalCopies).toHaveLength(2);
+  });
+
   it("applies a format filter on its own, with no types specified", async () => {
     await prisma.book.create({
       data: {

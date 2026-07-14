@@ -262,7 +262,13 @@ describe("syncAbsCache", () => {
         "ebook-lib": [
           {
             id: "test-new-1",
-            media: { metadata: { title: "Test Abs Sync Brand New Book", authorName: "New Author" } },
+            media: {
+              metadata: {
+                title: "Test Abs Sync Brand New Book",
+                authorName: "New Author",
+                isbn: "9780765326355",
+              },
+            },
           },
         ],
       },
@@ -277,6 +283,7 @@ describe("syncAbsCache", () => {
     expect(book.hasEbook).toBe(true);
     expect(book.absEbookItemIds).toEqual(["test-new-1"]);
     expect(book.author).toBe("New Author");
+    expect(book.isbn).toBe("9780765326355");
     const copies = await prisma.physicalCopy.count({ where: { bookId: book.id } });
     expect(copies).toBe(0);
   });

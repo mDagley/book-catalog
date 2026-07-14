@@ -103,7 +103,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 
   const books = await prisma.book.findMany({
     where: { AND: filters },
-    include: { copies: { where: format ? { format } : undefined } },
+    include: { copies: { where: includePhysical && format ? { format } : undefined } },
     orderBy: { id: "asc" },
   });
 

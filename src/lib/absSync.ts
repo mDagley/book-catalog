@@ -159,6 +159,7 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
       data: {
         title: item.title,
         author: item.author,
+        isbn: item.isbn,
         absEbookItemIds: [item.absItemId],
         hasEbook: true,
         lastAbsSyncedAt: new Date(),
@@ -170,6 +171,7 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
     data: {
       title: item.title,
       author: item.author,
+      isbn: item.isbn,
       absAudiobookItemIds: [item.absItemId],
       hasAudiobook: true,
       lastAbsSyncedAt: new Date(),
