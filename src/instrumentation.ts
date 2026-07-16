@@ -7,6 +7,7 @@ export async function register() {
   const cron = await import("node-cron");
   const { syncAbsCache } = await import("@/lib/absSync");
   const { syncGoodreadsTbr } = await import("@/lib/goodreadsSync");
+  const { syncOwnedPhysicalBooks } = await import("@/lib/ownedPhysicalSync");
 
   // Every 30 minutes — within the design spec's "every 30-60 minutes" range.
   cron.schedule(
@@ -41,6 +42,13 @@ export async function register() {
         console.log(`Scheduled Goodreads sync: ${result.synced} items synced`);
       } catch (error) {
         console.error("Scheduled Goodreads sync failed:", error);
+      }
+      try {
+        const shelfName = process.env.GOODREADS_OWNED_PHYSICAL_SHELF || undefined;
+        const result = await syncOwnedPhysicalBooks(userId, shelfName);
+        console.log(`Scheduled owned-physical sync: ${result.synced} items synced`);
+      } catch (error) {
+        console.error("Scheduled owned-physical sync failed:", error);
       }
     },
     { noOverlap: true },
