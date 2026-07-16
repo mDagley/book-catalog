@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
+import { titleMatchScore, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 
 export interface BookFormState {
   error?: string;
@@ -93,6 +94,33 @@ export async function createBookWithCopyData(
 
   if (!title) {
     return { error: "Title is required" };
+  }
+
+  // Fuzzy title match fallback: a physical edition's ISBN almost always
+  // differs from an ebook/audiobook edition's ISBN, so the ISBN check above
+  // alone can't find a book you already own digitally when scanning in a
+  // physical copy of the same title -- without this, every such scan would
+  // create a duplicate Book row instead of attaching to the existing one.
+  // Mirrors the same fuzzy-match-then-attach pattern absSync.ts/
+  // goodreadsSync.ts already use. As with those, the matched book's title/
+  // author/isbn are never overwritten here, both to protect a good existing
+  // title from a differently-formatted scan input, and to limit the damage
+  // of a false-positive fuzzy match.
+  const candidates = await prisma.book.findMany({ select: { id: true, title: true } });
+  let titleMatch: { id: string; title: string } | null = null;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const score = titleMatchScore(candidate.title, title);
+    if (score >= DEFAULT_MATCH_THRESHOLD && score > bestScore) {
+      titleMatch = candidate;
+      bestScore = score;
+    }
+  }
+  if (titleMatch) {
+    await prisma.physicalCopy.create({
+      data: { ...copyData, bookId: titleMatch.id },
+    });
+    return { bookId: titleMatch.id };
   }
 
   const book = await prisma.book.create({

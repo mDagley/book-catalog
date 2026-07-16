@@ -270,9 +270,79 @@ describe("createBookWithCopyData", () => {
     expect(book.copies).toHaveLength(2);
   });
 
+  it("attaches a new copy to an existing book with a matching title but a different/absent ISBN, instead of creating a duplicate", async () => {
+    // Reproduces the reported bug: an ebook/audiobook-only Book (no physical
+    // copies, no isbn set -- e.g. from an ABS sync) already exists for this
+    // title. Scanning a physical edition almost always carries a DIFFERENT
+    // ISBN than the ebook's, so the ISBN check alone can never find this
+    // existing row -- a title fuzzy-match fallback is required.
+    const existing = await prisma.book.create({
+      data: {
+        title: "Test Books Existing Ebook Only Title",
+        hasEbook: true,
+        absEbookItemIds: ["existing-ebook-item"],
+      },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Test Books Existing Ebook Only Title",
+      author: "",
+      isbn: "9780765326355",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // Registered for cleanup regardless of outcome: if the fix regresses and
+    // this creates a new (duplicate) row instead of reusing `existing.id`,
+    // that row must still be cleaned up by afterEach rather than leaking.
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).toBe(existing.id);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: existing.id },
+      include: { copies: true },
+    });
+    expect(book.copies).toHaveLength(1);
+    expect(book.copies[0].format).toBe("HARDCOVER");
+    expect(book.hasEbook).toBe(true);
+    expect(book.title).toBe("Test Books Existing Ebook Only Title"); // not overwritten by the scan's input
+    expect(book.isbn).toBeNull(); // not backfilled from the scan -- matched by title, not by ISBN
+  });
+
+  it("creates a new book when no existing title is a close enough fuzzy match", async () => {
+    const existing = await prisma.book.create({
+      data: { title: "Completely Unrelated Existing Book" },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Totally Different New Book Title Zzz",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).not.toBe(existing.id);
+  });
+
   it("creates a new book when the ISBN doesn't match any existing book", async () => {
+    // Deliberately dissimilar titles (unlike the fuzzy-match tests above,
+    // which need close titles): "No Match Book One"/"Two" would themselves
+    // fuzzy-match each other above threshold, which would defeat the point
+    // of this test.
     const first = await createBookWithCopyData({
-      title: "No Match Book One",
+      title: "Distinctly Different First Book",
       author: "",
       isbn: "1111111111111",
       format: "HARDCOVER",
@@ -285,7 +355,7 @@ describe("createBookWithCopyData", () => {
     createdBookIds.push(first.bookId);
 
     const second = await createBookWithCopyData({
-      title: "No Match Book Two",
+      title: "Wholly Unrelated Second Volume",
       author: "",
       isbn: "2222222222222",
       format: "HARDCOVER",
