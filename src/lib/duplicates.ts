@@ -96,13 +96,14 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
     .map((books) => ({ books }));
 }
 
-// Moves every PhysicalCopy from `mergeIds` onto `keepId`, unions their
-// ebook/audiobook ownership signals onto `keepId`, then deletes the merged
-// rows. Never touches `keepId`'s own title/author/isbn -- same
-// never-overwrite safeguard createBookWithCopyData's fuzzy-match fallback
-// uses, so a human confirming the wrong pair doesn't also corrupt the
-// surviving row's identity, only its ownership data (which is reversible by
-// re-running a sync, unlike title/author/isbn).
+// Moves every PhysicalCopy/EbookCopy/AudiobookCopy from `mergeIds` onto
+// `keepId`, recomputes hasEbook/hasAudiobook from the post-reassignment row
+// counts, then deletes the merged rows. Never touches `keepId`'s own
+// title/author/isbn -- same never-overwrite safeguard
+// createBookWithCopyData's fuzzy-match fallback uses, so a human confirming
+// the wrong pair doesn't also corrupt the surviving row's identity, only
+// its ownership data (which is reversible by re-running a sync, unlike
+// title/author/isbn).
 export async function mergeBooksData(
   keepId: string,
   rawMergeIds: string[],
@@ -127,32 +128,36 @@ export async function mergeBooksData(
     return { error: "One or more books to merge were not found" };
   }
 
-  const mergedEbookIds = new Set(keep.absEbookItemIds);
-  const mergedAudiobookIds = new Set(keep.absAudiobookItemIds);
-  for (const book of toMerge) {
-    for (const id of book.absEbookItemIds) mergedEbookIds.add(id);
-    for (const id of book.absAudiobookItemIds) mergedAudiobookIds.add(id);
-  }
+  // Counted before the transaction (rather than inside it) since the array
+  // form of $transaction can't read intermediate results of its own
+  // operations -- this app is single-user, so nothing else concurrently
+  // modifies these specific rows in the interim.
+  const [keepEbookCount, keepAudiobookCount, mergeEbookCount, mergeAudiobookCount] =
+    await Promise.all([
+      prisma.ebookCopy.count({ where: { bookId: keepId } }),
+      prisma.audiobookCopy.count({ where: { bookId: keepId } }),
+      prisma.ebookCopy.count({ where: { bookId: { in: mergeIds } } }),
+      prisma.audiobookCopy.count({ where: { bookId: { in: mergeIds } } }),
+    ]);
+  const hasEbook = keepEbookCount + mergeEbookCount > 0;
+  const hasAudiobook = keepAudiobookCount + mergeAudiobookCount > 0;
 
   await prisma.$transaction([
     prisma.physicalCopy.updateMany({
       where: { bookId: { in: mergeIds } },
       data: { bookId: keepId },
     }),
+    prisma.ebookCopy.updateMany({
+      where: { bookId: { in: mergeIds } },
+      data: { bookId: keepId },
+    }),
+    prisma.audiobookCopy.updateMany({
+      where: { bookId: { in: mergeIds } },
+      data: { bookId: keepId },
+    }),
     prisma.book.update({
       where: { id: keepId },
-      data: {
-        absEbookItemIds: Array.from(mergedEbookIds),
-        absAudiobookItemIds: Array.from(mergedAudiobookIds),
-        // Derived from the merged arrays themselves, not OR'd from the
-        // input rows' own flags -- matches the invariant absSync.ts's
-        // stale-link removal already relies on (hasEbook/hasAudiobook
-        // always reflects "is the corresponding array non-empty"), so this
-        // stays correct even if an input row's stored flag was ever
-        // inconsistent with its own arrays.
-        hasEbook: mergedEbookIds.size > 0,
-        hasAudiobook: mergedAudiobookIds.size > 0,
-      },
+      data: { hasEbook, hasAudiobook },
     }),
     prisma.book.deleteMany({ where: { id: { in: mergeIds } } }),
   ]);
