@@ -157,6 +157,28 @@ describe("syncOwnedPhysicalBooks", () => {
     expect(updated.copies).toHaveLength(1); // still there
   });
 
+  it("re-checks the database for a concurrently-added copy before creating a placeholder", async () => {
+    const existing = await prisma.book.create({
+      data: { title: "Test Owned Physical Race Book" },
+    });
+
+    mockShelfFetch(buildRssPage([{ title: "Test Owned Physical Race Book" }]));
+
+    // Simulate another process (e.g. the cron sync overlapping a manual
+    // refresh) adding a physical copy between the initial candidate read
+    // (which reported 0 copies) and this sync's create step.
+    const countSpy = vi.spyOn(prisma.physicalCopy, "count").mockResolvedValueOnce(1);
+    const createSpy = vi.spyOn(prisma.physicalCopy, "create");
+
+    await syncOwnedPhysicalBooks("1993628", "owned-physical");
+
+    expect(createSpy).not.toHaveBeenCalled();
+    countSpy.mockRestore();
+    createSpy.mockRestore();
+
+    await prisma.physicalCopy.deleteMany({ where: { bookId: existing.id } });
+  });
+
   it("defaults to the owned-physical shelf when no shelf name is given", async () => {
     const fetchMock = vi
       .fn()

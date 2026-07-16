@@ -54,6 +54,15 @@ async function applyShelfItem(
 
   if (match) {
     if (match.copiesCount > 0) return;
+    // match.copiesCount is a snapshot from the initial candidate read, so it
+    // can go stale if another sync run (cron vs. manual refresh) adds a copy
+    // to the same book while this loop is in progress. Re-check right before
+    // creating to avoid a duplicate placeholder copy.
+    const currentCount = await prisma.physicalCopy.count({ where: { bookId: match.id } });
+    if (currentCount > 0) {
+      match.copiesCount = currentCount;
+      return;
+    }
     await prisma.physicalCopy.create({ data: { bookId: match.id, format: "OTHER" } });
     match.copiesCount += 1;
     return;
