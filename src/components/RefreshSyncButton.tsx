@@ -13,10 +13,13 @@ export function RefreshSyncButton() {
     setError(null);
 
     try {
-      const [absResponse, goodreadsResponse] = await Promise.all([
-        fetch("/api/sync/abs", { method: "POST" }),
-        fetch("/api/sync/goodreads", { method: "POST" }),
-      ]);
+      // Sequential, not Promise.all -- running both syncs concurrently
+      // starves the production VPS's small connection pool badly enough to
+      // fail one sync's transaction outright (Prisma P2028), since both
+      // syncs make many sequential DB round-trips. See instrumentation.ts's
+      // matching cron-stagger fix for the same underlying contention.
+      const absResponse = await fetch("/api/sync/abs", { method: "POST" });
+      const goodreadsResponse = await fetch("/api/sync/goodreads", { method: "POST" });
 
       // An expired session makes middleware redirect these requests to
       // /login, which returns the login page's HTML with a 200 status.

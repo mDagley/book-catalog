@@ -29,8 +29,14 @@ export async function register() {
     { noOverlap: true },
   );
 
+  // Offset 5 minutes from the ABS sync's "*/30 * * * *" -- both jobs used to
+  // share the identical expression, so they fired at the exact same instant
+  // every 30 minutes. On the resource-constrained production VPS, running
+  // both syncs' many sequential DB round-trips concurrently starved the
+  // connection pool badly enough that this transaction failed with Prisma
+  // P2028 ("Unable to start a transaction in the given time").
   cron.schedule(
-    "*/30 * * * *",
+    "5,35 * * * *",
     async () => {
       const userId = process.env.GOODREADS_USER_ID;
       if (!userId) {

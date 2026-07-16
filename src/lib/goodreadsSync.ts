@@ -212,16 +212,26 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
     ),
   ) as Record<GoodreadsShelf, GoodreadsBook[]>;
 
-  await prisma.$transaction([
-    prisma.goodreadsTbrItem.deleteMany(),
-    prisma.goodreadsTbrItem.createMany({
-      data: shelfItems["to-read"].map((book) => ({
-        title: book.title,
-        author: book.author,
-        isbn: book.isbn,
-      })),
-    }),
-  ]);
+  // Explicit maxWait/timeout (Prisma defaults: 2s/5s) as defense-in-depth on
+  // the resource-constrained production VPS -- even with the ABS and
+  // Goodreads syncs no longer scheduled/triggered concurrently (see
+  // instrumentation.ts and RefreshSyncButton.tsx), incidental concurrent
+  // load (e.g. a user browsing while a sync runs) could still starve this
+  // transaction's connection acquisition. This failed in production with
+  // Prisma P2028 ("Unable to start a transaction in the given time").
+  await prisma.$transaction(
+    [
+      prisma.goodreadsTbrItem.deleteMany(),
+      prisma.goodreadsTbrItem.createMany({
+        data: shelfItems["to-read"].map((book) => ({
+          title: book.title,
+          author: book.author,
+          isbn: book.isbn,
+        })),
+      }),
+    ],
+    { maxWait: 10000, timeout: 20000 },
+  );
 
   const books: StatusSyncBook[] = await prisma.book.findMany({ select: STATUS_SYNC_BOOK_SELECT });
   for (const shelf of STATUS_SYNC_SHELVES) {
