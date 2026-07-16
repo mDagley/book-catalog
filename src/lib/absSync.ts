@@ -202,11 +202,17 @@ async function removeStaleAbsLinks(
 ): Promise<void> {
   const affectedBookIds = new Set<string>();
 
+  // Filtered in-process against the Set rather than passed as a `notIn`
+  // filter -- a large library sync can put tens of thousands of IDs into
+  // `seenItemIds` (MAX_PAGES * PAGE_LIMIT = 50,000 per media type), and a
+  // `NOT IN` over that many values risks slow query planning / large
+  // parameter payloads. A plain `findMany` of existing copies plus an
+  // in-memory Set lookup avoids ever putting the full seen-set into SQL.
   if (syncedMediaTypes.has("EBOOK")) {
-    const staleEbookCopies = await prisma.ebookCopy.findMany({
-      where: { absItemId: { notIn: Array.from(seenItemIds) } },
-      select: { id: true, bookId: true },
+    const allEbookCopies = await prisma.ebookCopy.findMany({
+      select: { id: true, bookId: true, absItemId: true },
     });
+    const staleEbookCopies = allEbookCopies.filter((c) => !seenItemIds.has(c.absItemId));
     if (staleEbookCopies.length > 0) {
       await prisma.ebookCopy.deleteMany({
         where: { id: { in: staleEbookCopies.map((c) => c.id) } },
@@ -216,10 +222,10 @@ async function removeStaleAbsLinks(
   }
 
   if (syncedMediaTypes.has("AUDIOBOOK")) {
-    const staleAudiobookCopies = await prisma.audiobookCopy.findMany({
-      where: { absItemId: { notIn: Array.from(seenItemIds) } },
-      select: { id: true, bookId: true },
+    const allAudiobookCopies = await prisma.audiobookCopy.findMany({
+      select: { id: true, bookId: true, absItemId: true },
     });
+    const staleAudiobookCopies = allAudiobookCopies.filter((c) => !seenItemIds.has(c.absItemId));
     if (staleAudiobookCopies.length > 0) {
       await prisma.audiobookCopy.deleteMany({
         where: { id: { in: staleAudiobookCopies.map((c) => c.id) } },
