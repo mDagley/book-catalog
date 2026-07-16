@@ -101,11 +101,11 @@ export async function createBookWithCopyData(
   // alone can't find a book you already own digitally when scanning in a
   // physical copy of the same title -- without this, every such scan would
   // create a duplicate Book row instead of attaching to the existing one.
-  // Mirrors the same fuzzy-match-then-attach pattern absSync.ts/
-  // goodreadsSync.ts already use. As with those, the matched book's title/
-  // author/isbn are never overwritten here, both to protect a good existing
-  // title from a differently-formatted scan input, and to limit the damage
-  // of a false-positive fuzzy match.
+  // Mirrors the same fuzzy-match-then-attach pattern absSync.ts already uses
+  // for ABS items. As with that, the matched book's title/author/isbn are
+  // never overwritten here, both to protect a good existing title from a
+  // differently-formatted scan input, and to limit the damage of a
+  // false-positive fuzzy match.
   const candidates = await prisma.book.findMany({ select: { id: true, title: true } });
   let titleMatch: { id: string; title: string } | null = null;
   let bestScore = -1;
