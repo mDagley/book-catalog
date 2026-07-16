@@ -26,10 +26,15 @@ function normalizeIsbn(raw: unknown): string | null {
 // Goodreads' per-shelf RSS feed includes <user_rating>, an integer 0-5 where
 // 0 means "not rated" -- confirmed against a real feed during design (see
 // docs/superpowers/specs/2026-07-15-read-status-ratings-design.md). Mapped
-// to null (not 0) to match Book.rating's own null-means-unrated convention.
+// to null (not 0) to match Book.rating's own null-means-unrated convention,
+// and constrained to the same 1-5 range Book.rating expects -- anything
+// outside it (feed corruption, an unexpected future format change) is
+// treated as null rather than persisted, since a stray out-of-range value
+// would otherwise propagate into the DB and could break UI code that
+// assumes a 1-5 range (e.g. ratingStars()'s repeat-count math).
 function parseRating(raw: unknown): number | null {
   const n = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : 0;
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return Number.isFinite(n) && n >= 1 && n <= 5 ? n : null;
 }
 
 export async function fetchGoodreadsPage(
@@ -183,7 +188,12 @@ async function applyShelfToBooks(
       data,
       select: STATUS_SYNC_BOOK_SELECT,
     });
-    books[books.findIndex((b) => b.id === updated.id)] = updated;
+    // `match` is the actual element findBestTitleMatch found inside `books`
+    // (not a copy), so mutating it in place keeps the in-memory list
+    // consistent with the DB for later shelf passes -- no re-scan needed,
+    // and no risk of a stale `findIndex` miss silently no-op'ing (assigning
+    // to `books[-1]`) the way a second array search could.
+    Object.assign(match, updated);
   }
 }
 

@@ -17,6 +17,10 @@ export const STATUS_FILTER_OPTIONS = [
 
 export const RATING_OPTIONS = [1, 2, 3, 4, 5] as const;
 
+// Clamped to 0-5 so a rating outside that range (unexpected DB data, or a
+// future sync/parser bug) can't make `.repeat()` throw a RangeError on a
+// negative count and take down the whole page render over one bad row.
 export function ratingStars(rating: number): string {
-  return "★".repeat(rating) + "☆".repeat(5 - rating);
+  const clamped = Math.max(0, Math.min(5, Math.round(rating)));
+  return "★".repeat(clamped) + "☆".repeat(5 - clamped);
 }

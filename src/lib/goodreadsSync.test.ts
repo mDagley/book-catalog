@@ -104,6 +104,31 @@ describe("fetchGoodreadsPage", () => {
     ]);
   });
 
+  it("treats an out-of-range user_rating as null instead of persisting a bad value", async () => {
+    const OUT_OF_RANGE_RATING_RSS_PAGE = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Out Of Range Rating Book</title>
+      <author_name>Some Author</author_name>
+      <isbn></isbn>
+      <isbn13></isbn13>
+      <user_rating>9</user_rating>
+    </item>
+  </channel>
+</rss>`;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => OUT_OF_RANGE_RATING_RSS_PAGE,
+    } as Response);
+
+    const books = await fetchGoodreadsPage("1993628", "to-read", 1);
+
+    expect(books).toEqual([
+      { title: "Out Of Range Rating Book", author: "Some Author", isbn: null, rating: null },
+    ]);
+  });
+
   it("returns an empty array for a shelf page with no items", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
