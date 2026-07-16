@@ -1,6 +1,17 @@
 import Link from "next/link";
-import { searchCatalog, parseFormatParam, parseTypesParam, type OwnershipType } from "@/lib/search";
+import {
+  searchCatalog,
+  parseFormatParam,
+  parseTypesParam,
+  parseStatusParam,
+  type OwnershipType,
+} from "@/lib/search";
 import { FORMAT_OPTIONS, FORMAT_LABELS } from "@/components/CopyFormFields";
+import {
+  READ_STATUS_LABELS,
+  STATUS_FILTER_OPTIONS,
+  ratingStars,
+} from "@/components/ReadingProgressFields";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
 
 export const dynamic = "force-dynamic";
@@ -14,15 +25,21 @@ const OWNERSHIP_TYPE_OPTIONS: { value: OwnershipType; label: string }[] = [
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; types?: string | string[]; format?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    types?: string | string[];
+    format?: string;
+    status?: string | string[];
+  }>;
 }) {
-  const { q, types: typesParam, format: formatParam } = await searchParams;
+  const { q, types: typesParam, format: formatParam, status: statusParam } = await searchParams;
   const query = q?.trim() ?? "";
   const types = parseTypesParam(typesParam);
   const format = parseFormatParam(formatParam);
+  const status = parseStatusParam(statusParam);
 
-  const results = await searchCatalog({ query, types, format });
-  const hasActiveFilters = Boolean(query || types || format);
+  const results = await searchCatalog({ query, types, format, status });
+  const hasActiveFilters = Boolean(query || types || format || status);
 
   return (
     <main className="mx-auto max-w-2xl p-4">
@@ -47,6 +64,17 @@ export default async function HomePage({
                 name="types"
                 value={opt.value}
                 defaultChecked={types?.includes(opt.value) ?? false}
+              />
+              {opt.label}
+            </label>
+          ))}
+          {STATUS_FILTER_OPTIONS.map((opt) => (
+            <label key={opt.value} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                name="status"
+                value={opt.value}
+                defaultChecked={status?.includes(opt.value) ?? false}
               />
               {opt.label}
             </label>
@@ -102,6 +130,19 @@ export default async function HomePage({
                 )}
                 {result.hasAudiobook && (
                   <span className="rounded bg-gray-100 px-2 py-0.5">Audiobook ✓</span>
+                )}
+                {result.readStatus && (
+                  <span className="rounded bg-gray-100 px-2 py-0.5">
+                    {READ_STATUS_LABELS[result.readStatus]}
+                  </span>
+                )}
+                {result.rating !== null && (
+                  <span
+                    className="rounded bg-gray-100 px-2 py-0.5"
+                    aria-label={`Rated ${result.rating} out of 5`}
+                  >
+                    {ratingStars(result.rating)}
+                  </span>
                 )}
               </div>
               {result.bookId && (
