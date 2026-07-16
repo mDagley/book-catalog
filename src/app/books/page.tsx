@@ -49,6 +49,12 @@ export default async function BooksPage({
         </Link>
       </div>
 
+      <div className="mb-4 text-sm">
+        <Link href="/books/duplicates" className="underline">
+          Check for duplicate books
+        </Link>
+      </div>
+
       <form action="/books" method="get" className="mb-4 space-y-2">
         <input
           type="text"
