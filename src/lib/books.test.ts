@@ -270,9 +270,109 @@ describe("createBookWithCopyData", () => {
     expect(book.copies).toHaveLength(2);
   });
 
+  it("attaches a new copy to an existing book with a matching title but a different/absent ISBN, instead of creating a duplicate", async () => {
+    // Reproduces the reported bug: an ebook/audiobook-only Book (no physical
+    // copies, no isbn set -- e.g. from an ABS sync) already exists for this
+    // title. Scanning a physical edition almost always carries a DIFFERENT
+    // ISBN than the ebook's, so the ISBN check alone can never find this
+    // existing row -- a title fuzzy-match fallback is required.
+    const existing = await prisma.book.create({
+      data: {
+        title: "Test Books Existing Ebook Only Title",
+        hasEbook: true,
+        absEbookItemIds: ["existing-ebook-item"],
+      },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Test Books Existing Ebook Only Title",
+      author: "",
+      isbn: "9780765326355",
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // Registered for cleanup regardless of outcome: if the fix regresses and
+    // this creates a new (duplicate) row instead of reusing `existing.id`,
+    // that row must still be cleaned up by afterEach rather than leaking.
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).toBe(existing.id);
+
+    const book = await prisma.book.findUniqueOrThrow({
+      where: { id: existing.id },
+      include: { copies: true },
+    });
+    expect(book.copies).toHaveLength(1);
+    expect(book.copies[0].format).toBe("HARDCOVER");
+    expect(book.hasEbook).toBe(true);
+    expect(book.title).toBe("Test Books Existing Ebook Only Title"); // not overwritten by the scan's input
+    expect(book.isbn).toBeNull(); // not backfilled from the scan -- matched by title, not by ISBN
+  });
+
+  it("does not fuzzy-match a purely physical existing book, even with an identical title", async () => {
+    // The fuzzy-match fallback exists specifically to reattach a scanned
+    // physical copy to an already-owned ebook/audiobook entry -- it must not
+    // also merge two unrelated physical-only books together just because
+    // their titles happen to match (e.g. two different real books that
+    // happen to share a common title).
+    const existing = await prisma.book.create({
+      data: {
+        title: "Test Books Purely Physical Existing Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Test Books Purely Physical Existing Book",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).not.toBe(existing.id);
+  });
+
+  it("creates a new book when no existing title is a close enough fuzzy match", async () => {
+    const existing = await prisma.book.create({
+      data: { title: "Completely Unrelated Existing Book" },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Totally Different New Book Title Zzz",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).not.toBe(existing.id);
+  });
+
   it("creates a new book when the ISBN doesn't match any existing book", async () => {
+    // Deliberately dissimilar titles (unlike the fuzzy-match tests above,
+    // which need close titles): "No Match Book One"/"Two" would themselves
+    // fuzzy-match each other above threshold, which would defeat the point
+    // of this test.
     const first = await createBookWithCopyData({
-      title: "No Match Book One",
+      title: "Distinctly Different First Book",
       author: "",
       isbn: "1111111111111",
       format: "HARDCOVER",
@@ -285,7 +385,7 @@ describe("createBookWithCopyData", () => {
     createdBookIds.push(first.bookId);
 
     const second = await createBookWithCopyData({
-      title: "No Match Book Two",
+      title: "Wholly Unrelated Second Volume",
       author: "",
       isbn: "2222222222222",
       format: "HARDCOVER",
@@ -468,6 +568,52 @@ describe("saveCoverFromUrl", () => {
     );
   });
 
+  it("follows a two-hop redirect from Open Library's covers CDN through archive.org's storage and saves the image", async () => {
+    // Confirmed against the real API: covers.openlibrary.org 302-redirects
+    // some (not all) covers to archive.org's bulk cover-zip storage, which
+    // itself 302-redirects again to a specific numbered storage shard
+    // (ia600703.us.archive.org -- the shard varies by item/availability,
+    // hence the endsWith(".archive.org") check rather than a fixed list).
+    // Both hops are real, legitimate Open Library redirect targets, not an
+    // attacker trying to redirect off the allowlist.
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        type: "basic",
+        headers: new Headers({
+          location: "https://archive.org/download/m_covers_0008/m_covers_0008_23.zip/0008231856-M.jpg",
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        type: "basic",
+        headers: new Headers({
+          location:
+            "https://ia600703.us.archive.org/view_archive.php?archive=/4/items/m_covers_0008/m_covers_0008_23.zip&file=0008231856-M.jpg",
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        type: "basic",
+        headers: new Headers({ "content-type": "image/png" }),
+        arrayBuffer: async () => Buffer.from(pngBase64, "base64"),
+      } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/8231856-M.jpg");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    savedPaths.push(result.coverImagePath);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("rejects a redirect that points off the allowlist, without fetching it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -483,7 +629,21 @@ describe("saveCoverFromUrl", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a second redirect rather than following an unbounded chain", async () => {
+  it("rejects a redirect to a lookalike host that merely ends with 'archive.org' as a suffix of an unrelated domain", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "basic",
+      headers: new Headers({ location: "https://evil-archive.org.attacker.com/steal.jpg" }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Unsupported cover image host" });
+  });
+
+  it("rejects a redirect chain that exceeds the hop limit rather than following it unbounded", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 302,
@@ -495,7 +655,9 @@ describe("saveCoverFromUrl", () => {
     const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
 
     expect(result).toEqual({ error: "Failed to fetch cover image" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // MAX_COVER_FETCH_REDIRECTS (3) allowed hops + the initial request = 4
+    // fetch calls before giving up.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("strips content-type parameters before matching against supported image types", async () => {

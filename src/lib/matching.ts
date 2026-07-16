@@ -183,9 +183,10 @@ export function isTitleMatch(
 
 // Scans `candidates` for the best fuzzy title match to `title`, returning
 // null if nothing scores at or above `threshold`. Generic over any shape
-// that carries a `title` string, so both absSync.ts's Book-shaped rows and
-// goodreadsSync.ts's Book-shaped rows can share one implementation instead
-// of each maintaining a near-identical private copy.
+// that carries a `title` string, so every fuzzy-match-then-attach-or-create
+// call site (absSync.ts, goodreadsSync.ts, createBookWithCopyData) shares
+// one implementation instead of each maintaining a near-identical private
+// copy.
 export function findBestTitleMatch<T extends { title: string }>(
   candidates: T[],
   title: string,

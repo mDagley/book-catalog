@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
+import { findBestTitleMatch } from "@/lib/matching";
 
 export interface BookFormState {
   error?: string;
@@ -95,6 +96,40 @@ export async function createBookWithCopyData(
     return { error: "Title is required" };
   }
 
+  // Fuzzy title match fallback: a physical edition's ISBN almost always
+  // differs from an ebook/audiobook edition's ISBN, so the ISBN check above
+  // alone can't find a book you already own digitally when scanning in a
+  // physical copy of the same title -- without this, every such scan would
+  // create a duplicate Book row instead of attaching to the existing one.
+  // Mirrors the same fuzzy-match-then-attach pattern absSync.ts already uses
+  // for ABS items (both now share findBestTitleMatch from matching.ts). As
+  // with that, the matched book's title/author/isbn are never overwritten
+  // here, both to protect a good existing title from a differently-formatted
+  // scan input, and to limit the damage of a false-positive fuzzy match.
+  //
+  // Candidates are restricted to books already known to be owned digitally
+  // (hasEbook/hasAudiobook) -- this fallback exists specifically to reattach
+  // a scanned physical copy to an already-owned ebook/audiobook entry, not
+  // to deduplicate physical-only books against each other. Narrowing the
+  // pool this way both avoids scanning every Book row on every no-ISBN-match
+  // creation and reduces the odds of a false-positive fuzzy match wrongly
+  // merging two unrelated physical-only books that happen to share a
+  // similar title. `orderBy: createdAt asc` matches the ISBN branch above:
+  // if more than one candidate ties for best score, the oldest wins
+  // deterministically rather than depending on unspecified DB row order.
+  const candidates = await prisma.book.findMany({
+    where: { OR: [{ hasEbook: true }, { hasAudiobook: true }] },
+    select: { id: true, title: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const titleMatch = findBestTitleMatch(candidates, title);
+  if (titleMatch) {
+    await prisma.physicalCopy.create({
+      data: { ...copyData, bookId: titleMatch.id },
+    });
+    return { bookId: titleMatch.id };
+  }
+
   const book = await prisma.book.create({
     data: {
       title,
@@ -111,20 +146,41 @@ export async function createBookWithCopyData(
 // from when selectedCoverSource is "url" (see src/lib/isbnLookup.ts). Since the
 // form field is just a plain hidden input, a request submitted outside the normal
 // UI (devtools/curl) could otherwise point the server at an arbitrary URL, so we
-// restrict fetches to Open Library's covers CDN to avoid SSRF.
-const ALLOWED_COVER_HOSTS = ["covers.openlibrary.org"];
+// restrict fetches to Open Library's covers CDN (and its known redirect targets
+// below) to avoid SSRF.
+//
+// archive.org (and its subdomains) are included because covers.openlibrary.org's
+// own redirects land there for a real subset of covers -- confirmed against the
+// live API, a cover can 302 twice: covers.openlibrary.org -> archive.org's bulk
+// cover-zip storage (e.g. https://archive.org/download/m_covers_0008/....zip/....jpg)
+// -> a specific numbered storage shard (e.g. https://ia600703.us.archive.org/...).
+// That shard subdomain varies per item/availability, so a fixed hostname list
+// isn't possible -- any *.archive.org subdomain must be allowed, not just the
+// bare domain. Without this, picking the Open Library cover for exactly those
+// books failed with "Unsupported cover image host" even though nothing was
+// actually wrong.
+function isAllowedCoverHost(hostname: string): boolean {
+  return (
+    hostname === "covers.openlibrary.org" ||
+    hostname === "archive.org" ||
+    hostname.endsWith(".archive.org")
+  );
+}
 
-// Open Library's covers CDN occasionally redirects a given size/path to a
-// different URL (e.g. a specific edge shard) — reported in practice as a
-// "failed to fetch cover image" error even for real, working ISBNs. Follow
-// up to one hop, re-validating the destination against the same allowlist
-// each time, rather than flatly rejecting any redirect.
-const MAX_COVER_FETCH_REDIRECTS = 1;
+// Confirmed against the live API: a real cover can need two redirect hops
+// (covers.openlibrary.org -> archive.org/download/... -> a numbered
+// ia*.us.archive.org shard) before reaching the actual image. One hop
+// wasn't enough -- reported in practice as "Unsupported cover image host"
+// (rejected at the second hop, before this fix widened the host check) even
+// for real, working ISBNs. Follow up to three hops, re-validating the
+// destination against the same allowlist each time, rather than flatly
+// rejecting a redirect chain past the first hop.
+const MAX_COVER_FETCH_REDIRECTS = 3;
 
 function isAllowedCoverUrl(url: string): boolean {
   try {
     const { hostname, protocol } = new URL(url);
-    return protocol === "https:" && ALLOWED_COVER_HOSTS.includes(hostname);
+    return protocol === "https:" && isAllowedCoverHost(hostname);
   } catch {
     return false;
   }
