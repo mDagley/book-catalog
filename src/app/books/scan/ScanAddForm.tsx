@@ -10,6 +10,15 @@ import { CopyFormFields } from "@/components/CopyFormFields";
 
 const initialState: ScanFormState = {};
 
+// Kept as a small local check (not imported from src/lib/books.ts's
+// normalizeIsbn) since that module pulls in the Prisma client at the top
+// level, which can't run in the browser -- same reasoning
+// /api/isbn-lookup/route.ts's own local normalizeIsbn copy documents.
+function looksLikeValidIsbn(raw: string): boolean {
+  const normalized = raw.replace(/[^0-9Xx]/g, "").toUpperCase();
+  return /^(\d{13}|\d{9}[\dX])$/.test(normalized);
+}
+
 interface LookupData {
   title: string;
   author: string;
@@ -22,6 +31,7 @@ interface ScanBookFormProps {
   isbn: string;
   capturedImage: string | null;
   lookup: LookupData | null;
+  lookupNotice: string | null;
   onRetake: () => void;
 }
 
@@ -32,12 +42,21 @@ interface ScanBookFormProps {
 // component; `state.values` (returned by the action on error) covers that
 // case by re-supplying whatever was last submitted as each field's
 // defaultValue.
-function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormProps) {
+function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: ScanBookFormProps) {
   const [state, formAction, isPending] = useActionState(createBookFromScan, initialState);
 
   return (
     <form action={formAction} className="space-y-4">
-      <input type="hidden" name="isbn" value={isbn} />
+      {/*
+        Only submitted when the scanned text actually looks like an ISBN --
+        /api/isbn-lookup already rejects anything else for the lookup step,
+        but the raw scanned text was still being submitted here regardless,
+        risking a malformed non-ISBN value (e.g. a misread barcode) getting
+        persisted as this book's isbn on save. An empty value here means the
+        server stores null, matching a manually-entered book with no ISBN.
+      */}
+      <input type="hidden" name="isbn" value={looksLikeValidIsbn(isbn) ? isbn : ""} />
+      {lookupNotice && <p className="text-sm text-gray-600">{lookupNotice}</p>}
       <div>
         <label htmlFor="title" className="block text-sm font-medium">
           Title
@@ -111,25 +130,56 @@ export function ScanAddForm() {
   const [showCamera, setShowCamera] = useState(true);
   const [lookup, setLookup] = useState<LookupData | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookupNotice, setLookupNotice] = useState<string | null>(null);
 
   async function handleDecode(decodedIsbn: string) {
     setIsbn(decodedIsbn);
     setCapturedImage(null);
     setShowCamera(true);
     setIsLookingUp(true);
+    setLookupNotice(null);
 
     try {
       const response = await fetch(`/api/isbn-lookup?isbn=${encodeURIComponent(decodedIsbn)}`);
       const data = await response.json();
+
+      // The route returns a non-2xx status (e.g. 400 when the decoded
+      // barcode text doesn't look like an ISBN -- some books carry a second,
+      // non-ISBN barcode, like a UPC price/retail code, that the scanner can
+      // pick up instead) with an `{ error }` body, not a lookup result. Never
+      // treat that body's (nonexistent) title/author/etc. fields as real
+      // data -- doing so previously produced a silently blank form with no
+      // indication anything had gone wrong.
+      if (!response.ok) {
+        setLookup({ title: "", author: "", publisher: "", publishYear: "", coverUrl: null });
+        // Prefer the route's own { error } message when present -- it's the
+        // more accurate, single source of truth (see /api/isbn-lookup) and
+        // stays correct if that route's validation message ever changes.
+        setLookupNotice(
+          typeof data.error === "string" && data.error
+            ? data.error
+            : "Couldn't recognize that barcode as an ISBN. Enter the details below manually, or try scanning again.",
+        );
+        return;
+      }
+
       setLookup({
         title: data.title ?? "",
         author: data.author ?? "",
         publisher: data.publisher ?? "",
         publishYear: data.publishYear?.toString() ?? "",
-        coverUrl: data.coverUrl,
+        coverUrl: data.coverUrl ?? null,
       });
+      // Only when EVERY field came back empty -- lookupIsbn's real-world
+      // shape means a genuinely partial result (e.g. title present but no
+      // cover) is plausible, and "No details found" would be inaccurate
+      // (and confusing) if some fields actually did populate.
+      if (!data.title && !data.author && !data.publisher && !data.publishYear && !data.coverUrl) {
+        setLookupNotice("No details found for this ISBN. Enter them below manually.");
+      }
     } catch {
       setLookup({ title: "", author: "", publisher: "", publishYear: "", coverUrl: null });
+      setLookupNotice("Couldn't reach the lookup service. Enter the details below manually.");
     } finally {
       setIsLookingUp(false);
     }
@@ -157,6 +207,7 @@ export function ScanAddForm() {
         isbn={isbn}
         capturedImage={capturedImage}
         lookup={lookup}
+        lookupNotice={lookupNotice}
         onRetake={() => setShowCamera(true)}
       />
       {/*
