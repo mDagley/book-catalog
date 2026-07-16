@@ -10,6 +10,9 @@ afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
     where: { book: { title: { startsWith: "Test Owned Physical" } } },
   });
+  await prisma.ebookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Owned Physical" } } },
+  });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Owned Physical" } } });
 });
 
@@ -66,7 +69,11 @@ describe("syncOwnedPhysicalBooks", () => {
 
   it("attaches a placeholder copy to an existing book matched by fuzzy title when no ISBN matches", async () => {
     const existing = await prisma.book.create({
-      data: { title: "Test Owned Physical Fuzzy Match Book", hasEbook: true, absEbookItemIds: ["owned-test-ebook"] },
+      data: {
+        title: "Test Owned Physical Fuzzy Match Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "owned-test-ebook" } },
+      },
     });
 
     mockShelfFetch(buildRssPage([{ title: "Test Owned Physical Fuzzy Match Book" }]));
