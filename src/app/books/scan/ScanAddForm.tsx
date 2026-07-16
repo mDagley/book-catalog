@@ -10,6 +10,15 @@ import { CopyFormFields } from "@/components/CopyFormFields";
 
 const initialState: ScanFormState = {};
 
+// Kept as a small local check (not imported from src/lib/books.ts's
+// normalizeIsbn) since that module pulls in the Prisma client at the top
+// level, which can't run in the browser -- same reasoning
+// /api/isbn-lookup/route.ts's own local normalizeIsbn copy documents.
+function looksLikeValidIsbn(raw: string): boolean {
+  const normalized = raw.replace(/[^0-9Xx]/g, "").toUpperCase();
+  return /^(\d{13}|\d{9}[\dX])$/.test(normalized);
+}
+
 interface LookupData {
   title: string;
   author: string;
@@ -38,7 +47,15 @@ function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: S
 
   return (
     <form action={formAction} className="space-y-4">
-      <input type="hidden" name="isbn" value={isbn} />
+      {/*
+        Only submitted when the scanned text actually looks like an ISBN --
+        /api/isbn-lookup already rejects anything else for the lookup step,
+        but the raw scanned text was still being submitted here regardless,
+        risking a malformed non-ISBN value (e.g. a misread barcode) getting
+        persisted as this book's isbn on save. An empty value here means the
+        server stores null, matching a manually-entered book with no ISBN.
+      */}
+      <input type="hidden" name="isbn" value={looksLikeValidIsbn(isbn) ? isbn : ""} />
       {lookupNotice && <p className="text-sm text-gray-600">{lookupNotice}</p>}
       <div>
         <label htmlFor="title" className="block text-sm font-medium">
