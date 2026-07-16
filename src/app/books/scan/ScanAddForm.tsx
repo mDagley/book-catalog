@@ -146,9 +146,13 @@ export function ScanAddForm() {
         author: data.author ?? "",
         publisher: data.publisher ?? "",
         publishYear: data.publishYear?.toString() ?? "",
-        coverUrl: data.coverUrl,
+        coverUrl: data.coverUrl ?? null,
       });
-      if (!data.title) {
+      // Only when EVERY field came back empty -- lookupIsbn's real-world
+      // shape means a genuinely partial result (e.g. title present but no
+      // cover) is plausible, and "No details found" would be inaccurate
+      // (and confusing) if some fields actually did populate.
+      if (!data.title && !data.author && !data.publisher && !data.publishYear && !data.coverUrl) {
         setLookupNotice("No details found for this ISBN. Enter them below manually.");
       }
     } catch {
