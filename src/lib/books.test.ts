@@ -538,6 +538,52 @@ describe("saveCoverFromUrl", () => {
     );
   });
 
+  it("follows a two-hop redirect from Open Library's covers CDN through archive.org's storage and saves the image", async () => {
+    // Confirmed against the real API: covers.openlibrary.org 302-redirects
+    // some (not all) covers to archive.org's bulk cover-zip storage, which
+    // itself 302-redirects again to a specific numbered storage shard
+    // (ia600703.us.archive.org -- the shard varies by item/availability,
+    // hence the endsWith(".archive.org") check rather than a fixed list).
+    // Both hops are real, legitimate Open Library redirect targets, not an
+    // attacker trying to redirect off the allowlist.
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        type: "basic",
+        headers: new Headers({
+          location: "https://archive.org/download/m_covers_0008/m_covers_0008_23.zip/0008231856-M.jpg",
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        type: "basic",
+        headers: new Headers({
+          location:
+            "https://ia600703.us.archive.org/view_archive.php?archive=/4/items/m_covers_0008/m_covers_0008_23.zip&file=0008231856-M.jpg",
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        type: "basic",
+        headers: new Headers({ "content-type": "image/png" }),
+        arrayBuffer: async () => Buffer.from(pngBase64, "base64"),
+      } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/8231856-M.jpg");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    savedPaths.push(result.coverImagePath);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("rejects a redirect that points off the allowlist, without fetching it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -553,7 +599,21 @@ describe("saveCoverFromUrl", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a second redirect rather than following an unbounded chain", async () => {
+  it("rejects a redirect to a lookalike host that merely ends with 'archive.org' as a suffix of an unrelated domain", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "basic",
+      headers: new Headers({ location: "https://evil-archive.org.attacker.com/steal.jpg" }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Unsupported cover image host" });
+  });
+
+  it("rejects a redirect chain that exceeds the hop limit rather than following it unbounded", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 302,
@@ -565,7 +625,9 @@ describe("saveCoverFromUrl", () => {
     const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
 
     expect(result).toEqual({ error: "Failed to fetch cover image" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // MAX_COVER_FETCH_REDIRECTS (3) allowed hops + the initial request = 4
+    // fetch calls before giving up.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("strips content-type parameters before matching against supported image types", async () => {

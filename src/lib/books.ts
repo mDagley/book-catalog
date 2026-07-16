@@ -139,20 +139,41 @@ export async function createBookWithCopyData(
 // from when selectedCoverSource is "url" (see src/lib/isbnLookup.ts). Since the
 // form field is just a plain hidden input, a request submitted outside the normal
 // UI (devtools/curl) could otherwise point the server at an arbitrary URL, so we
-// restrict fetches to Open Library's covers CDN to avoid SSRF.
-const ALLOWED_COVER_HOSTS = ["covers.openlibrary.org"];
+// restrict fetches to Open Library's covers CDN (and its known redirect targets
+// below) to avoid SSRF.
+//
+// archive.org (and its subdomains) are included because covers.openlibrary.org's
+// own redirects land there for a real subset of covers -- confirmed against the
+// live API, a cover can 302 twice: covers.openlibrary.org -> archive.org's bulk
+// cover-zip storage (e.g. https://archive.org/download/m_covers_0008/....zip/....jpg)
+// -> a specific numbered storage shard (e.g. https://ia600703.us.archive.org/...).
+// That shard subdomain varies per item/availability, so a fixed hostname list
+// isn't possible -- any *.archive.org subdomain must be allowed, not just the
+// bare domain. Without this, picking the Open Library cover for exactly those
+// books failed with "Unsupported cover image host" even though nothing was
+// actually wrong.
+function isAllowedCoverHost(hostname: string): boolean {
+  return (
+    hostname === "covers.openlibrary.org" ||
+    hostname === "archive.org" ||
+    hostname.endsWith(".archive.org")
+  );
+}
 
-// Open Library's covers CDN occasionally redirects a given size/path to a
-// different URL (e.g. a specific edge shard) — reported in practice as a
-// "failed to fetch cover image" error even for real, working ISBNs. Follow
-// up to one hop, re-validating the destination against the same allowlist
-// each time, rather than flatly rejecting any redirect.
-const MAX_COVER_FETCH_REDIRECTS = 1;
+// Confirmed against the live API: a real cover can need two redirect hops
+// (covers.openlibrary.org -> archive.org/download/... -> a numbered
+// ia*.us.archive.org shard) before reaching the actual image. One hop
+// wasn't enough -- reported in practice as "Unsupported cover image host"
+// (rejected at the second hop, before this fix widened the host check) even
+// for real, working ISBNs. Follow up to three hops, re-validating the
+// destination against the same allowlist each time, rather than flatly
+// rejecting a redirect chain past the first hop.
+const MAX_COVER_FETCH_REDIRECTS = 3;
 
 function isAllowedCoverUrl(url: string): boolean {
   try {
     const { hostname, protocol } = new URL(url);
-    return protocol === "https:" && ALLOWED_COVER_HOSTS.includes(hostname);
+    return protocol === "https:" && isAllowedCoverHost(hostname);
   } catch {
     return false;
   }
