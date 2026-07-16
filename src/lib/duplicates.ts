@@ -66,8 +66,19 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
 
   for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
-      if (titleMatchScore(candidates[i].title, candidates[j].title) >= DEFAULT_MATCH_THRESHOLD) {
-        union(candidates[i].id, candidates[j].id);
+      const a = candidates[i];
+      const b = candidates[j];
+      // Skip the (expensive) fuzzy score entirely when NEITHER side is
+      // digitally owned -- this tool exists specifically for the
+      // physical-scan-duplicates-an-ebook/audiobook-row bug, not for
+      // deduplicating physical-only books against each other, so a
+      // physical-vs-physical pair is never a candidate group regardless of
+      // title similarity. This is the same restriction
+      // createBookWithCopyData's fuzzy-match fallback applies to its own
+      // candidate pool, for the same false-positive-risk reason.
+      if (!a.hasEbook && !a.hasAudiobook && !b.hasEbook && !b.hasAudiobook) continue;
+      if (titleMatchScore(a.title, b.title) >= DEFAULT_MATCH_THRESHOLD) {
+        union(a.id, b.id);
       }
     }
   }
@@ -118,13 +129,9 @@ export async function mergeBooksData(
 
   const mergedEbookIds = new Set(keep.absEbookItemIds);
   const mergedAudiobookIds = new Set(keep.absAudiobookItemIds);
-  let hasEbook = keep.hasEbook;
-  let hasAudiobook = keep.hasAudiobook;
   for (const book of toMerge) {
     for (const id of book.absEbookItemIds) mergedEbookIds.add(id);
     for (const id of book.absAudiobookItemIds) mergedAudiobookIds.add(id);
-    hasEbook = hasEbook || book.hasEbook;
-    hasAudiobook = hasAudiobook || book.hasAudiobook;
   }
 
   await prisma.$transaction([
@@ -137,8 +144,14 @@ export async function mergeBooksData(
       data: {
         absEbookItemIds: Array.from(mergedEbookIds),
         absAudiobookItemIds: Array.from(mergedAudiobookIds),
-        hasEbook,
-        hasAudiobook,
+        // Derived from the merged arrays themselves, not OR'd from the
+        // input rows' own flags -- matches the invariant absSync.ts's
+        // stale-link removal already relies on (hasEbook/hasAudiobook
+        // always reflects "is the corresponding array non-empty"), so this
+        // stays correct even if an input row's stored flag was ever
+        // inconsistent with its own arrays.
+        hasEbook: mergedEbookIds.size > 0,
+        hasAudiobook: mergedAudiobookIds.size > 0,
       },
     }),
     prisma.book.deleteMany({ where: { id: { in: mergeIds } } }),

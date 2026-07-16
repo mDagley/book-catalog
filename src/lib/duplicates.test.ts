@@ -10,15 +10,44 @@ afterEach(async () => {
 });
 
 describe("findDuplicateBookGroups", () => {
-  it("groups two books with closely-matching titles together", async () => {
-    const a = await prisma.book.create({ data: { title: "Test Duplicates The Way of Kings" } });
-    const b = await prisma.book.create({ data: { title: "Test Duplicates The Way of Kings" } });
+  it("groups two books with closely-matching titles together when at least one is digitally owned", async () => {
+    const a = await prisma.book.create({
+      data: { title: "Test Duplicates The Way of Kings", copies: { create: { format: "HARDCOVER" } } },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates The Way of Kings",
+        hasEbook: true,
+        absEbookItemIds: ["dup-test-group-ebook"],
+      },
+    });
 
     const groups = await findDuplicateBookGroups();
 
     const group = groups.find((g) => g.books.some((book) => book.id === a.id));
     expect(group).toBeDefined();
     expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("does not group two purely physical books, even with identical titles", async () => {
+    // The tool exists specifically for the physical-scan-duplicates-a-
+    // digital-row bug -- two physical-only books sharing a title are more
+    // likely to just be two genuinely different books (e.g. a common title
+    // like "Echo" used by unrelated authors) than the same book split in
+    // two, so they're intentionally never grouped.
+    await prisma.book.create({
+      data: { title: "Test Duplicates Purely Physical Duplicate", copies: { create: { format: "HARDCOVER" } } },
+    });
+    await prisma.book.create({
+      data: { title: "Test Duplicates Purely Physical Duplicate", copies: { create: { format: "PAPERBACK" } } },
+    });
+
+    const groups = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Purely Physical Duplicate"),
+    );
+    expect(relevantGroups).toEqual([]);
   });
 
   it("does not group two books with dissimilar titles", async () => {
