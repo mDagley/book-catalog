@@ -4,13 +4,23 @@ import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
 
-// True when `err` is a Postgres unique-constraint violation on absItemId --
-// meaning a concurrent sync run (cron overlapping a manual refresh) already
-// linked this exact ABS item to a book between this pass's initial
-// already-linked check and this write. That's not a real error, just a
-// race this pass lost; the item is already correctly linked somewhere.
+// True when `err` is specifically a Postgres unique-constraint violation on
+// absItemId -- meaning a concurrent sync run (cron overlapping a manual
+// refresh) already linked this exact ABS item to a book between this pass's
+// initial already-linked check and this write. That's not a real error,
+// just a race this pass lost; the item is already correctly linked
+// somewhere. Narrowed to the absItemId constraint specifically (rather than
+// any P2002) so an unrelated uniqueness violation doesn't get silently
+// swallowed here. The driver-adapter error's constraint field names are
+// double-quoted column identifiers (e.g. `"absItemId"`), confirmed against
+// a real constraint violation on this project's Postgres adapter.
 function isConcurrentAbsItemLink(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") return false;
+  const meta = err.meta as
+    | { driverAdapterError?: { cause?: { constraint?: { fields?: string[] } } } }
+    | undefined;
+  const fields = meta?.driverAdapterError?.cause?.constraint?.fields ?? [];
+  return fields.some((f) => f.replace(/"/g, "") === "absItemId");
 }
 
 export interface AbsLibrary {

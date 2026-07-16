@@ -1,5 +1,6 @@
 // src/lib/absSync.test.ts
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
 import { searchCatalog } from "@/lib/search";
@@ -582,6 +583,34 @@ describe("syncAbsCache", () => {
     expect(copies[0].bookId).toBe(other.id);
     const unchanged = await prisma.book.findUniqueOrThrow({ where: { id: existing.id } });
     expect(unchanged.hasEbook).toBe(false);
+    transactionSpy.mockRestore();
+  });
+
+  it("does not swallow a P2002 that isn't the absItemId constraint", async () => {
+    await prisma.book.create({ data: { title: "Test Abs Sync Unrelated Constraint" } });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-unrelated-p2002",
+            media: { metadata: { title: "Test Abs Sync Unrelated Constraint" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    const fakeError = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "test",
+      meta: { driverAdapterError: { cause: { constraint: { fields: ['"title"'] } } } },
+    });
+    const transactionSpy = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(fakeError);
+
+    await expect(syncAbsCache("https://abs.example.com", "token")).rejects.toThrow(
+      "Unique constraint failed",
+    );
     transactionSpy.mockRestore();
   });
 
