@@ -22,6 +22,7 @@ interface ScanBookFormProps {
   isbn: string;
   capturedImage: string | null;
   lookup: LookupData | null;
+  lookupNotice: string | null;
   onRetake: () => void;
 }
 
@@ -32,12 +33,13 @@ interface ScanBookFormProps {
 // component; `state.values` (returned by the action on error) covers that
 // case by re-supplying whatever was last submitted as each field's
 // defaultValue.
-function ScanBookForm({ isbn, capturedImage, lookup, onRetake }: ScanBookFormProps) {
+function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: ScanBookFormProps) {
   const [state, formAction, isPending] = useActionState(createBookFromScan, initialState);
 
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="isbn" value={isbn} />
+      {lookupNotice && <p className="text-sm text-gray-600">{lookupNotice}</p>}
       <div>
         <label htmlFor="title" className="block text-sm font-medium">
           Title
@@ -111,16 +113,34 @@ export function ScanAddForm() {
   const [showCamera, setShowCamera] = useState(true);
   const [lookup, setLookup] = useState<LookupData | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookupNotice, setLookupNotice] = useState<string | null>(null);
 
   async function handleDecode(decodedIsbn: string) {
     setIsbn(decodedIsbn);
     setCapturedImage(null);
     setShowCamera(true);
     setIsLookingUp(true);
+    setLookupNotice(null);
 
     try {
       const response = await fetch(`/api/isbn-lookup?isbn=${encodeURIComponent(decodedIsbn)}`);
       const data = await response.json();
+
+      // The route returns a non-2xx status (e.g. 400 when the decoded
+      // barcode text doesn't look like an ISBN -- some books carry a second,
+      // non-ISBN barcode, like a UPC price/retail code, that the scanner can
+      // pick up instead) with an `{ error }` body, not a lookup result. Never
+      // treat that body's (nonexistent) title/author/etc. fields as real
+      // data -- doing so previously produced a silently blank form with no
+      // indication anything had gone wrong.
+      if (!response.ok) {
+        setLookup({ title: "", author: "", publisher: "", publishYear: "", coverUrl: null });
+        setLookupNotice(
+          "Couldn't recognize that barcode as an ISBN. Enter the details below manually, or try scanning again.",
+        );
+        return;
+      }
+
       setLookup({
         title: data.title ?? "",
         author: data.author ?? "",
@@ -128,8 +148,12 @@ export function ScanAddForm() {
         publishYear: data.publishYear?.toString() ?? "",
         coverUrl: data.coverUrl,
       });
+      if (!data.title) {
+        setLookupNotice("No details found for this ISBN. Enter them below manually.");
+      }
     } catch {
       setLookup({ title: "", author: "", publisher: "", publishYear: "", coverUrl: null });
+      setLookupNotice("Couldn't reach the lookup service. Enter the details below manually.");
     } finally {
       setIsLookingUp(false);
     }
@@ -157,6 +181,7 @@ export function ScanAddForm() {
         isbn={isbn}
         capturedImage={capturedImage}
         lookup={lookup}
+        lookupNotice={lookupNotice}
         onRetake={() => setShowCamera(true)}
       />
       {/*
