@@ -152,8 +152,13 @@ export function ScanAddForm() {
       // indication anything had gone wrong.
       if (!response.ok) {
         setLookup({ title: "", author: "", publisher: "", publishYear: "", coverUrl: null });
+        // Prefer the route's own { error } message when present -- it's the
+        // more accurate, single source of truth (see /api/isbn-lookup) and
+        // stays correct if that route's validation message ever changes.
         setLookupNotice(
-          "Couldn't recognize that barcode as an ISBN. Enter the details below manually, or try scanning again.",
+          typeof data.error === "string" && data.error
+            ? data.error
+            : "Couldn't recognize that barcode as an ISBN. Enter the details below manually, or try scanning again.",
         );
         return;
       }
