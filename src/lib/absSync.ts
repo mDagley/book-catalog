@@ -1,7 +1,17 @@
 // src/lib/absSync.ts
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
+
+// True when `err` is a Postgres unique-constraint violation on absItemId --
+// meaning a concurrent sync run (cron overlapping a manual refresh) already
+// linked this exact ABS item to a book between this pass's initial
+// already-linked check and this write. That's not a real error, just a
+// race this pass lost; the item is already correctly linked somewhere.
+function isConcurrentAbsItemLink(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+}
 
 export interface AbsLibrary {
   id: string;
@@ -208,12 +218,37 @@ async function removeStaleAbsLinks(
     }
   }
 
-  for (const bookId of affectedBookIds) {
-    const [ebookCount, audiobookCount, physicalCount] = await Promise.all([
-      prisma.ebookCopy.count({ where: { bookId } }),
-      prisma.audiobookCopy.count({ where: { bookId } }),
-      prisma.physicalCopy.count({ where: { bookId } }),
-    ]);
+  if (affectedBookIds.size === 0) return;
+  const affectedIds = Array.from(affectedBookIds);
+
+  // Aggregated per-table (one query each, not one per book) instead of
+  // three count() queries per affected book -- a sync that drops stale
+  // links for many books at once would otherwise fire 3xN queries here.
+  const [ebookGroups, audiobookGroups, physicalGroups] = await Promise.all([
+    prisma.ebookCopy.groupBy({
+      by: ["bookId"],
+      where: { bookId: { in: affectedIds } },
+      _count: { bookId: true },
+    }),
+    prisma.audiobookCopy.groupBy({
+      by: ["bookId"],
+      where: { bookId: { in: affectedIds } },
+      _count: { bookId: true },
+    }),
+    prisma.physicalCopy.groupBy({
+      by: ["bookId"],
+      where: { bookId: { in: affectedIds } },
+      _count: { bookId: true },
+    }),
+  ]);
+  const ebookCounts = new Map(ebookGroups.map((g) => [g.bookId, g._count.bookId]));
+  const audiobookCounts = new Map(audiobookGroups.map((g) => [g.bookId, g._count.bookId]));
+  const physicalCounts = new Map(physicalGroups.map((g) => [g.bookId, g._count.bookId]));
+
+  for (const bookId of affectedIds) {
+    const ebookCount = ebookCounts.get(bookId) ?? 0;
+    const audiobookCount = audiobookCounts.get(bookId) ?? 0;
+    const physicalCount = physicalCounts.get(bookId) ?? 0;
 
     if (ebookCount === 0 && audiobookCount === 0 && physicalCount === 0) {
       await prisma.book.delete({ where: { id: bookId } });
@@ -286,12 +321,16 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
       continue;
     }
 
-    const match = findBestTitleMatch(books, item.title);
-    if (match) {
-      await linkItemToExistingBook(match, mediaType, item.absItemId);
-    } else {
-      const created = await createBookForItem(item, mediaType);
-      books.push(created);
+    try {
+      const match = findBestTitleMatch(books, item.title);
+      if (match) {
+        await linkItemToExistingBook(match, mediaType, item.absItemId);
+      } else {
+        const created = await createBookForItem(item, mediaType);
+        books.push(created);
+      }
+    } catch (err) {
+      if (!isConcurrentAbsItemLink(err)) throw err;
     }
     linkedIds.add(item.absItemId);
 

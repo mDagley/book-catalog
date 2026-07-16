@@ -55,7 +55,7 @@ model EbookCopy {
   id             String   @id @default(cuid())
   bookId         String
   book           Book     @relation(fields: [bookId], references: [id])
-  absItemId      String
+  absItemId      String   @unique
   coverImagePath String?
   createdAt      DateTime @default(now())
 }
@@ -64,7 +64,7 @@ model AudiobookCopy {
   id             String   @id @default(cuid())
   bookId         String
   book           Book     @relation(fields: [bookId], references: [id])
-  absItemId      String
+  absItemId      String   @unique
   coverImagePath String?
   createdAt      DateTime @default(now())
 }

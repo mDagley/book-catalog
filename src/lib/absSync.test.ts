@@ -548,6 +548,43 @@ describe("syncAbsCache", () => {
     expect(updated.hasEbook).toBe(true);
   });
 
+  it("does not create a duplicate row or crash when a concurrent sync run already linked the item", async () => {
+    const existing = await prisma.book.create({
+      data: { title: "Test Abs Sync Race Book" },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          { id: "test-race-1", media: { metadata: { title: "Test Abs Sync Race Book" } } },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    // Simulate another sync run (e.g. cron overlapping a manual refresh)
+    // linking this exact ABS item to a different book right as this pass's
+    // own write is about to happen -- the real unique constraint on
+    // absItemId is what turns this into a P2002 the code must swallow.
+    const other = await prisma.book.create({ data: { title: "Test Abs Sync Race Concurrent" } });
+    const transactionSpy = vi
+      .spyOn(prisma, "$transaction")
+      .mockImplementationOnce(async (arg) => {
+        await prisma.ebookCopy.create({ data: { bookId: other.id, absItemId: "test-race-1" } });
+        return prisma.$transaction(arg as never);
+      });
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 1 });
+    const copies = await prisma.ebookCopy.findMany({ where: { absItemId: "test-race-1" } });
+    expect(copies).toHaveLength(1);
+    expect(copies[0].bookId).toBe(other.id);
+    const unchanged = await prisma.book.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(unchanged.hasEbook).toBe(false);
+    transactionSpy.mockRestore();
+  });
+
   it("throws if the ABS instance is unreachable, without touching existing Book rows", async () => {
     await prisma.book.create({
       data: {
