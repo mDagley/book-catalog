@@ -96,43 +96,39 @@ export async function fetchAbsLibraryItems(
 interface SyncBook {
   id: string;
   title: string;
-  absEbookItemIds: string[];
-  absAudiobookItemIds: string[];
 }
 
-const SYNC_BOOK_SELECT = {
-  id: true,
-  title: true,
-  absEbookItemIds: true,
-  absAudiobookItemIds: true,
-} as const;
+const SYNC_BOOK_SELECT = { id: true, title: true } as const;
 
-// Appends this item's ID onto the matched book's array WITHOUT touching its
-// title/author/isbn -- per the design spec, ABS metadata is never written
-// onto an existing Book, both to avoid a differently-formatted ABS title
-// overwriting a good existing one, and to limit the damage of a false-
-// positive fuzzy match.
+// Creates one EbookCopy/AudiobookCopy row for this item WITHOUT touching the
+// matched book's title/author/isbn -- per the design spec, ABS metadata is
+// never written onto an existing Book, both to avoid a differently-formatted
+// ABS title overwriting a good existing one, and to limit the damage of a
+// false-positive fuzzy match. Title never changes here, so (unlike the old
+// array-based version) there's nothing to refresh on the in-memory `books`
+// list afterward -- only a newly CREATED book needs to be added to it.
 async function linkItemToExistingBook(
   book: SyncBook,
   mediaType: AbsMediaType,
   absItemId: string,
-): Promise<SyncBook> {
+): Promise<void> {
   if (mediaType === "EBOOK") {
-    return prisma.book.update({
-      where: { id: book.id },
-      data: { absEbookItemIds: { push: absItemId }, hasEbook: true, lastAbsSyncedAt: new Date() },
-      select: SYNC_BOOK_SELECT,
-    });
+    await prisma.$transaction([
+      prisma.ebookCopy.create({ data: { bookId: book.id, absItemId } }),
+      prisma.book.update({
+        where: { id: book.id },
+        data: { hasEbook: true, lastAbsSyncedAt: new Date() },
+      }),
+    ]);
+    return;
   }
-  return prisma.book.update({
-    where: { id: book.id },
-    data: {
-      absAudiobookItemIds: { push: absItemId },
-      hasAudiobook: true,
-      lastAbsSyncedAt: new Date(),
-    },
-    select: SYNC_BOOK_SELECT,
-  });
+  await prisma.$transaction([
+    prisma.audiobookCopy.create({ data: { bookId: book.id, absItemId } }),
+    prisma.book.update({
+      where: { id: book.id },
+      data: { hasAudiobook: true, lastAbsSyncedAt: new Date() },
+    }),
+  ]);
 }
 
 async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Promise<SyncBook> {
@@ -142,9 +138,9 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
         title: item.title,
         author: item.author,
         isbn: item.isbn,
-        absEbookItemIds: [item.absItemId],
         hasEbook: true,
         lastAbsSyncedAt: new Date(),
+        ebookCopies: { create: { absItemId: item.absItemId } },
       },
       select: SYNC_BOOK_SELECT,
     });
@@ -154,26 +150,28 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
       title: item.title,
       author: item.author,
       isbn: item.isbn,
-      absAudiobookItemIds: [item.absItemId],
       hasAudiobook: true,
       lastAbsSyncedAt: new Date(),
+      audiobookCopies: { create: { absItemId: item.absItemId } },
     },
     select: SYNC_BOOK_SELECT,
   });
 }
 
-// Drops any previously-linked ABS item ID not seen in this sync pass, then
-// deletes any Book left with no ebook links, no audiobook links, and no
-// physical copies -- mirroring the zero-copy cleanup already established for
-// physical-only books (a Book backed by nothing shouldn't exist), except an
-// ebook/audiobook-only Book with zero physical copies is now a normal state,
-// not a defensive-only edge case.
+// Deletes any EbookCopy/AudiobookCopy row whose ABS item ID wasn't seen in
+// this sync pass, then recomputes hasEbook/hasAudiobook for every book that
+// actually lost a row, deleting the Book entirely if it ends up with no
+// ebook copies, no audiobook copies, and no physical copies -- mirroring the
+// zero-copy cleanup already established for physical-only books. A book
+// that had no rows deleted is never touched at all (no wasted writes),
+// naturally preserving the old array-based code's "unchanged: skip"
+// optimization.
 //
-// `syncedMediaTypes` gates pruning PER media type: a media type's array is
-// only ever filtered against `seenItemIds` if at least one item of that
-// specific type was actually fetched this pass. This protects against two
-// failure modes with one mechanism -- a library renamed/missing so it no
-// longer matches the "panda ebooks"/"panda audiobooks" substrings, AND a
+// `syncedMediaTypes` gates pruning PER media type: a media type's rows are
+// only ever candidates for deletion if at least one item of that specific
+// type was actually fetched this pass. This protects against two failure
+// modes with one mechanism -- a library renamed/missing so it no longer
+// matches the "panda ebooks"/"panda audiobooks" substrings, AND a
 // correctly-matched library that happens to return zero items this pass
 // (e.g. a transient ABS hiccup) -- either of which would otherwise look
 // identical to "the user deleted every book of that type" and wipe real
@@ -182,46 +180,51 @@ async function removeStaleAbsLinks(
   seenItemIds: Set<string>,
   syncedMediaTypes: Set<AbsMediaType>,
 ): Promise<void> {
-  const booksWithAbsLinks = await prisma.book.findMany({
-    where: {
-      OR: [{ absEbookItemIds: { isEmpty: false } }, { absAudiobookItemIds: { isEmpty: false } }],
-    },
-    select: {
-      id: true,
-      absEbookItemIds: true,
-      absAudiobookItemIds: true,
-      _count: { select: { copies: true } },
-    },
-  });
+  const affectedBookIds = new Set<string>();
 
-  for (const book of booksWithAbsLinks) {
-    const remainingEbookIds = syncedMediaTypes.has("EBOOK")
-      ? book.absEbookItemIds.filter((id) => seenItemIds.has(id))
-      : book.absEbookItemIds;
-    const remainingAudiobookIds = syncedMediaTypes.has("AUDIOBOOK")
-      ? book.absAudiobookItemIds.filter((id) => seenItemIds.has(id))
-      : book.absAudiobookItemIds;
+  if (syncedMediaTypes.has("EBOOK")) {
+    const staleEbookCopies = await prisma.ebookCopy.findMany({
+      where: { absItemId: { notIn: Array.from(seenItemIds) } },
+      select: { id: true, bookId: true },
+    });
+    if (staleEbookCopies.length > 0) {
+      await prisma.ebookCopy.deleteMany({
+        where: { id: { in: staleEbookCopies.map((c) => c.id) } },
+      });
+      for (const c of staleEbookCopies) affectedBookIds.add(c.bookId);
+    }
+  }
 
-    const unchanged =
-      remainingEbookIds.length === book.absEbookItemIds.length &&
-      remainingAudiobookIds.length === book.absAudiobookItemIds.length;
-    if (unchanged) continue;
+  if (syncedMediaTypes.has("AUDIOBOOK")) {
+    const staleAudiobookCopies = await prisma.audiobookCopy.findMany({
+      where: { absItemId: { notIn: Array.from(seenItemIds) } },
+      select: { id: true, bookId: true },
+    });
+    if (staleAudiobookCopies.length > 0) {
+      await prisma.audiobookCopy.deleteMany({
+        where: { id: { in: staleAudiobookCopies.map((c) => c.id) } },
+      });
+      for (const c of staleAudiobookCopies) affectedBookIds.add(c.bookId);
+    }
+  }
 
-    const stillOwned =
-      remainingEbookIds.length > 0 || remainingAudiobookIds.length > 0 || book._count.copies > 0;
+  for (const bookId of affectedBookIds) {
+    const [ebookCount, audiobookCount, physicalCount] = await Promise.all([
+      prisma.ebookCopy.count({ where: { bookId } }),
+      prisma.audiobookCopy.count({ where: { bookId } }),
+      prisma.physicalCopy.count({ where: { bookId } }),
+    ]);
 
-    if (!stillOwned) {
-      await prisma.book.delete({ where: { id: book.id } });
+    if (ebookCount === 0 && audiobookCount === 0 && physicalCount === 0) {
+      await prisma.book.delete({ where: { id: bookId } });
       continue;
     }
 
     await prisma.book.update({
-      where: { id: book.id },
+      where: { id: bookId },
       data: {
-        absEbookItemIds: remainingEbookIds,
-        absAudiobookItemIds: remainingAudiobookIds,
-        hasEbook: remainingEbookIds.length > 0,
-        hasAudiobook: remainingAudiobookIds.length > 0,
+        hasEbook: ebookCount > 0,
+        hasAudiobook: audiobookCount > 0,
         lastAbsSyncedAt: new Date(),
       },
     });
@@ -229,11 +232,10 @@ async function removeStaleAbsLinks(
 }
 
 // Syncs the "Panda EBooks" and "Panda Audiobooks" ABS libraries directly onto
-// Book rows (see docs/superpowers/specs/2026-07-14-catalog-data-model-unification-design.md).
+// Book rows (see docs/superpowers/specs/2026-07-14-catalog-data-model-unification-design.md
+// and docs/superpowers/specs/2026-07-16-unify-copy-types-design.md).
 // All ABS API calls happen before any database write, so a fetch failure
-// partway through (e.g. the audiobook library's API call rejecting after the
-// ebook library already succeeded) throws without touching the database at
-// all -- matching the previous cache-table sync's same guarantee.
+// partway through throws without touching the database at all.
 export async function syncAbsCache(baseUrl: string, token: string): Promise<{ synced: number }> {
   const libraries = await fetchAbsLibraries(baseUrl, token);
 
@@ -251,21 +253,24 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
     }
   }
 
-  // A sync that fetched zero items at all (no matching library found, or
-  // every matching library came back empty) is treated as suspicious rather
+  // A sync that fetched zero items at all is treated as suspicious rather
   // than "the user deleted their whole ABS ebook/audiobook collection" --
-  // running the removal pass here would strip every currently-linked Book's
-  // arrays and delete every ebook/audiobook-only Book in one shot, which is
-  // a much likelier sign of a misconfigured library name or a transient ABS
-  // hiccup than a real mass deletion. Skip straight to a no-op instead.
+  // running the removal pass here would strip every currently-linked Book
+  // and delete every ebook/audiobook-only Book in one shot, which is a much
+  // likelier sign of a misconfigured library name or a transient ABS hiccup
+  // than a real mass deletion. Skip straight to a no-op instead.
   if (pendingItems.length === 0) {
     return { synced: 0 };
   }
 
   const books: SyncBook[] = await prisma.book.findMany({ select: SYNC_BOOK_SELECT });
 
-  const linkedEbookIds = new Set<string>(books.flatMap((b) => b.absEbookItemIds));
-  const linkedAudiobookIds = new Set<string>(books.flatMap((b) => b.absAudiobookItemIds));
+  const [existingEbookCopies, existingAudiobookCopies] = await Promise.all([
+    prisma.ebookCopy.findMany({ select: { absItemId: true } }),
+    prisma.audiobookCopy.findMany({ select: { absItemId: true } }),
+  ]);
+  const linkedEbookIds = new Set<string>(existingEbookCopies.map((c) => c.absItemId));
+  const linkedAudiobookIds = new Set<string>(existingAudiobookCopies.map((c) => c.absItemId));
   const linkedIdSetFor = (mediaType: AbsMediaType): Set<string> =>
     mediaType === "EBOOK" ? linkedEbookIds : linkedAudiobookIds;
 
@@ -283,8 +288,7 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
 
     const match = findBestTitleMatch(books, item.title);
     if (match) {
-      const updated = await linkItemToExistingBook(match, mediaType, item.absItemId);
-      books[books.findIndex((b) => b.id === updated.id)] = updated;
+      await linkItemToExistingBook(match, mediaType, item.absItemId);
     } else {
       const created = await createBookForItem(item, mediaType);
       books.push(created);
