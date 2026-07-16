@@ -1,7 +1,7 @@
 // src/lib/absSync.ts
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
-import { titleMatchScore, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { findBestTitleMatch } from "@/lib/matching";
 
 export interface AbsLibrary {
   id: string;
@@ -106,19 +106,6 @@ const SYNC_BOOK_SELECT = {
   absEbookItemIds: true,
   absAudiobookItemIds: true,
 } as const;
-
-function findBestTitleMatch(books: SyncBook[], title: string): SyncBook | null {
-  let best: SyncBook | null = null;
-  let bestScore = -1;
-  for (const book of books) {
-    const score = titleMatchScore(book.title, title);
-    if (score >= DEFAULT_MATCH_THRESHOLD && score > bestScore) {
-      best = book;
-      bestScore = score;
-    }
-  }
-  return best;
-}
 
 // Appends this item's ID onto the matched book's array WITHOUT touching its
 // title/author/isbn -- per the design spec, ABS metadata is never written
