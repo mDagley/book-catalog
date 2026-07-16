@@ -20,11 +20,11 @@ model Book {
   createdAt DateTime       @default(now())
   copies    PhysicalCopy[]
 
-  hasEbook            Boolean   @default(false)
-  hasAudiobook        Boolean   @default(false)
-  absEbookItemIds     String[]  @default([])
-  absAudiobookItemIds String[]  @default([])
-  lastAbsSyncedAt     DateTime?
+  hasEbook        Boolean         @default(false)
+  hasAudiobook    Boolean         @default(false)
+  lastAbsSyncedAt DateTime?
+  ebookCopies     EbookCopy[]
+  audiobookCopies AudiobookCopy[]
 
   readStatus       ReadStatus?
   readStatusManual Boolean     @default(false)
@@ -49,6 +49,24 @@ enum Format {
   PAPERBACK
   MASS_MARKET
   OTHER
+}
+
+model EbookCopy {
+  id             String   @id @default(cuid())
+  bookId         String
+  book           Book     @relation(fields: [bookId], references: [id])
+  absItemId      String   @unique
+  coverImagePath String?
+  createdAt      DateTime @default(now())
+}
+
+model AudiobookCopy {
+  id             String   @id @default(cuid())
+  bookId         String
+  book           Book     @relation(fields: [bookId], references: [id])
+  absItemId      String   @unique
+  coverImagePath String?
+  createdAt      DateTime @default(now())
 }
 
 model GoodreadsTbrItem {

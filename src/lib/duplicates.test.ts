@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { findDuplicateBookGroups, mergeBooksData } from "@/lib/duplicates";
 
 afterEach(async () => {
+  await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test Duplicates" } } } });
+  await prisma.audiobookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Duplicates" } } },
+  });
   await prisma.physicalCopy.deleteMany({
     where: { book: { title: { startsWith: "Test Duplicates" } } },
   });
@@ -18,7 +22,7 @@ describe("findDuplicateBookGroups", () => {
       data: {
         title: "Test Duplicates The Way of Kings",
         hasEbook: true,
-        absEbookItemIds: ["dup-test-group-ebook"],
+        ebookCopies: { create: { absItemId: "dup-test-group-ebook" } },
       },
     });
 
@@ -82,7 +86,7 @@ describe("findDuplicateBookGroups", () => {
       data: {
         title: "Test Duplicates Reported Fields Book",
         hasEbook: true,
-        absEbookItemIds: ["dup-test-ebook-item"],
+        ebookCopies: { create: { absItemId: "dup-test-ebook-item" } },
       },
     });
 
@@ -120,30 +124,33 @@ describe("mergeBooksData", () => {
     expect(merged).toBeNull();
   });
 
-  it("unions ebook/audiobook flags and item ids from the merged book onto the kept book", async () => {
+  it("reassigns ebook/audiobook copies from the merged book onto the kept book, recomputing flags", async () => {
     const keep = await prisma.book.create({
       data: {
         title: "Test Duplicates Union Book",
         hasEbook: true,
-        absEbookItemIds: ["dup-test-keep-ebook"],
+        ebookCopies: { create: { absItemId: "dup-test-keep-ebook" } },
       },
     });
     const merge = await prisma.book.create({
       data: {
         title: "Test Duplicates Union Book",
         hasAudiobook: true,
-        absAudiobookItemIds: ["dup-test-merge-audiobook"],
+        audiobookCopies: { create: { absItemId: "dup-test-merge-audiobook" } },
       },
     });
 
     const result = await mergeBooksData(keep.id, [merge.id]);
 
     expect(result).toEqual({ ok: true });
-    const kept = await prisma.book.findUniqueOrThrow({ where: { id: keep.id } });
+    const kept = await prisma.book.findUniqueOrThrow({
+      where: { id: keep.id },
+      include: { ebookCopies: true, audiobookCopies: true },
+    });
     expect(kept.hasEbook).toBe(true);
     expect(kept.hasAudiobook).toBe(true);
-    expect(kept.absEbookItemIds).toEqual(["dup-test-keep-ebook"]);
-    expect(kept.absAudiobookItemIds).toEqual(["dup-test-merge-audiobook"]);
+    expect(kept.ebookCopies.map((c) => c.absItemId)).toEqual(["dup-test-keep-ebook"]);
+    expect(kept.audiobookCopies.map((c) => c.absItemId)).toEqual(["dup-test-merge-audiobook"]);
   });
 
   it("does not overwrite the kept book's title/author/isbn", async () => {

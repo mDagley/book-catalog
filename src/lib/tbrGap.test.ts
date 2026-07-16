@@ -7,6 +7,10 @@ afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
     where: { book: { title: { startsWith: "Test TBR" } } },
   });
+  await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test TBR" } } } });
+  await prisma.audiobookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test TBR" } } },
+  });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test TBR" } } });
 });
 
@@ -29,7 +33,7 @@ describe("getTbrGap", () => {
       data: {
         title: "Test TBR Abs Book",
         hasAudiobook: true,
-        absAudiobookItemIds: ["test-tbr-abs-1"],
+        audiobookCopies: { create: { absItemId: "test-tbr-abs-1" } },
       },
     });
     await prisma.goodreadsTbrItem.create({

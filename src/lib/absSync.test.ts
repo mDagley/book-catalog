@@ -1,18 +1,27 @@
 // src/lib/absSync.test.ts
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
 import { searchCatalog } from "@/lib/search";
 
 const originalFetch = global.fetch;
 
-afterEach(async () => {
-  global.fetch = originalFetch;
-  vi.restoreAllMocks();
+async function cleanupTestAbsSyncBooks(): Promise<void> {
+  await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test Abs Sync" } } } });
+  await prisma.audiobookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Abs Sync" } } },
+  });
   await prisma.physicalCopy.deleteMany({
     where: { book: { title: { startsWith: "Test Abs Sync" } } },
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
+}
+
+afterEach(async () => {
+  global.fetch = originalFetch;
+  vi.restoreAllMocks();
+  await cleanupTestAbsSyncBooks();
 });
 
 describe("fetchAbsLibraries", () => {
@@ -185,18 +194,15 @@ function mockLibrariesAndItems(
 
 describe("syncAbsCache", () => {
   beforeEach(async () => {
-    await prisma.physicalCopy.deleteMany({
-      where: { book: { title: { startsWith: "Test Abs Sync" } } },
-    });
-    await prisma.book.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
+    await cleanupTestAbsSyncBooks();
   });
 
   it("skips fuzzy matching when the item's ID is already linked (fast path)", async () => {
     const book = await prisma.book.create({
       data: {
         title: "Test Abs Sync Fast Path Book",
-        absEbookItemIds: ["test-fastpath-1"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-fastpath-1" } },
       },
     });
 
@@ -205,11 +211,6 @@ describe("syncAbsCache", () => {
         "ebook-lib": [
           {
             id: "test-fastpath-1",
-            // Deliberately a non-matching title -- if the fast path didn't
-            // short-circuit, this item would either fail to fuzzy-match
-            // (leaving it stranded) or corrupt data by matching something
-            // else. Neither should happen: the already-linked ID is
-            // recognized before any fuzzy matching is attempted.
             media: { metadata: { title: "Completely Unrelated Title" } },
           },
         ],
@@ -220,9 +221,12 @@ describe("syncAbsCache", () => {
     const result = await syncAbsCache("https://abs.example.com", "token");
 
     expect(result).toEqual({ synced: 1 });
-    const unchanged = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    const unchanged = await prisma.book.findUniqueOrThrow({
+      where: { id: book.id },
+      include: { ebookCopies: true },
+    });
     expect(unchanged.title).toBe("Test Abs Sync Fast Path Book");
-    expect(unchanged.absEbookItemIds).toEqual(["test-fastpath-1"]);
+    expect(unchanged.ebookCopies.map((c) => c.absItemId)).toEqual(["test-fastpath-1"]);
     const total = await prisma.book.count({ where: { title: { startsWith: "Test Abs Sync" } } });
     expect(total).toBe(1);
   });
@@ -248,10 +252,11 @@ describe("syncAbsCache", () => {
 
     const book = await prisma.book.findFirstOrThrow({
       where: { title: "Test Abs Sync Mistborn" },
+      include: { audiobookCopies: true },
     });
     expect(book.author).toBe("Brandon Sanderson");
     expect(book.hasAudiobook).toBe(true);
-    expect(book.absAudiobookItemIds).toEqual(["test-fuzzy-1"]);
+    expect(book.audiobookCopies.map((c) => c.absItemId)).toEqual(["test-fuzzy-1"]);
     const total = await prisma.book.count({ where: { title: { startsWith: "Test Abs Sync" } } });
     expect(total).toBe(1);
   });
@@ -279,16 +284,17 @@ describe("syncAbsCache", () => {
 
     const book = await prisma.book.findFirstOrThrow({
       where: { title: "Test Abs Sync Brand New Book" },
+      include: { ebookCopies: true },
     });
     expect(book.hasEbook).toBe(true);
-    expect(book.absEbookItemIds).toEqual(["test-new-1"]);
+    expect(book.ebookCopies.map((c) => c.absItemId)).toEqual(["test-new-1"]);
     expect(book.author).toBe("New Author");
     expect(book.isbn).toBe("9780765326355");
     const copies = await prisma.physicalCopy.count({ where: { bookId: book.id } });
     expect(copies).toBe(0);
   });
 
-  it("links two different audiobook editions of the same title into one Book's array", async () => {
+  it("links two different audiobook editions of the same title onto one Book", async () => {
     mockLibrariesAndItems(
       {
         "audio-lib": [
@@ -301,9 +307,12 @@ describe("syncAbsCache", () => {
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const books = await prisma.book.findMany({ where: { title: "Test Abs Sync Two Editions" } });
+    const books = await prisma.book.findMany({
+      where: { title: "Test Abs Sync Two Editions" },
+      include: { audiobookCopies: true },
+    });
     expect(books).toHaveLength(1);
-    expect(books[0].absAudiobookItemIds.slice().sort()).toEqual([
+    expect(books[0].audiobookCopies.map((c) => c.absItemId).sort()).toEqual([
       "test-edition-1",
       "test-edition-2",
     ]);
@@ -336,8 +345,10 @@ describe("syncAbsCache", () => {
     const book = await prisma.book.create({
       data: {
         title: "Test Abs Sync Partial Stale Removal",
-        absAudiobookItemIds: ["test-partial-keep", "test-partial-stale"],
         hasAudiobook: true,
+        audiobookCopies: {
+          create: [{ absItemId: "test-partial-keep" }, { absItemId: "test-partial-stale" }],
+        },
       },
     });
 
@@ -355,8 +366,11 @@ describe("syncAbsCache", () => {
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
-    expect(updated.absAudiobookItemIds).toEqual(["test-partial-keep"]);
+    const updated = await prisma.book.findUniqueOrThrow({
+      where: { id: book.id },
+      include: { audiobookCopies: true },
+    });
+    expect(updated.audiobookCopies.map((c) => c.absItemId)).toEqual(["test-partial-keep"]);
     expect(updated.hasAudiobook).toBe(true);
   });
 
@@ -364,8 +378,8 @@ describe("syncAbsCache", () => {
     await prisma.book.create({
       data: {
         title: "Test Abs Sync Fully Removed",
-        absEbookItemIds: ["test-remove-1"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-remove-1" } },
       },
     });
 
@@ -393,8 +407,8 @@ describe("syncAbsCache", () => {
     const book = await prisma.book.create({
       data: {
         title: "Test Abs Sync Kept With Physical Copy",
-        absEbookItemIds: ["test-keep-1"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-keep-1" } },
         copies: { create: { format: "HARDCOVER" } },
       },
     });
@@ -413,17 +427,20 @@ describe("syncAbsCache", () => {
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    const updated = await prisma.book.findUniqueOrThrow({
+      where: { id: book.id },
+      include: { ebookCopies: true },
+    });
     expect(updated.hasEbook).toBe(false);
-    expect(updated.absEbookItemIds).toEqual([]);
+    expect(updated.ebookCopies).toEqual([]);
   });
 
   it("does not remove any links when a sync fetches zero items across every matching library", async () => {
     await prisma.book.create({
       data: {
         title: "Test Abs Sync Survives Empty Sync",
-        absEbookItemIds: ["test-empty-guard-1"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-empty-guard-1" } },
       },
     });
 
@@ -434,17 +451,18 @@ describe("syncAbsCache", () => {
     expect(result).toEqual({ synced: 0 });
     const unchanged = await prisma.book.findFirstOrThrow({
       where: { title: "Test Abs Sync Survives Empty Sync" },
+      include: { ebookCopies: true },
     });
     expect(unchanged.hasEbook).toBe(true);
-    expect(unchanged.absEbookItemIds).toEqual(["test-empty-guard-1"]);
+    expect(unchanged.ebookCopies.map((c) => c.absItemId)).toEqual(["test-empty-guard-1"]);
   });
 
   it("does not remove any links when no ABS library matches the ebook/audiobook name substrings", async () => {
     await prisma.book.create({
       data: {
         title: "Test Abs Sync Survives No Matching Library",
-        absAudiobookItemIds: ["test-no-library-1"],
         hasAudiobook: true,
+        audiobookCopies: { create: { absItemId: "test-no-library-1" } },
       },
     });
 
@@ -463,16 +481,13 @@ describe("syncAbsCache", () => {
     const book = await prisma.book.create({
       data: {
         title: "Test Abs Sync Partial Type Guard",
-        absEbookItemIds: ["test-partial-type-ebook-1"],
         hasEbook: true,
-        absAudiobookItemIds: ["test-partial-type-audio-stale"],
+        ebookCopies: { create: { absItemId: "test-partial-type-ebook-1" } },
         hasAudiobook: true,
+        audiobookCopies: { create: { absItemId: "test-partial-type-audio-stale" } },
       },
     });
 
-    // Only the ebook library appears in this sync pass -- as if the
-    // audiobook library was renamed/removed or is otherwise absent, not
-    // just returning zero items.
     mockLibrariesAndItems(
       {
         "ebook-lib": [
@@ -487,12 +502,15 @@ describe("syncAbsCache", () => {
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
-    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-1"]);
+    const updated = await prisma.book.findUniqueOrThrow({
+      where: { id: book.id },
+      include: { ebookCopies: true, audiobookCopies: true },
+    });
+    expect(updated.ebookCopies.map((c) => c.absItemId)).toEqual(["test-partial-type-ebook-1"]);
     expect(updated.hasEbook).toBe(true);
-    // Audiobook wasn't synced this pass at all -- its stale-looking link must
-    // survive untouched, not be wiped just because no audiobook items were seen.
-    expect(updated.absAudiobookItemIds).toEqual(["test-partial-type-audio-stale"]);
+    expect(updated.audiobookCopies.map((c) => c.absItemId)).toEqual([
+      "test-partial-type-audio-stale",
+    ]);
     expect(updated.hasAudiobook).toBe(true);
   });
 
@@ -500,14 +518,11 @@ describe("syncAbsCache", () => {
     const book = await prisma.book.create({
       data: {
         title: "Test Abs Sync Partial Type Guard Two",
-        absEbookItemIds: ["test-partial-type-ebook-stale"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-partial-type-ebook-stale" } },
       },
     });
 
-    // Both libraries are present and matched by name, but the ebook library
-    // happens to return zero items this pass (e.g. a transient hiccup) while
-    // the audiobook library returns a real item for an unrelated book.
     mockLibrariesAndItems(
       {
         "ebook-lib": [],
@@ -526,19 +541,85 @@ describe("syncAbsCache", () => {
 
     await syncAbsCache("https://abs.example.com", "token");
 
-    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
-    // The ebook library matched by name but returned zero items -- ebook
-    // wasn't actually confirmed this pass, so its existing link must survive.
-    expect(updated.absEbookItemIds).toEqual(["test-partial-type-ebook-stale"]);
+    const updated = await prisma.book.findUniqueOrThrow({
+      where: { id: book.id },
+      include: { ebookCopies: true },
+    });
+    expect(updated.ebookCopies.map((c) => c.absItemId)).toEqual(["test-partial-type-ebook-stale"]);
     expect(updated.hasEbook).toBe(true);
+  });
+
+  it("does not create a duplicate row or crash when a concurrent sync run already linked the item", async () => {
+    const existing = await prisma.book.create({
+      data: { title: "Test Abs Sync Race Book" },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          { id: "test-race-1", media: { metadata: { title: "Test Abs Sync Race Book" } } },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    // Simulate another sync run (e.g. cron overlapping a manual refresh)
+    // linking this exact ABS item to a different book right as this pass's
+    // own write is about to happen -- the real unique constraint on
+    // absItemId is what turns this into a P2002 the code must swallow.
+    const other = await prisma.book.create({ data: { title: "Test Abs Sync Race Concurrent" } });
+    const transactionSpy = vi
+      .spyOn(prisma, "$transaction")
+      .mockImplementationOnce(async (arg) => {
+        await prisma.ebookCopy.create({ data: { bookId: other.id, absItemId: "test-race-1" } });
+        return prisma.$transaction(arg as never);
+      });
+
+    const result = await syncAbsCache("https://abs.example.com", "token");
+
+    expect(result).toEqual({ synced: 1 });
+    const copies = await prisma.ebookCopy.findMany({ where: { absItemId: "test-race-1" } });
+    expect(copies).toHaveLength(1);
+    expect(copies[0].bookId).toBe(other.id);
+    const unchanged = await prisma.book.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(unchanged.hasEbook).toBe(false);
+    transactionSpy.mockRestore();
+  });
+
+  it("does not swallow a P2002 that isn't the absItemId constraint", async () => {
+    await prisma.book.create({ data: { title: "Test Abs Sync Unrelated Constraint" } });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-unrelated-p2002",
+            media: { metadata: { title: "Test Abs Sync Unrelated Constraint" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    const fakeError = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "test",
+      meta: { driverAdapterError: { cause: { constraint: { fields: ['"title"'] } } } },
+    });
+    const transactionSpy = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(fakeError);
+
+    await expect(syncAbsCache("https://abs.example.com", "token")).rejects.toThrow(
+      "Unique constraint failed",
+    );
+    transactionSpy.mockRestore();
   });
 
   it("throws if the ABS instance is unreachable, without touching existing Book rows", async () => {
     await prisma.book.create({
       data: {
         title: "Test Abs Sync Still Here",
-        absEbookItemIds: ["test-unreachable-1"],
         hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-unreachable-1" } },
       },
     });
 
@@ -548,16 +629,13 @@ describe("syncAbsCache", () => {
 
     const stillThere = await prisma.book.findFirstOrThrow({
       where: { title: "Test Abs Sync Still Here" },
+      include: { ebookCopies: true },
     });
-    expect(stillThere.absEbookItemIds).toEqual(["test-unreachable-1"]);
+    expect(stillThere.ebookCopies.map((c) => c.absItemId)).toEqual(["test-unreachable-1"]);
   });
 });
 
 describe("syncAbsCache + searchCatalog integration", () => {
-  // The unit tests above cover syncAbsCache and searchCatalog in isolation;
-  // this proves the seam between them actually works end-to-end -- linking a
-  // physical book to a newly-synced ebook, then confirming search surfaces
-  // both ownership badges on the same result.
   it("makes a physical book's newly-linked ebook show up in search with both badges", async () => {
     await prisma.book.create({
       data: {

@@ -8,9 +8,12 @@ const createdBookIds: string[] = [];
 
 afterEach(async () => {
   for (const id of createdBookIds) {
-    // PhysicalCopy.bookId is ON DELETE RESTRICT, so copies must be removed
-    // before the parent book can be deleted.
+    // PhysicalCopy/EbookCopy/AudiobookCopy.bookId are all ON DELETE
+    // RESTRICT, so copies must be removed before the parent book can be
+    // deleted.
     await prisma.physicalCopy.deleteMany({ where: { bookId: id } });
+    await prisma.ebookCopy.deleteMany({ where: { bookId: id } });
+    await prisma.audiobookCopy.deleteMany({ where: { bookId: id } });
     await prisma.book.deleteMany({ where: { id } });
   }
   createdBookIds.length = 0;
@@ -280,7 +283,7 @@ describe("createBookWithCopyData", () => {
       data: {
         title: "Test Books Existing Ebook Only Title",
         hasEbook: true,
-        absEbookItemIds: ["existing-ebook-item"],
+        ebookCopies: { create: { absItemId: "existing-ebook-item" } },
       },
     });
     createdBookIds.push(existing.id);
