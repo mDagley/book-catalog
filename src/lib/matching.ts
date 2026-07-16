@@ -180,3 +180,25 @@ export function isTitleMatch(
 ): boolean {
   return titleMatchScore(titleA, titleB) >= threshold;
 }
+
+// Scans `candidates` for the best fuzzy title match to `title`, returning
+// null if nothing scores at or above `threshold`. Generic over any shape
+// that carries a `title` string, so both absSync.ts's Book-shaped rows and
+// goodreadsSync.ts's Book-shaped rows can share one implementation instead
+// of each maintaining a near-identical private copy.
+export function findBestTitleMatch<T extends { title: string }>(
+  candidates: T[],
+  title: string,
+  threshold: number = DEFAULT_MATCH_THRESHOLD,
+): T | null {
+  let best: T | null = null;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const score = titleMatchScore(candidate.title, title);
+    if (score >= threshold && score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}

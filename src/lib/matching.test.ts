@@ -6,6 +6,7 @@ import {
   sequenceMatcherRatio,
   titleMatchScore,
   isTitleMatch,
+  findBestTitleMatch,
 } from "@/lib/matching";
 
 describe("normalizeTitle", () => {
@@ -106,5 +107,53 @@ describe("titleMatchScore / isTitleMatch", () => {
     const score = titleMatchScore("The Hobbit", "The Hobbitt");
     expect(isTitleMatch("The Hobbit", "The Hobbitt", 100)).toBe(false);
     expect(isTitleMatch("The Hobbit", "The Hobbitt", Math.floor(score))).toBe(true);
+  });
+});
+
+describe("findBestTitleMatch", () => {
+  interface Candidate {
+    id: string;
+    title: string;
+  }
+
+  it("returns the candidate whose title best matches, above threshold", () => {
+    const candidates: Candidate[] = [
+      { id: "1", title: "The Way of Kings" },
+      { id: "2", title: "Mistborn" },
+    ];
+
+    const match = findBestTitleMatch(candidates, "the way of kings");
+
+    expect(match?.id).toBe("1");
+  });
+
+  it("returns null when no candidate is above threshold", () => {
+    const candidates: Candidate[] = [{ id: "1", title: "The Way of Kings" }];
+
+    const match = findBestTitleMatch(candidates, "Completely Unrelated Title Zzz");
+
+    expect(match).toBeNull();
+  });
+
+  it("returns null for an empty candidate list", () => {
+    expect(findBestTitleMatch([], "Anything")).toBeNull();
+  });
+
+  it("picks the highest-scoring candidate when more than one is above threshold", () => {
+    const candidates: Candidate[] = [
+      { id: "close", title: "The Way of Kingz" },
+      { id: "exact", title: "The Way of Kings" },
+    ];
+
+    const match = findBestTitleMatch(candidates, "The Way of Kings");
+
+    expect(match?.id).toBe("exact");
+  });
+
+  it("respects a custom threshold argument", () => {
+    const candidates: Candidate[] = [{ id: "1", title: "Somewhat Similar Title" }];
+
+    expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 99)).toBeNull();
+    expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 50)).not.toBeNull();
   });
 });
