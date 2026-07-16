@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
-import type { Format, Prisma } from "@prisma/client";
+import type { Format, Prisma, ReadStatus } from "@prisma/client";
 
 export interface SearchResultCopy {
   id: string;
@@ -16,6 +16,8 @@ export interface SearchResult {
   physicalCopies: SearchResultCopy[];
   hasEbook: boolean;
   hasAudiobook: boolean;
+  readStatus: ReadStatus | null;
+  rating: number | null;
 }
 
 export type OwnershipType = "physical" | "ebook" | "audiobook";
@@ -24,7 +26,10 @@ export interface SearchOptions {
   query?: string;
   types?: OwnershipType[];
   format?: Format;
+  status?: ReadStatusFilterValue[];
 }
+
+export type ReadStatusFilterValue = "to_read" | "reading" | "read" | "unrated";
 
 // `as const satisfies` ties each literal to the real type, so a typo (e.g.
 // "PAPERBAK") fails to compile instead of silently being an always-false
@@ -33,6 +38,18 @@ export interface SearchOptions {
 // string (from a URL param), not already narrowed to the literal union.
 const VALID_FORMATS = ["HARDCOVER", "PAPERBACK", "MASS_MARKET", "OTHER"] as const satisfies readonly Format[];
 const VALID_TYPES = ["physical", "ebook", "audiobook"] as const satisfies readonly OwnershipType[];
+const VALID_STATUS_VALUES = [
+  "to_read",
+  "reading",
+  "read",
+  "unrated",
+] as const satisfies readonly ReadStatusFilterValue[];
+
+const STATUS_VALUE_TO_ENUM: Record<Exclude<ReadStatusFilterValue, "unrated">, ReadStatus> = {
+  to_read: "TO_READ",
+  reading: "READING",
+  read: "READ",
+};
 
 export function parseFormatParam(value: string | undefined): Format | undefined {
   if (!value) return undefined;
@@ -50,12 +67,24 @@ export function parseTypesParam(
   return parsed.length > 0 ? parsed : undefined;
 }
 
+export function parseStatusParam(
+  value: string | string[] | undefined,
+): ReadStatusFilterValue[] | undefined {
+  if (!value) return undefined;
+  const tokens = Array.isArray(value) ? value.flatMap((v) => v.split(",")) : value.split(",");
+  const parsed = tokens
+    .map((t) => t.trim())
+    .filter((t): t is ReadStatusFilterValue => (VALID_STATUS_VALUES as readonly string[]).includes(t));
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
   const format = options.format;
+  const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
 
-  if (!trimmed && !types && !format) return [];
+  if (!trimmed && !types && !format && !statusValues) return [];
 
   const includePhysical = !types || types.includes("physical");
   const includeEbook = !types || types.includes("ebook");
@@ -91,6 +120,17 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     if (includeEbook) ownershipOr.push({ hasEbook: true });
     if (includeAudiobook) ownershipOr.push({ hasAudiobook: true });
     filters.push({ OR: ownershipOr });
+  }
+  if (statusValues) {
+    const statusOr: Prisma.BookWhereInput[] = [];
+    for (const value of statusValues) {
+      if (value === "unrated") {
+        statusOr.push({ rating: null });
+      } else {
+        statusOr.push({ readStatus: STATUS_VALUE_TO_ENUM[value] });
+      }
+    }
+    filters.push({ OR: statusOr });
   }
   if (trimmed) {
     filters.push({
@@ -133,5 +173,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
       : [],
     hasEbook: includeEbook ? book.hasEbook : false,
     hasAudiobook: includeAudiobook ? book.hasAudiobook : false,
+    readStatus: book.readStatus,
+    rating: book.rating,
   }));
 }

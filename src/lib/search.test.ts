@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { searchCatalog, parseFormatParam, parseTypesParam } from "@/lib/search";
+import { searchCatalog, parseFormatParam, parseTypesParam, parseStatusParam } from "@/lib/search";
 
 afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
@@ -224,6 +224,86 @@ describe("searchCatalog", () => {
     expect(results.map((r) => r.title)).toContain("Test Search Standalone Format Paperback");
     expect(results.map((r) => r.title)).not.toContain("Test Search Standalone Format Hardcover");
   });
+
+  it("filters to only books with a given read status", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search Reading Status Book", readStatus: "READING" },
+    });
+    await prisma.book.create({
+      data: { title: "Test Search Read Status Book", readStatus: "READ" },
+    });
+
+    const results = await searchCatalog({ status: ["reading"] });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Reading Status Book");
+    expect(results.map((r) => r.title)).not.toContain("Test Search Read Status Book");
+  });
+
+  it("ORs multiple status values together", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search To Read Status Book", readStatus: "TO_READ" },
+    });
+    await prisma.book.create({
+      data: { title: "Test Search Read Status Book Two", readStatus: "READ" },
+    });
+    await prisma.book.create({
+      data: { title: "Test Search No Status Book" },
+    });
+
+    const results = await searchCatalog({ status: ["to_read", "read"] });
+
+    expect(results.map((r) => r.title)).toEqual(
+      expect.arrayContaining([
+        "Test Search To Read Status Book",
+        "Test Search Read Status Book Two",
+      ]),
+    );
+    expect(results.map((r) => r.title)).not.toContain("Test Search No Status Book");
+  });
+
+  it("filters to only unrated books", async () => {
+    await prisma.book.create({ data: { title: "Test Search Unrated Book" } });
+    await prisma.book.create({ data: { title: "Test Search Rated Book", rating: 3 } });
+
+    const results = await searchCatalog({ status: ["unrated"] });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Unrated Book");
+    expect(results.map((r) => r.title)).not.toContain("Test Search Rated Book");
+  });
+
+  it("combines a status filter with an existing types filter", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Search Physical Reading Book",
+        readStatus: "READING",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Search Ebook Reading Book",
+        readStatus: "READING",
+        hasEbook: true,
+        absEbookItemIds: ["search-test-status-ebook"],
+      },
+    });
+
+    const results = await searchCatalog({ types: ["physical"], status: ["reading"] });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Physical Reading Book");
+    expect(results.map((r) => r.title)).not.toContain("Test Search Ebook Reading Book");
+  });
+
+  it("includes readStatus and rating on every result", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search Status Display Book", readStatus: "READ", rating: 5 },
+    });
+
+    const results = await searchCatalog({ query: "Test Search Status Display Book" });
+
+    expect(results[0].readStatus).toBe("READ");
+    expect(results[0].rating).toBe(5);
+  });
 });
 
 describe("parseFormatParam", () => {
@@ -265,5 +345,32 @@ describe("parseTypesParam", () => {
 
   it("returns undefined when every token is unrecognized", () => {
     expect(parseTypesParam("bogus,alsobogus")).toBeUndefined();
+  });
+});
+
+describe("parseStatusParam", () => {
+  it("returns undefined for an undefined or empty value", () => {
+    expect(parseStatusParam(undefined)).toBeUndefined();
+    expect(parseStatusParam("")).toBeUndefined();
+  });
+
+  it("parses a single value", () => {
+    expect(parseStatusParam("reading")).toEqual(["reading"]);
+  });
+
+  it("parses a comma-separated value", () => {
+    expect(parseStatusParam("reading,unrated")).toEqual(["reading", "unrated"]);
+  });
+
+  it("parses an array value (repeated same-name checkboxes)", () => {
+    expect(parseStatusParam(["to_read", "read"])).toEqual(["to_read", "read"]);
+  });
+
+  it("drops unrecognized tokens and keeps valid ones", () => {
+    expect(parseStatusParam("reading,bogus,read")).toEqual(["reading", "read"]);
+  });
+
+  it("returns undefined when every token is unrecognized", () => {
+    expect(parseStatusParam("bogus,alsobogus")).toBeUndefined();
   });
 });
