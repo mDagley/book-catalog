@@ -6,6 +6,12 @@ datasource db {
   provider = "postgresql"
 }
 
+enum ReadStatus {
+  TO_READ
+  READING
+  READ
+}
+
 model Book {
   id        String         @id @default(cuid())
   title     String
@@ -19,6 +25,11 @@ model Book {
   absEbookItemIds     String[]  @default([])
   absAudiobookItemIds String[]  @default([])
   lastAbsSyncedAt     DateTime?
+
+  readStatus       ReadStatus?
+  readStatusManual Boolean     @default(false)
+  rating           Int?
+  ratingManual     Boolean     @default(false)
 }
 
 model PhysicalCopy {
