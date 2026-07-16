@@ -12,6 +12,12 @@ afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
     where: { book: { title: { startsWith: "Test Search" } } },
   });
+  await prisma.ebookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Search" } } },
+  });
+  await prisma.audiobookCopy.deleteMany({
+    where: { book: { title: { startsWith: "Test Search" } } },
+  });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Search" } } });
 });
 
@@ -22,7 +28,7 @@ describe("searchCatalog", () => {
         title: "Test Search Mistborn",
         author: "Brandon Sanderson",
         hasEbook: true,
-        absEbookItemIds: ["search-test-mistborn-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-mistborn-ebook" } },
         copies: { create: { format: "PAPERBACK", publisher: "Tor", publishYear: 2010 } },
       },
     });
@@ -76,7 +82,7 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Ebook Only Book",
         hasEbook: true,
-        absEbookItemIds: ["search-test-ebook-only"],
+        ebookCopies: { create: { absItemId: "search-test-ebook-only" } },
       },
     });
 
@@ -94,7 +100,7 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Audiobook Only Book",
         hasAudiobook: true,
-        absAudiobookItemIds: ["search-test-audiobook-only"],
+        audiobookCopies: { create: { absItemId: "search-test-audiobook-only" } },
       },
     });
 
@@ -151,7 +157,7 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Combo Ebook",
         hasEbook: true,
-        absEbookItemIds: ["search-test-combo-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-combo-ebook" } },
       },
     });
 
@@ -165,7 +171,7 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Format Noop Ebook",
         hasEbook: true,
-        absEbookItemIds: ["search-test-format-noop-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-format-noop-ebook" } },
       },
     });
 
@@ -179,7 +185,7 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Ebook With Multiple Formats",
         hasEbook: true,
-        absEbookItemIds: ["search-test-multi-format-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-multi-format-ebook" } },
         copies: { create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }] },
       },
     });
@@ -197,9 +203,9 @@ describe("searchCatalog", () => {
       data: {
         title: "Test Search Both Ebook And Audiobook",
         hasEbook: true,
-        absEbookItemIds: ["search-test-both-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-both-ebook" } },
         hasAudiobook: true,
-        absAudiobookItemIds: ["search-test-both-audiobook"],
+        audiobookCopies: { create: { absItemId: "search-test-both-audiobook" } },
       },
     });
 
@@ -290,7 +296,7 @@ describe("searchCatalog", () => {
         title: "Test Search Ebook Reading Book",
         readStatus: "READING",
         hasEbook: true,
-        absEbookItemIds: ["search-test-status-ebook"],
+        ebookCopies: { create: { absItemId: "search-test-status-ebook" } },
       },
     });
 

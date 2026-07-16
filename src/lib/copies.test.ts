@@ -8,6 +8,8 @@ const createdBookIds: string[] = [];
 afterEach(async () => {
   for (const id of createdBookIds) {
     await prisma.physicalCopy.deleteMany({ where: { bookId: id } });
+    await prisma.ebookCopy.deleteMany({ where: { bookId: id } });
+    await prisma.audiobookCopy.deleteMany({ where: { bookId: id } });
     await prisma.book.deleteMany({ where: { id } });
   }
   createdBookIds.length = 0;
@@ -134,7 +136,7 @@ describe("deleteCopyData", () => {
     const bookId = await createTestBook();
     await prisma.book.update({
       where: { id: bookId },
-      data: { hasEbook: true, absEbookItemIds: ["test-copies-ebook-link"] },
+      data: { hasEbook: true, ebookCopies: { create: { absItemId: "test-copies-ebook-link" } } },
     });
     const [onlyCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
 
