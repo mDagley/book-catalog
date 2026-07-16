@@ -94,8 +94,14 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
 // re-running a sync, unlike title/author/isbn).
 export async function mergeBooksData(
   keepId: string,
-  mergeIds: string[],
+  rawMergeIds: string[],
 ): Promise<{ ok: true } | { error: string }> {
+  // De-duplicated up front: Prisma's `id: { in: [...] }` already de-dupes
+  // ids internally, so comparing its result's length against a
+  // not-yet-deduplicated input list below would wrongly report "not found"
+  // whenever the same id appeared twice in `rawMergeIds`.
+  const mergeIds = Array.from(new Set(rawMergeIds));
+
   if (mergeIds.includes(keepId)) {
     return { error: "Cannot merge a book into itself" };
   }

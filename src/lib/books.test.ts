@@ -314,6 +314,36 @@ describe("createBookWithCopyData", () => {
     expect(book.isbn).toBeNull(); // not backfilled from the scan -- matched by title, not by ISBN
   });
 
+  it("does not fuzzy-match a purely physical existing book, even with an identical title", async () => {
+    // The fuzzy-match fallback exists specifically to reattach a scanned
+    // physical copy to an already-owned ebook/audiobook entry -- it must not
+    // also merge two unrelated physical-only books together just because
+    // their titles happen to match (e.g. two different real books that
+    // happen to share a common title).
+    const existing = await prisma.book.create({
+      data: {
+        title: "Test Books Purely Physical Existing Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    createdBookIds.push(existing.id);
+
+    const result = await createBookWithCopyData({
+      title: "Test Books Purely Physical Existing Book",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+    expect(result.bookId).not.toBe(existing.id);
+  });
+
   it("creates a new book when no existing title is a close enough fuzzy match", async () => {
     const existing = await prisma.book.create({
       data: { title: "Completely Unrelated Existing Book" },

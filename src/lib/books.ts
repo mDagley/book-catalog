@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
-import { titleMatchScore, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { findBestTitleMatch } from "@/lib/matching";
 
 export interface BookFormState {
   error?: string;
@@ -102,20 +102,27 @@ export async function createBookWithCopyData(
   // physical copy of the same title -- without this, every such scan would
   // create a duplicate Book row instead of attaching to the existing one.
   // Mirrors the same fuzzy-match-then-attach pattern absSync.ts already uses
-  // for ABS items. As with that, the matched book's title/author/isbn are
-  // never overwritten here, both to protect a good existing title from a
-  // differently-formatted scan input, and to limit the damage of a
-  // false-positive fuzzy match.
-  const candidates = await prisma.book.findMany({ select: { id: true, title: true } });
-  let titleMatch: { id: string; title: string } | null = null;
-  let bestScore = -1;
-  for (const candidate of candidates) {
-    const score = titleMatchScore(candidate.title, title);
-    if (score >= DEFAULT_MATCH_THRESHOLD && score > bestScore) {
-      titleMatch = candidate;
-      bestScore = score;
-    }
-  }
+  // for ABS items (both now share findBestTitleMatch from matching.ts). As
+  // with that, the matched book's title/author/isbn are never overwritten
+  // here, both to protect a good existing title from a differently-formatted
+  // scan input, and to limit the damage of a false-positive fuzzy match.
+  //
+  // Candidates are restricted to books already known to be owned digitally
+  // (hasEbook/hasAudiobook) -- this fallback exists specifically to reattach
+  // a scanned physical copy to an already-owned ebook/audiobook entry, not
+  // to deduplicate physical-only books against each other. Narrowing the
+  // pool this way both avoids scanning every Book row on every no-ISBN-match
+  // creation and reduces the odds of a false-positive fuzzy match wrongly
+  // merging two unrelated physical-only books that happen to share a
+  // similar title. `orderBy: createdAt asc` matches the ISBN branch above:
+  // if more than one candidate ties for best score, the oldest wins
+  // deterministically rather than depending on unspecified DB row order.
+  const candidates = await prisma.book.findMany({
+    where: { OR: [{ hasEbook: true }, { hasAudiobook: true }] },
+    select: { id: true, title: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const titleMatch = findBestTitleMatch(candidates, title);
   if (titleMatch) {
     await prisma.physicalCopy.create({
       data: { ...copyData, bookId: titleMatch.id },

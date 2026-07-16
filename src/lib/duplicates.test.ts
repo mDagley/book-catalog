@@ -176,4 +176,23 @@ describe("mergeBooksData", () => {
 
     expect(result).toEqual({ error: "One or more books to merge were not found" });
   });
+
+  it("does not falsely report a missing book when the same id is passed twice", async () => {
+    const keep = await prisma.book.create({ data: { title: "Test Duplicates Repeated Id Book" } });
+    const merge = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Repeated Id Book",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    const result = await mergeBooksData(keep.id, [merge.id, merge.id]);
+
+    expect(result).toEqual({ ok: true });
+    const kept = await prisma.book.findUniqueOrThrow({
+      where: { id: keep.id },
+      include: { copies: true },
+    });
+    expect(kept.copies).toHaveLength(1);
+  });
 });
