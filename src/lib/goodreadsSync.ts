@@ -39,7 +39,7 @@ function parseRating(raw: unknown): number | null {
 
 export async function fetchGoodreadsPage(
   userId: string,
-  shelf: GoodreadsShelf,
+  shelf: string,
   page: number,
 ): Promise<GoodreadsBook[]> {
   const url = new URL(`https://www.goodreads.com/review/list_rss/${userId}`);
@@ -111,7 +111,7 @@ export async function fetchGoodreadsPage(
 
 export async function fetchAllGoodreadsBooks(
   userId: string,
-  shelf: GoodreadsShelf,
+  shelf: string,
 ): Promise<GoodreadsBook[]> {
   const allBooks: GoodreadsBook[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
