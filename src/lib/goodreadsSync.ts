@@ -194,11 +194,13 @@ async function applyShelfToBooks(
 // matched against existing Book rows to set readStatus/rating -- see
 // docs/superpowers/specs/2026-07-15-read-status-ratings-design.md.
 export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number }> {
-  const shelfItems: Record<GoodreadsShelf, GoodreadsBook[]> = {
-    "to-read": await fetchAllGoodreadsBooks(userId, "to-read"),
-    "currently-reading": await fetchAllGoodreadsBooks(userId, "currently-reading"),
-    read: await fetchAllGoodreadsBooks(userId, "read"),
-  };
+  const shelfItems = Object.fromEntries(
+    await Promise.all(
+      STATUS_SYNC_SHELVES.map(
+        async (shelf) => [shelf, await fetchAllGoodreadsBooks(userId, shelf)] as const,
+      ),
+    ),
+  ) as Record<GoodreadsShelf, GoodreadsBook[]>;
 
   await prisma.$transaction([
     prisma.goodreadsTbrItem.deleteMany(),
