@@ -1,6 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { searchCatalog, parseFormatParam, parseTypesParam, parseStatusParam } from "@/lib/search";
+import {
+  searchCatalog,
+  parseFormatParam,
+  parseTypesParam,
+  parseStatusParam,
+  parseStatusModeParam,
+} from "@/lib/search";
 
 afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
@@ -304,6 +310,47 @@ describe("searchCatalog", () => {
     expect(results[0].readStatus).toBe("READ");
     expect(results[0].rating).toBe(5);
   });
+
+  it("ORs status values by default (no statusMode given)", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search Default Or Read Unrated Book", readStatus: "READ" },
+    });
+
+    const results = await searchCatalog({ status: ["reading", "unrated"] });
+
+    // Not "reading", but unrated -- an OR should still include it.
+    expect(results.map((r) => r.title)).toContain("Test Search Default Or Read Unrated Book");
+  });
+
+  it("ANDs status values together when statusMode is 'and'", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search And Reading Unrated Book", readStatus: "READING" },
+    });
+    await prisma.book.create({
+      data: { title: "Test Search And Reading Rated Book", readStatus: "READING", rating: 3 },
+    });
+
+    const results = await searchCatalog({
+      status: ["reading", "unrated"],
+      statusMode: "and",
+    });
+
+    expect(results.map((r) => r.title)).toContain("Test Search And Reading Unrated Book");
+    expect(results.map((r) => r.title)).not.toContain("Test Search And Reading Rated Book");
+  });
+
+  it("returns no results when ANDing two status values a single book can never satisfy at once", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search And Contradiction Book", readStatus: "TO_READ" },
+    });
+
+    const results = await searchCatalog({
+      status: ["to_read", "reading"],
+      statusMode: "and",
+    });
+
+    expect(results.map((r) => r.title)).not.toContain("Test Search And Contradiction Book");
+  });
 });
 
 describe("parseFormatParam", () => {
@@ -372,5 +419,23 @@ describe("parseStatusParam", () => {
 
   it("returns undefined when every token is unrecognized", () => {
     expect(parseStatusParam("bogus,alsobogus")).toBeUndefined();
+  });
+});
+
+describe("parseStatusModeParam", () => {
+  it("defaults to 'or' for an undefined value", () => {
+    expect(parseStatusModeParam(undefined)).toBe("or");
+  });
+
+  it("returns 'and' for 'and'", () => {
+    expect(parseStatusModeParam("and")).toBe("and");
+  });
+
+  it("returns 'or' for 'or'", () => {
+    expect(parseStatusModeParam("or")).toBe("or");
+  });
+
+  it("defaults to 'or' for an unrecognized value", () => {
+    expect(parseStatusModeParam("bogus")).toBe("or");
   });
 });

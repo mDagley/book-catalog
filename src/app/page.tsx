@@ -4,6 +4,7 @@ import {
   parseFormatParam,
   parseTypesParam,
   parseStatusParam,
+  parseStatusModeParam,
   type OwnershipType,
 } from "@/lib/search";
 import { FORMAT_OPTIONS, FORMAT_LABELS } from "@/components/CopyFormFields";
@@ -30,15 +31,23 @@ export default async function HomePage({
     types?: string | string[];
     format?: string;
     status?: string | string[];
+    statusMode?: string;
   }>;
 }) {
-  const { q, types: typesParam, format: formatParam, status: statusParam } = await searchParams;
+  const {
+    q,
+    types: typesParam,
+    format: formatParam,
+    status: statusParam,
+    statusMode: statusModeParam,
+  } = await searchParams;
   const query = q?.trim() ?? "";
   const types = parseTypesParam(typesParam);
   const format = parseFormatParam(formatParam);
   const status = parseStatusParam(statusParam);
+  const statusMode = parseStatusModeParam(statusModeParam);
 
-  const results = await searchCatalog({ query, types, format, status });
+  const results = await searchCatalog({ query, types, format, status, statusMode });
   const hasActiveFilters = Boolean(query || types || format || status);
 
   return (
@@ -79,6 +88,27 @@ export default async function HomePage({
               {opt.label}
             </label>
           ))}
+          <span className="flex items-center gap-1 text-gray-500">
+            Match:
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="statusMode"
+                value="or"
+                defaultChecked={statusMode === "or"}
+              />
+              Any
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="statusMode"
+                value="and"
+                defaultChecked={statusMode === "and"}
+              />
+              All
+            </label>
+          </span>
           <select
             name="format"
             defaultValue={format ?? ""}

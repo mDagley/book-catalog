@@ -27,9 +27,11 @@ export interface SearchOptions {
   types?: OwnershipType[];
   format?: Format;
   status?: ReadStatusFilterValue[];
+  statusMode?: StatusFilterMode;
 }
 
 export type ReadStatusFilterValue = "to_read" | "reading" | "read" | "unrated";
+export type StatusFilterMode = "or" | "and";
 
 // `as const satisfies` ties each literal to the real type, so a typo (e.g.
 // "PAPERBAK") fails to compile instead of silently being an always-false
@@ -78,6 +80,13 @@ export function parseStatusParam(
   return parsed.length > 0 ? parsed : undefined;
 }
 
+// Defaults to "or" (the pre-existing behavior) for anything not exactly
+// "and" -- missing, malformed, or unrecognized values all fall back to the
+// same safe default rather than erroring.
+export function parseStatusModeParam(value: string | undefined): StatusFilterMode {
+  return value === "and" ? "and" : "or";
+}
+
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
@@ -122,15 +131,17 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     filters.push({ OR: ownershipOr });
   }
   if (statusValues) {
-    const statusOr: Prisma.BookWhereInput[] = [];
-    for (const value of statusValues) {
-      if (value === "unrated") {
-        statusOr.push({ rating: null });
-      } else {
-        statusOr.push({ readStatus: STATUS_VALUE_TO_ENUM[value] });
-      }
-    }
-    filters.push({ OR: statusOr });
+    const statusConditions: Prisma.BookWhereInput[] = statusValues.map((value) =>
+      value === "unrated" ? { rating: null } : { readStatus: STATUS_VALUE_TO_ENUM[value] },
+    );
+    // "and" is meaningful when combining a status with "unrated" (e.g.
+    // "reading AND unrated"); ANDing two distinct readStatus values together
+    // isn't a separate case to guard against -- a Book's readStatus is a
+    // single column, so requiring it to equal two different values at once
+    // naturally (and correctly) matches nothing at the SQL level, with no
+    // special-casing needed here.
+    const statusMode = options.statusMode ?? "or";
+    filters.push(statusMode === "and" ? { AND: statusConditions } : { OR: statusConditions });
   }
   if (trimmed) {
     filters.push({
