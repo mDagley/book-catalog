@@ -9,7 +9,18 @@ export async function register() {
   const { syncGoodreadsTbr } = await import("@/lib/goodreadsSync");
   const { syncOwnedPhysicalBooks } = await import("@/lib/ownedPhysicalSync");
 
-  // Every 30 minutes — within the design spec's "every 30-60 minutes" range.
+  // A single cron job running all three syncs sequentially, every 30
+  // minutes -- within the design spec's "every 30-60 minutes" range. This
+  // used to be two separate cron.schedule() calls on offset expressions,
+  // but an offset only reduces the chance of overlap, it doesn't prevent
+  // it (e.g. a slow ABS sync run can still still be in progress when the
+  // next job's start time arrives). Running everything inside one
+  // scheduled task with { noOverlap: true } makes concurrent execution of
+  // these syncs structurally impossible rather than merely unlikely --
+  // this matters because running them concurrently on the
+  // resource-constrained production VPS previously starved the DB
+  // connection pool badly enough to fail a transaction outright with
+  // Prisma P2028 ("Unable to start a transaction in the given time").
   cron.schedule(
     "*/30 * * * *",
     async () => {
@@ -17,27 +28,15 @@ export async function register() {
       const absToken = process.env.ABS_TOKEN;
       if (!absUrl || !absToken) {
         console.error("Skipping scheduled ABS sync: ABS_URL/ABS_TOKEN not set");
-        return;
+      } else {
+        try {
+          const result = await syncAbsCache(absUrl, absToken);
+          console.log(`Scheduled ABS sync: ${result.synced} items synced`);
+        } catch (error) {
+          console.error("Scheduled ABS sync failed:", error);
+        }
       }
-      try {
-        const result = await syncAbsCache(absUrl, absToken);
-        console.log(`Scheduled ABS sync: ${result.synced} items synced`);
-      } catch (error) {
-        console.error("Scheduled ABS sync failed:", error);
-      }
-    },
-    { noOverlap: true },
-  );
 
-  // Offset 5 minutes from the ABS sync's "*/30 * * * *" -- both jobs used to
-  // share the identical expression, so they fired at the exact same instant
-  // every 30 minutes. On the resource-constrained production VPS, running
-  // both syncs' many sequential DB round-trips concurrently starved the
-  // connection pool badly enough that this transaction failed with Prisma
-  // P2028 ("Unable to start a transaction in the given time").
-  cron.schedule(
-    "5,35 * * * *",
-    async () => {
       const userId = process.env.GOODREADS_USER_ID;
       if (!userId) {
         console.error("Skipping scheduled Goodreads sync: GOODREADS_USER_ID not set");
@@ -60,5 +59,5 @@ export async function register() {
     { noOverlap: true },
   );
 
-  console.log("Registered ABS and Goodreads sync cron jobs (every 30 minutes)");
+  console.log("Registered ABS and Goodreads sync cron job (every 30 minutes)");
 }

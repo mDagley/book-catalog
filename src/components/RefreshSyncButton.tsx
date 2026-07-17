@@ -19,7 +19,6 @@ export function RefreshSyncButton() {
       // syncs make many sequential DB round-trips. See instrumentation.ts's
       // matching cron-stagger fix for the same underlying contention.
       const absResponse = await fetch("/api/sync/abs", { method: "POST" });
-      const goodreadsResponse = await fetch("/api/sync/goodreads", { method: "POST" });
 
       // An expired session makes middleware redirect these requests to
       // /login, which returns the login page's HTML with a 200 status.
@@ -27,10 +26,15 @@ export function RefreshSyncButton() {
       // tells us it happened — check this BEFORE calling .json(), since
       // parsing the HTML body as JSON would throw a SyntaxError that the
       // generic catch block below would misreport as a connectivity issue.
-      if (absResponse.redirected || goodreadsResponse.redirected) {
+      // Checked after the first request (not both) so an expired session
+      // short-circuits before firing the second request at all — it would
+      // just redirect too, so there's no point waiting on it.
+      if (absResponse.redirected) {
         setError("Your session has expired — please log in again.");
         return;
       }
+
+      const goodreadsResponse = await fetch("/api/sync/goodreads", { method: "POST" });
 
       const absData = await absResponse.json();
       const goodreadsData = await goodreadsResponse.json();
