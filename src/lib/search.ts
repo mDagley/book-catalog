@@ -87,6 +87,23 @@ export function parseStatusModeParam(value: string | undefined): StatusFilterMod
   return value === "and" ? "and" : "or";
 }
 
+// "and" is meaningful when combining a status with "unrated" (e.g.
+// "reading AND unrated"); ANDing two distinct readStatus values together
+// isn't a separate case to guard against -- a Book's readStatus is a
+// single column, so requiring it to equal two different values at once
+// naturally (and correctly) matches nothing at the SQL level, with no
+// special-casing needed here.
+export function buildStatusWhere(
+  statusValues: ReadStatusFilterValue[] | undefined,
+  statusMode: StatusFilterMode,
+): Prisma.BookWhereInput | undefined {
+  if (!statusValues || statusValues.length === 0) return undefined;
+  const statusConditions: Prisma.BookWhereInput[] = statusValues.map((value) =>
+    value === "unrated" ? { rating: null } : { readStatus: STATUS_VALUE_TO_ENUM[value] },
+  );
+  return statusMode === "and" ? { AND: statusConditions } : { OR: statusConditions };
+}
+
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
@@ -130,19 +147,8 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     if (includeAudiobook) ownershipOr.push({ hasAudiobook: true });
     filters.push({ OR: ownershipOr });
   }
-  if (statusValues) {
-    const statusConditions: Prisma.BookWhereInput[] = statusValues.map((value) =>
-      value === "unrated" ? { rating: null } : { readStatus: STATUS_VALUE_TO_ENUM[value] },
-    );
-    // "and" is meaningful when combining a status with "unrated" (e.g.
-    // "reading AND unrated"); ANDing two distinct readStatus values together
-    // isn't a separate case to guard against -- a Book's readStatus is a
-    // single column, so requiring it to equal two different values at once
-    // naturally (and correctly) matches nothing at the SQL level, with no
-    // special-casing needed here.
-    const statusMode = options.statusMode ?? "or";
-    filters.push(statusMode === "and" ? { AND: statusConditions } : { OR: statusConditions });
-  }
+  const statusWhere = buildStatusWhere(statusValues, options.statusMode ?? "or");
+  if (statusWhere) filters.push(statusWhere);
   if (trimmed) {
     filters.push({
       OR: [

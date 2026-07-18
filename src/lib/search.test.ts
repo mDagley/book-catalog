@@ -6,6 +6,7 @@ import {
   parseTypesParam,
   parseStatusParam,
   parseStatusModeParam,
+  buildStatusWhere,
 } from "@/lib/search";
 
 afterEach(async () => {
@@ -356,6 +357,30 @@ describe("searchCatalog", () => {
     });
 
     expect(results.map((r) => r.title)).not.toContain("Test Search And Contradiction Book");
+  });
+});
+
+describe("buildStatusWhere", () => {
+  it("returns undefined when no status values are given", () => {
+    expect(buildStatusWhere(undefined, "or")).toBeUndefined();
+  });
+
+  it("returns undefined for an empty status array", () => {
+    expect(buildStatusWhere([], "or")).toBeUndefined();
+  });
+
+  it("builds an OR clause of readStatus/rating conditions for 'or' mode", () => {
+    const where = buildStatusWhere(["reading", "unrated"], "or");
+    expect(where).toEqual({
+      OR: [{ readStatus: "READING" }, { rating: null }],
+    });
+  });
+
+  it("builds an AND clause of readStatus/rating conditions for 'and' mode", () => {
+    const where = buildStatusWhere(["read", "unrated"], "and");
+    expect(where).toEqual({
+      AND: [{ readStatus: "READ" }, { rating: null }],
+    });
   });
 });
 

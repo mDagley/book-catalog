@@ -1,17 +1,36 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { parseFormatParam } from "@/lib/search";
+import type { Prisma } from "@prisma/client";
+import {
+  parseFormatParam,
+  parseStatusParam,
+  parseStatusModeParam,
+  buildStatusWhere,
+} from "@/lib/search";
 import { normalizeIsbn } from "@/lib/books";
 import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
+import { STATUS_FILTER_OPTIONS } from "@/components/ReadingProgressFields";
 
 export default async function BooksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; format?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    format?: string;
+    status?: string | string[];
+    statusMode?: string;
+  }>;
 }) {
-  const { q, format: formatParam } = await searchParams;
+  const {
+    q,
+    format: formatParam,
+    status: statusParam,
+    statusMode: statusModeParam,
+  } = await searchParams;
   const query = q?.trim() || "";
   const format = parseFormatParam(formatParam);
+  const status = parseStatusParam(statusParam);
+  const statusMode = parseStatusModeParam(statusModeParam);
 
   // Book.isbn is always stored normalized (digits + uppercase X only, no
   // hyphens/spaces) -- mirror the same isbn-shaped guard + normalization
@@ -21,21 +40,31 @@ export default async function BooksPage({
   const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(query);
   const normalizedIsbnQuery = query && looksLikeIsbnQuery ? normalizeIsbn(query) : "";
 
+  // Built as an explicit filters array combined via `{ AND: filters }`
+  // (matching searchCatalog's pattern) rather than spreading multiple
+  // conditions into one flat where object -- buildStatusWhere can itself
+  // return a top-level `OR` key, which would silently collide with the
+  // query-text OR clause below under a plain object spread.
+  const filters: Prisma.BookWhereInput[] = [];
+  if (query) {
+    filters.push({
+      OR: [
+        { title: { contains: query, mode: "insensitive" } },
+        { author: { contains: query, mode: "insensitive" } },
+        ...(normalizedIsbnQuery
+          ? [{ isbn: { contains: normalizedIsbnQuery, mode: "insensitive" as const } }]
+          : []),
+      ],
+    });
+  }
+  if (format) {
+    filters.push({ copies: { some: { format } } });
+  }
+  const statusWhere = buildStatusWhere(status, statusMode);
+  if (statusWhere) filters.push(statusWhere);
+
   const books = await prisma.book.findMany({
-    where: {
-      ...(query
-        ? {
-            OR: [
-              { title: { contains: query, mode: "insensitive" } },
-              { author: { contains: query, mode: "insensitive" } },
-              ...(normalizedIsbnQuery
-                ? [{ isbn: { contains: normalizedIsbnQuery, mode: "insensitive" as const } }]
-                : []),
-            ],
-          }
-        : {}),
-      ...(format ? { copies: { some: { format } } } : {}),
-    },
+    where: { AND: filters },
     include: { copies: true },
     orderBy: { title: "asc" },
   });
@@ -63,7 +92,39 @@ export default async function BooksPage({
           placeholder="Search by title, author, or ISBN"
           className="w-full rounded border p-2"
         />
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {STATUS_FILTER_OPTIONS.map((opt) => (
+            <label key={opt.value} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                name="status"
+                value={opt.value}
+                defaultChecked={status?.includes(opt.value) ?? false}
+              />
+              {opt.label}
+            </label>
+          ))}
+          <span className="flex items-center gap-1 text-gray-500">
+            Match:
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="statusMode"
+                value="or"
+                defaultChecked={statusMode === "or"}
+              />
+              Any
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="statusMode"
+                value="and"
+                defaultChecked={statusMode === "and"}
+              />
+              All
+            </label>
+          </span>
           <select
             name="format"
             defaultValue={format ?? ""}
