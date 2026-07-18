@@ -11,6 +11,14 @@ export interface TbrGapItem {
 /** Tag used to invalidate the cached TBR gap computation after a sync completes. */
 export const TBR_GAP_CACHE_TAG = "tbr-gap";
 
+// Author (trimmed) if present, else title (trimmed) -- used both to sort the
+// full list and to decide which letter bucket an item falls into in
+// groupByInitial, so the two always agree on what "browsing alphabetically"
+// means for a given item.
+function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
+  return item.author?.trim() || item.title.trim();
+}
+
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const [tbrItems, books] = await Promise.all([
     prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, author: true } }),
@@ -21,7 +29,8 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
 
   return tbrItems
     .filter((tbr) => !ownedTitles.some((owned) => isTitleMatch(tbr.title, owned)))
-    .map((tbr) => ({ id: tbr.id, title: tbr.title, author: tbr.author }));
+    .map((tbr) => ({ id: tbr.id, title: tbr.title, author: tbr.author }))
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
 }
 
 // Cache the expensive fuzzy-matching computation rather than re-running it on
@@ -40,7 +49,12 @@ const getCachedTbrGap = unstable_cache(computeTbrGap, ["tbr-gap"], {
   revalidate: 1800,
 });
 
-export async function getTbrGap(): Promise<TbrGapItem[]> {
+// `query` is applied in-memory, after the cache lookup, against the full
+// (already sorted) gap list -- filtering ~800 items in-process is cheap, and
+// keeping the cache keyed only on the unfiltered gap avoids a per-query cache
+// entry for what would otherwise be an unbounded set of possible query
+// strings.
+export async function getTbrGap(query?: string): Promise<TbrGapItem[]> {
   // unstable_cache requires an active Next.js request/render context (it
   // looks up an incrementalCache via async storage), which a Vitest unit
   // test running in a plain Node process never has. Rather than calling
@@ -51,8 +65,42 @@ export async function getTbrGap(): Promise<TbrGapItem[]> {
   // directly with no fallback: a real caching failure should throw loudly
   // (a failed page load) rather than silently degrade into a slow,
   // uncached computation.
-  if (process.env.NODE_ENV === "test") {
-    return computeTbrGap();
+  const gap = process.env.NODE_ENV === "test" ? await computeTbrGap() : await getCachedTbrGap();
+
+  const trimmed = query?.trim().toLowerCase();
+  if (!trimmed) return gap;
+  return gap.filter(
+    (item) =>
+      item.title.toLowerCase().includes(trimmed) ||
+      (item.author?.toLowerCase().includes(trimmed) ?? false),
+  );
+}
+
+export interface TbrGapGroup {
+  letter: string;
+  items: TbrGapItem[];
+}
+
+// Assumes `items` is already sorted by the same sortKey used here (true for
+// whatever getTbrGap returns) -- this only groups, it doesn't re-sort, so
+// each group's items stay in the order they arrived in.
+export function groupByInitial(items: TbrGapItem[]): TbrGapGroup[] {
+  const groups = new Map<string, TbrGapItem[]>();
+  for (const item of items) {
+    const firstChar = sortKey(item).charAt(0).toUpperCase();
+    const letter = /[A-Z]/.test(firstChar) ? firstChar : "#";
+    const group = groups.get(letter);
+    if (group) {
+      group.push(item);
+    } else {
+      groups.set(letter, [item]);
+    }
   }
-  return getCachedTbrGap();
+
+  const letters = [...groups.keys()].sort((a, b) => {
+    if (a === "#") return 1;
+    if (b === "#") return -1;
+    return a.localeCompare(b);
+  });
+  return letters.map((letter) => ({ letter, items: groups.get(letter)! }));
 }
