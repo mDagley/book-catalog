@@ -1,9 +1,14 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { createBookWithCopyData } from "@/lib/books";
 import { addCopyData, updateCopyData, deleteCopyData } from "@/lib/copies";
+import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
+const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const createdBookIds: string[] = [];
+const savedCoverPaths: string[] = [];
 
 afterEach(async () => {
   for (const id of createdBookIds) {
@@ -13,6 +18,10 @@ afterEach(async () => {
     await prisma.book.deleteMany({ where: { id } });
   }
   createdBookIds.length = 0;
+  for (const p of savedCoverPaths) {
+    await deleteCoverImage(p);
+  }
+  savedCoverPaths.length = 0;
 });
 
 async function createTestBook() {
@@ -74,6 +83,8 @@ describe("updateCopyData", () => {
       publisher: "Updated Publisher",
       publishYear: "1999",
       specialNotes: "Water damaged",
+      selectedCoverDataUrl: "",
+      selectedCoverSource: undefined,
     });
 
     expect(result).toEqual({ ok: true });
@@ -93,8 +104,61 @@ describe("updateCopyData", () => {
       publisher: "",
       publishYear: "",
       specialNotes: "",
+      selectedCoverDataUrl: "",
+      selectedCoverSource: undefined,
     });
     expect(result).toEqual({ error: "A valid format is required" });
+  });
+
+  it("sets a cover on a copy that has none yet", async () => {
+    const bookId = await createTestBook();
+    const [existingCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
+    const ONE_PX_PNG_DATA_URL =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+    const result = await updateCopyData(existingCopy.id, {
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+      selectedCoverDataUrl: ONE_PX_PNG_DATA_URL,
+      selectedCoverSource: "dataUrl",
+    });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.physicalCopy.findUniqueOrThrow({ where: { id: existingCopy.id } });
+    expect(updated.coverImagePath).toMatch(/^[a-f0-9-]+\.png$/);
+    await deleteCoverImage(updated.coverImagePath as string);
+  });
+
+  it("leaves an existing cover untouched when no new cover is selected", async () => {
+    const bookId = await createTestBook();
+    const [existingCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
+    const ONE_PX_PNG_DATA_URL =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const existingCoverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(existingCoverPath);
+    await prisma.physicalCopy.update({
+      where: { id: existingCopy.id },
+      data: { coverImagePath: existingCoverPath },
+    });
+
+    const result = await updateCopyData(existingCopy.id, {
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+      selectedCoverDataUrl: "",
+      selectedCoverSource: undefined,
+    });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.physicalCopy.findUniqueOrThrow({ where: { id: existingCopy.id } });
+    expect(updated.coverImagePath).toBe(existingCoverPath);
+    expect(updated.format).toBe("PAPERBACK");
+
+    const stillThere = await readFile(path.join(uploadsDir, existingCoverPath));
+    expect(stillThere.length).toBeGreaterThan(0);
   });
 });
 

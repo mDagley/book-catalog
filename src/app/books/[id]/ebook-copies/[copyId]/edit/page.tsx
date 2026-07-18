@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { EditCopyForm } from "./EditCopyForm";
+import { EditEbookCopyCoverForm } from "./EditEbookCopyCoverForm";
 
-export default async function EditCopyPage({
+export default async function EditEbookCopyPage({
   params,
 }: {
   params: Promise<{ id: string; copyId: string }>;
 }) {
   const { id, copyId } = await params;
-  const copy = await prisma.physicalCopy.findUnique({
+  const copy = await prisma.ebookCopy.findUnique({
     where: { id: copyId },
     include: { book: true },
   });
@@ -19,15 +19,11 @@ export default async function EditCopyPage({
 
   return (
     <main className="mx-auto max-w-lg p-4">
-      <h1 className="mb-1 text-2xl font-semibold">Edit Copy</h1>
+      <h1 className="mb-1 text-2xl font-semibold">Edit Ebook Cover</h1>
       <p className="mb-4 text-gray-600">{copy.book.title}</p>
-      <EditCopyForm
+      <EditEbookCopyCoverForm
         copyId={copy.id}
         bookId={id}
-        defaultFormat={copy.format}
-        defaultPublisher={copy.publisher ?? ""}
-        defaultPublishYear={copy.publishYear?.toString() ?? ""}
-        defaultSpecialNotes={copy.specialNotes ?? ""}
         currentCoverPath={copy.coverImagePath}
         bookIsbn={copy.book.isbn}
       />
