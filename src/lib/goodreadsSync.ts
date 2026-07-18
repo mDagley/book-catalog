@@ -210,13 +210,26 @@ interface ExistingTbrItem {
 // instead of the old delete+recreate approach -- a full replace would
 // destroy any fetched cover (coverImagePath/coverCheckedAt) every single
 // sync cycle, since Goodreads' RSS feed exposes no stable per-item id to
-// upsert on directly. Matches by exact ISBN first (O(1) via a Map), falling
-// back to fuzzy title matching (findBestTitleMatch, already used elsewhere
-// in this codebase for the same "match incoming data to existing rows with
-// no shared stable id" problem) for the remaining pool. A shelf item with no
-// match gets a fresh row; an existing row matched to nothing on the current
-// shelf (removed from Goodreads) gets deleted, with its cover file cleaned
-// up first -- same pattern as PR #19's orphaned-cover cleanup.
+// upsert on directly. Matches by exact ISBN first (O(1) via existingByIsbn),
+// falling back to fuzzy title matching (findBestTitleMatch, already used
+// elsewhere in this codebase for the same "match incoming data to existing
+// rows with no shared stable id" problem) against the FULL remaining
+// (not-yet-matched) pool -- deliberately not a separate ISBN-less-only pool.
+// Two bugs already lived in an earlier, static-partition version of this
+// function: (1) two incoming shelf items sharing one ISBN would both match
+// the same existing row, silently dropping one book (last-write-wins, no
+// error, since isbn has no unique constraint); (2) an existing row WITH an
+// isbn became permanently unreachable by fuzzy fallback the moment its
+// incoming isbn stopped matching (drifted or vanished from the feed),
+// destroying the very cover-preservation this function exists for. Both are
+// why the ISBN branch below re-checks matchedIds before accepting a hit, and
+// why the fuzzy fallback pool is drawn from `existing` (all rows), not a
+// pre-filtered ISBN-less subset -- don't reintroduce a static partition here.
+//
+// A shelf item with no match gets a fresh row; an existing row matched to
+// nothing on the current shelf (removed from Goodreads) gets deleted, with
+// its cover file cleaned up first -- same pattern as PR #19's orphaned-cover
+// cleanup.
 //
 // Runs as sequential individual Prisma calls, not one large transaction --
 // deliberately avoiding the kind of long-held-transaction/connection-pool
