@@ -182,6 +182,31 @@ export function isTitleMatch(
 }
 
 // Scans `candidates` for the best fuzzy title match to `title`, returning
+// both the match and its score (null if nothing scores at or above
+// `threshold`). Split out from findBestTitleMatch (below) specifically for
+// callers that need to decide whether to trust one candidate pool's best
+// match outright or additionally check a second, more expensive pool for a
+// possibly-better one -- discarding the score (as findBestTitleMatch does)
+// makes that decision impossible. See reconcileTbrItems in goodreadsSync.ts
+// for the motivating case.
+export function findBestTitleMatchWithScore<T extends { title: string }>(
+  candidates: T[],
+  title: string,
+  threshold: number = DEFAULT_MATCH_THRESHOLD,
+): { item: T; score: number } | null {
+  let best: T | null = null;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const score = titleMatchScore(candidate.title, title);
+    if (score >= threshold && score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best === null ? null : { item: best, score: bestScore };
+}
+
+// Scans `candidates` for the best fuzzy title match to `title`, returning
 // null if nothing scores at or above `threshold`. Generic over any shape
 // that carries a `title` string, so every fuzzy-match-then-attach-or-create
 // call site (absSync.ts, goodreadsSync.ts, createBookWithCopyData) shares
@@ -192,14 +217,5 @@ export function findBestTitleMatch<T extends { title: string }>(
   title: string,
   threshold: number = DEFAULT_MATCH_THRESHOLD,
 ): T | null {
-  let best: T | null = null;
-  let bestScore = -1;
-  for (const candidate of candidates) {
-    const score = titleMatchScore(candidate.title, title);
-    if (score >= threshold && score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-  return best;
+  return findBestTitleMatchWithScore(candidates, title, threshold)?.item ?? null;
 }

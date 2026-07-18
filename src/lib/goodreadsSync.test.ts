@@ -697,6 +697,61 @@ describe("syncGoodreadsTbr", () => {
     expect(lookupIsbn).toHaveBeenCalledTimes(25);
   });
 
+  it("does not let an imperfect isbn-less decoy match steal an isbn-drifted item's true match (regression: caught in code review)", async () => {
+    // An early version of the performance fix trusted ANY above-threshold
+    // tier-1 (isbn-less-pool) match, not just a perfect one. That silently
+    // reintroduced the isbn-drift data-loss bug whenever an unrelated
+    // isbn-less row happened to score above threshold against the shelf
+    // item's title -- exactly what this test constructs.
+    const decoy = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync The Way of Kingdoms",
+        coverImagePath: "decoy-cover.jpg",
+      }, // isbn-less, imperfect (96) match against the shelf item below
+    });
+    const trueMatch = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync The Way of Kings",
+        isbn: "9780000000077",
+        coverImagePath: "true-match-cover.jpg",
+      },
+    });
+
+    // Both books are still on the shelf this sync -- "The Way of Kings" is
+    // listed FIRST, with its isbn dropped (drifted/disappeared from the
+    // feed), and the decoy's own unchanged shelf entry comes second. This
+    // order matters: if the decoy's own perfect self-match were processed
+    // first, it would already be claimed (and correctly excluded) by the
+    // time "The Way of Kings" is processed, masking the bug this test
+    // exists to catch -- caught while writing this test.
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync The Way of Kings" },
+          { title: "Test Goodreads Sync The Way of Kingdoms" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync The Way of King" } },
+    });
+    expect(items).toHaveLength(2);
+    // Each row keeps its own id, cover, AND title -- the decoy's near-match
+    // score (96, not 100) must not let it steal the true match's shelf
+    // entry (which would leave both rows' titles cross-contaminated even
+    // though coverImagePath is never touched by an update, so a
+    // cover/id-only assertion wouldn't have caught this).
+    const trueMatchRow = items.find((i) => i.id === trueMatch.id);
+    const decoyRow = items.find((i) => i.id === decoy.id);
+    expect(trueMatchRow?.title).toBe("Test Goodreads Sync The Way of Kings");
+    expect(trueMatchRow?.coverImagePath).toBe("true-match-cover.jpg");
+    expect(decoyRow?.title).toBe("Test Goodreads Sync The Way of Kingdoms");
+    expect(decoyRow?.coverImagePath).toBe("decoy-cover.jpg");
+  });
+
   it("stays fast when many isbn-less shelf items need fuzzy matching against a large existing table (regression: production CPU incident)", async () => {
     // Real book titles commonly have colons/subtitles/series suffixes,
     // which titleForms() expands into multiple normalized variants each --
