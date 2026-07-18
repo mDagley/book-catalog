@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage } from "@/lib/coverStorage";
+import { lookupIsbn } from "@/lib/isbnLookup";
+import { saveCoverFromUrl } from "@/lib/books";
 
 export interface GoodreadsBook {
   title: string;
@@ -294,6 +296,39 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   }
 }
 
+const TBR_COVER_FETCH_CAP = 25;
+
+// Fetches an Open Library cover for any TBR item that has an ISBN and has
+// never had a cover-fetch attempt (coverCheckedAt null), capped per run so
+// the initial backlog (every existing item, on the first sync after this
+// shipped) fills in gradually over several cron cycles instead of one long
+// burst against Open Library. coverCheckedAt is always set after an
+// attempt, whether or not a cover was found -- see reconcileTbrItems's
+// sibling concern above for why a permanently-missing cover must never be
+// retried.
+async function fetchMissingTbrCovers(): Promise<void> {
+  const pending = await prisma.goodreadsTbrItem.findMany({
+    where: { coverImagePath: null, coverCheckedAt: null, isbn: { not: null } },
+    select: { id: true, isbn: true },
+    take: TBR_COVER_FETCH_CAP,
+  });
+
+  for (const item of pending) {
+    const lookup = await lookupIsbn(item.isbn!);
+    let coverImagePath: string | undefined;
+    if (lookup.coverUrl) {
+      const result = await saveCoverFromUrl(lookup.coverUrl);
+      if (!("error" in result)) {
+        coverImagePath = result.coverImagePath;
+      }
+    }
+    await prisma.goodreadsTbrItem.update({
+      where: { id: item.id },
+      data: { coverCheckedAt: new Date(), ...(coverImagePath ? { coverImagePath } : {}) },
+    });
+  }
+}
+
 // See reconcileTbrItems above for how GoodreadsTbrItem rows are kept in
 // sync with the "to-read" shelf. The currently-reading/read shelves are
 // additionally matched against existing Book rows to set readStatus/rating
@@ -315,5 +350,8 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
   }
 
   const synced = STATUS_SYNC_SHELVES.reduce((sum, shelf) => sum + shelfItems[shelf].length, 0);
+
+  await fetchMissingTbrCovers();
+
   return { synced };
 }

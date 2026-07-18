@@ -2,13 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
-import { saveCoverImage } from "@/lib/coverStorage";
+import { saveCoverImage, deleteCoverImage } from "@/lib/coverStorage";
+import { lookupIsbn } from "@/lib/isbnLookup";
 import {
   fetchGoodreadsPage,
   fetchAllGoodreadsBooks,
   syncGoodreadsTbr,
   type GoodreadsShelf,
 } from "@/lib/goodreadsSync";
+
+vi.mock("@/lib/isbnLookup", () => ({ lookupIsbn: vi.fn() }));
 
 const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const ONE_PX_PNG_DATA_URL =
@@ -260,6 +263,25 @@ describe("syncGoodreadsTbr", () => {
         coverCheckedAt: true,
         lastSyncedAt: true,
       },
+    });
+    // vi.restoreAllMocks() in the top-level afterEach clears call history
+    // for spies, but this file's `describe`-scoped ordering means it's not
+    // guaranteed to run before the NEXT test's assertions build on a fresh
+    // mock -- explicitly reset here so no test's lookupIsbn call count or
+    // resolved value can leak into another (this matters most for the
+    // "caps at 25" test's exact toHaveBeenCalledTimes assertion). Every
+    // syncGoodreadsTbr call now runs fetchMissingTbrCovers internally, so
+    // ANY test whose fixtures leave an ISBN-bearing, never-checked TBR row
+    // behind (not just the cover-fetch tests below) will invoke this mock --
+    // default it to "no cover found" so pre-existing tests that don't care
+    // about cover-fetching aren't left calling an unmocked-for-this-test
+    // function and blowing up on `undefined`.
+    vi.mocked(lookupIsbn).mockReset().mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: null,
     });
   });
 
@@ -556,5 +578,122 @@ describe("syncGoodreadsTbr", () => {
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe(existing.id);
     expect(items[0].coverImagePath).toBe("isbn-drift-cover.jpg");
+  });
+
+  it("fetches and stores a cover for a new TBR item that has an ISBN", async () => {
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780765326355-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Cover Fetch Book", isbn13: "9780765326355" },
+        ]),
+      ],
+    });
+    // mockShelfFetch replaces global.fetch for the RSS calls; saveCoverFromUrl
+    // also calls global.fetch for the actual image bytes, so wrap the RSS
+    // router to additionally serve a fake image response for the cover URL.
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    const item = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Cover Fetch Book" },
+    });
+    expect(item.coverImagePath).not.toBeNull();
+    expect(item.coverCheckedAt).not.toBeNull();
+    if (item.coverImagePath) {
+      await deleteCoverImage(item.coverImagePath);
+    }
+  });
+
+  it("sets coverCheckedAt without a coverImagePath when Open Library has no cover", async () => {
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: null,
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([{ title: "Test Goodreads Sync No Cover Available", isbn13: "9780000000001" }]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const item = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync No Cover Available" },
+    });
+    expect(item.coverImagePath).toBeNull();
+    expect(item.coverCheckedAt).not.toBeNull();
+  });
+
+  it("never re-attempts a cover fetch once coverCheckedAt is set, even with no coverImagePath", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Already Checked",
+        isbn: "9780000000002",
+        coverCheckedAt: new Date(),
+      },
+    });
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000002-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([{ title: "Test Goodreads Sync Already Checked", isbn13: "9780000000002" }]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    expect(lookupIsbn).not.toHaveBeenCalled();
+  });
+
+  it("caps the number of cover fetches attempted in a single sync run", async () => {
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: null,
+    });
+    const items = Array.from({ length: 30 }, (_, i) => ({
+      title: `Test Goodreads Sync Cap Book ${i}`,
+      isbn13: `978000000${String(i).padStart(4, "0")}`,
+    }));
+    mockShelfFetch({ "to-read": [buildRssPage(items)] });
+
+    await syncGoodreadsTbr("1993628");
+
+    expect(lookupIsbn).toHaveBeenCalledTimes(25);
   });
 });
