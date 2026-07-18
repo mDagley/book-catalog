@@ -13,11 +13,11 @@ interface CoverEditorProps {
   currentCoverPath: string | null;
   bookIsbn: string | null;
   allowCamera?: boolean;
-  // FileReader.readAsDataURL is async -- without this, a submit click that
-  // lands in the window between picking a file and the read resolving
-  // would submit the hidden fields' stale (empty) values, silently
-  // no-op'ing the cover change with no error shown. The parent form uses
-  // this to disable its own submit button until the read settles.
+  // Both FileReader.readAsDataURL and the Open Library lookup fetch are
+  // async -- without this, a submit click that lands in the window before
+  // either resolves would submit the hidden fields' stale (empty) values,
+  // silently no-op'ing the cover change with no error shown. The parent
+  // form uses this to disable its own submit button until either settles.
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -42,6 +42,7 @@ export function CoverEditor({
     if (!bookIsbn) return;
     setIsLookingUp(true);
     setLookupError(null);
+    onBusyChange?.(true);
     try {
       const response = await fetch(`/api/isbn-lookup?isbn=${encodeURIComponent(bookIsbn)}`);
       const data = await response.json();
@@ -55,6 +56,7 @@ export function CoverEditor({
       setLookupError("Couldn't reach the lookup service.");
     } finally {
       setIsLookingUp(false);
+      onBusyChange?.(false);
     }
   }
 
