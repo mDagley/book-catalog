@@ -26,7 +26,7 @@ function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
 function letterBucket(key: string): string {
   const normalized = key
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/\p{M}/gu, "")
     .toUpperCase();
   const firstChar = normalized.charAt(0);
   return /[A-Z]/.test(firstChar) ? firstChar : "#";
