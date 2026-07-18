@@ -138,7 +138,7 @@ describe("getTbrGap", () => {
 
 describe("groupByInitial", () => {
   function item(title: string, author: string | null): TbrGapItem {
-    return { id: title, title, author };
+    return { id: title, title, author, coverImagePath: null };
   }
 
   it("groups items by the uppercased first character of their sort key", () => {

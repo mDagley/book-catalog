@@ -6,6 +6,7 @@ export interface TbrGapItem {
   id: string;
   title: string;
   author: string | null;
+  coverImagePath: string | null;
 }
 
 /** Tag used to invalidate the cached TBR gap computation after a sync completes. */
@@ -34,7 +35,9 @@ function letterBucket(key: string): string {
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const [tbrItems, books] = await Promise.all([
-    prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, author: true } }),
+    prisma.goodreadsTbrItem.findMany({
+      select: { id: true, title: true, author: true, coverImagePath: true },
+    }),
     prisma.book.findMany({ select: { title: true } }),
   ]);
 
@@ -42,7 +45,12 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
 
   return tbrItems
     .filter((tbr) => !ownedTitles.some((owned) => isTitleMatch(tbr.title, owned)))
-    .map((tbr) => ({ id: tbr.id, title: tbr.title, author: tbr.author }))
+    .map((tbr) => ({
+      id: tbr.id,
+      title: tbr.title,
+      author: tbr.author,
+      coverImagePath: tbr.coverImagePath,
+    }))
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
 }
 
