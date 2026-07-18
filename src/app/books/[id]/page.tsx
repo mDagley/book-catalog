@@ -19,7 +19,11 @@ export default async function BookDetailPage({
   const { id } = await params;
   const book = await prisma.book.findUnique({
     where: { id },
-    include: { copies: { orderBy: { createdAt: "asc" } } },
+    include: {
+      copies: { orderBy: { createdAt: "asc" } },
+      ebookCopies: { orderBy: { createdAt: "asc" } },
+      audiobookCopies: { orderBy: { createdAt: "asc" } },
+    },
   });
 
   if (!book) {
@@ -150,6 +154,64 @@ export default async function BookDetailPage({
           </li>
         ))}
       </ul>
+
+      {book.ebookCopies.length > 0 && (
+        <>
+          <h2 className="mb-2 mt-6 text-lg font-medium">Ebooks ({book.ebookCopies.length})</h2>
+          <ul className="space-y-3">
+            {book.ebookCopies.map((copy) => (
+              <li key={copy.id} className="rounded border p-3">
+                {copy.coverImagePath ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/covers/${encodeURIComponent(copy.coverImagePath)}`}
+                    alt="Cover"
+                    className="h-32 w-24 rounded object-cover"
+                  />
+                ) : (
+                  <p className="text-sm text-gray-600">No cover set.</p>
+                )}
+                <Link
+                  href={`/books/${book.id}/ebook-copies/${copy.id}/edit`}
+                  className="mt-2 inline-block text-sm underline"
+                >
+                  Edit cover
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {book.audiobookCopies.length > 0 && (
+        <>
+          <h2 className="mb-2 mt-6 text-lg font-medium">
+            Audiobooks ({book.audiobookCopies.length})
+          </h2>
+          <ul className="space-y-3">
+            {book.audiobookCopies.map((copy) => (
+              <li key={copy.id} className="rounded border p-3">
+                {copy.coverImagePath ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`/api/covers/${encodeURIComponent(copy.coverImagePath)}`}
+                    alt="Cover"
+                    className="h-32 w-24 rounded object-cover"
+                  />
+                ) : (
+                  <p className="text-sm text-gray-600">No cover set.</p>
+                )}
+                <Link
+                  href={`/books/${book.id}/audiobook-copies/${copy.id}/edit`}
+                  className="mt-2 inline-block text-sm underline"
+                >
+                  Edit cover
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </main>
   );
 }
