@@ -333,14 +333,23 @@ async function fetchAbsCoverAndSave(
 // after an attempt, success or not, so a permanently-missing cover is never
 // retried.
 async function backfillAbsCovers(baseUrl: string, token: string): Promise<void> {
+  // Each query is bounded at the DB level (take + a stable orderBy) rather
+  // than fetching every missing-cover row and slicing in JS -- on a large
+  // library the unbounded version would read every pending row on every
+  // sync run just to keep 25, and without an explicit order the "first 25"
+  // would be arbitrary/unstable across runs.
   const [missingEbookCovers, missingAudiobookCovers] = await Promise.all([
     prisma.ebookCopy.findMany({
       where: { coverImagePath: null, coverCheckedAt: null },
       select: { id: true, absItemId: true },
+      orderBy: { id: "asc" },
+      take: ABS_COVER_FETCH_CAP,
     }),
     prisma.audiobookCopy.findMany({
       where: { coverImagePath: null, coverCheckedAt: null },
       select: { id: true, absItemId: true },
+      orderBy: { id: "asc" },
+      take: ABS_COVER_FETCH_CAP,
     }),
   ]);
 

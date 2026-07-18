@@ -1,4 +1,4 @@
-import { config as loadEnv } from "dotenv";
+import { config as loadEnv, parse as parseEnv } from "dotenv";
 import { defineConfig, defaultExclude } from "vitest/config";
 import fs from "fs";
 import path from "path";
@@ -20,12 +20,24 @@ if (!fs.existsSync(envTestPath)) {
       "and point its DATABASE_URL at that database, then run `npx prisma migrate deploy` against it.",
   );
 }
-loadEnv({ path: envTestPath });
+// dotenv's config() does NOT override a variable that's already present in
+// process.env (e.g. inherited from a parent shell that sourced .env, or set
+// by CI) -- confirmed empirically. Without `override: true`, a pre-set
+// DATABASE_URL would silently defeat this whole isolation mechanism: the
+// test run would keep using whatever was already in the environment instead
+// of .env.test's value, while the guard below (if it compared process.env
+// after loading) could pass or fail based on that same stale value rather
+// than what .env.test actually specifies.
+const parsedTestEnv = parseEnv(fs.readFileSync(envTestPath));
+loadEnv({ path: envTestPath, override: true });
 
 const devEnvPath = path.resolve(__dirname, ".env");
 if (fs.existsSync(devEnvPath)) {
-  const devUrlMatch = fs.readFileSync(devEnvPath, "utf8").match(/^DATABASE_URL="?([^"\n]+)"?/m);
-  if (devUrlMatch && devUrlMatch[1] === process.env.DATABASE_URL) {
+  // Compare the two files' parsed values directly, not process.env -- this
+  // stays correct regardless of what else may have set process.env.DATABASE_URL
+  // before this file ran.
+  const parsedDevEnv = parseEnv(fs.readFileSync(devEnvPath));
+  if (parsedDevEnv.DATABASE_URL && parsedDevEnv.DATABASE_URL === parsedTestEnv.DATABASE_URL) {
     throw new Error(
       ".env.test's DATABASE_URL is identical to .env's -- tests would run against the shared " +
         "dev database. Point .env.test at a dedicated test database instead.",
