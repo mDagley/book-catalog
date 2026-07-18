@@ -82,8 +82,7 @@ describe("resolveCoverUpdate", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       headers: new Headers({ "content-type": "image/png" }),
-      arrayBuffer: async () =>
-        Buffer.from(ONE_PX_PNG_DATA_URL.split(",")[1], "base64").buffer,
+      arrayBuffer: async () => Buffer.from(ONE_PX_PNG_DATA_URL.split(",")[1], "base64"),
     } as unknown as Response);
 
     const result = await resolveCoverUpdate(
@@ -104,8 +103,7 @@ describe("resolveCoverUpdate", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       headers: new Headers({ "content-type": "image/png" }),
-      arrayBuffer: async () =>
-        Buffer.from(ONE_PX_PNG_DATA_URL.split(",")[1], "base64").buffer,
+      arrayBuffer: async () => Buffer.from(ONE_PX_PNG_DATA_URL.split(",")[1], "base64"),
     } as unknown as Response);
 
     const result = await resolveCoverUpdate(
