@@ -36,6 +36,8 @@ export async function updateCopy(
     publisher: (formData.get("publisher") as string) ?? "",
     publishYear: (formData.get("publishYear") as string) ?? "",
     specialNotes: (formData.get("specialNotes") as string) ?? "",
+    selectedCoverDataUrl: formData.get("selectedCoverDataUrl")?.toString() ?? "",
+    selectedCoverSource: formData.get("selectedCoverSource")?.toString(),
   });
 
   if ("error" in result) {

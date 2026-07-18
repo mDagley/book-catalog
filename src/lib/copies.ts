@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parseCopyFields } from "@/lib/books";
+import { resolveCoverUpdate, type CoverSelectionInput } from "@/lib/copyCovers";
 
 export interface CopyFormState {
   error?: string;
@@ -30,16 +31,26 @@ export async function addCopyData(
 
 export async function updateCopyData(
   copyId: string,
-  input: CopyFieldsInput,
+  input: CopyFieldsInput & CoverSelectionInput,
 ): Promise<{ ok: true } | { error: string }> {
   const parsed = parseCopyFields(input);
   if ("error" in parsed) {
     return parsed;
   }
 
+  const existing = await prisma.physicalCopy.findUniqueOrThrow({
+    where: { id: copyId },
+    select: { coverImagePath: true },
+  });
+
+  const coverResult = await resolveCoverUpdate(input, existing.coverImagePath);
+  if ("error" in coverResult) {
+    return coverResult;
+  }
+
   await prisma.physicalCopy.update({
     where: { id: copyId },
-    data: parsed,
+    data: { ...parsed, coverImagePath: coverResult.coverImagePath },
   });
 
   return { ok: true };
