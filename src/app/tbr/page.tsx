@@ -3,6 +3,14 @@ import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
 
 export const dynamic = "force-dynamic";
 
+// The "#" bucket (groupByInitial's catch-all for non-letter first characters)
+// can't be used directly in an href/id -- "#" is meaningful in a URL fragment
+// and awkward to reference from a CSS/JS selector, so it gets a dedicated
+// anchor token here while the visible jump-nav label stays "#".
+function anchorId(letter: string): string {
+  return letter === "#" ? "letter-hash" : `letter-${letter}`;
+}
+
 export default async function TbrGapPage({
   searchParams,
 }: {
@@ -35,7 +43,7 @@ export default async function TbrGapPage({
       {groups.length > 0 && (
         <nav className="mb-4 flex flex-wrap gap-2 text-sm" aria-label="Jump to letter">
           {groups.map((group) => (
-            <a key={group.letter} href={`#letter-${group.letter}`} className="underline">
+            <a key={group.letter} href={`#${anchorId(group.letter)}`} className="underline">
               {group.letter}
             </a>
           ))}
@@ -52,7 +60,7 @@ export default async function TbrGapPage({
         groups.map((group) => (
           <section key={group.letter} className="mb-4">
             <h2
-              id={`letter-${group.letter}`}
+              id={anchorId(group.letter)}
               className="mb-2 text-lg font-semibold text-gray-700"
             >
               {group.letter}
