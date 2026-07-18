@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "@/lib/prisma";
+import { saveCoverImage } from "@/lib/coverStorage";
 import {
   fetchGoodreadsPage,
   fetchAllGoodreadsBooks,
   syncGoodreadsTbr,
   type GoodreadsShelf,
 } from "@/lib/goodreadsSync";
+
+const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
+const ONE_PX_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 const originalFetch = global.fetch;
 
@@ -237,12 +244,22 @@ describe("syncGoodreadsTbr", () => {
     title: string;
     author: string | null;
     isbn: string | null;
+    coverImagePath: string | null;
+    coverCheckedAt: Date | null;
     lastSyncedAt: Date;
   }> = [];
 
   beforeEach(async () => {
     realDataSnapshot = await prisma.goodreadsTbrItem.findMany({
-      select: { id: true, title: true, author: true, isbn: true, lastSyncedAt: true },
+      select: {
+        id: true,
+        title: true,
+        author: true,
+        isbn: true,
+        coverImagePath: true,
+        coverCheckedAt: true,
+        lastSyncedAt: true,
+      },
     });
   });
 
@@ -403,5 +420,92 @@ describe("syncGoodreadsTbr", () => {
       where: { title: "Test Goodreads Sync Unowned Book" },
     });
     expect(found).toEqual([]);
+  });
+
+  it("preserves an existing item's id and coverImagePath when it's matched by ISBN across a sync", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Old Title",
+        author: "Old Author",
+        isbn: "9780765326355",
+        coverImagePath: "some-cover.jpg",
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          {
+            title: "Test Goodreads Sync New Title",
+            author: "New Author",
+            isbn13: "9780765326355",
+          },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany();
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(existing.id);
+    expect(items[0].coverImagePath).toBe("some-cover.jpg");
+    expect(items[0].title).toBe("Test Goodreads Sync New Title");
+    expect(items[0].author).toBe("New Author");
+  });
+
+  it("preserves an existing item's id and coverImagePath when matched by fuzzy title (no ISBN)", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync The Way of Kings",
+        author: "Brandon Sanderson",
+        coverImagePath: "way-of-kings-cover.jpg",
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync The Way of Kings", author: "Brandon Sanderson" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany();
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(existing.id);
+    expect(items[0].coverImagePath).toBe("way-of-kings-cover.jpg");
+  });
+
+  it("deletes an existing item's cover file when the item is removed from the shelf", async () => {
+    const coverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Goodreads Sync Removed Book", coverImagePath: coverPath },
+    });
+
+    mockShelfFetch({ "to-read": [] });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany();
+    expect(items.some((i) => i.title === "Test Goodreads Sync Removed Book")).toBe(false);
+    await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
+  });
+
+  it("creates a fresh row for a shelf item with no matching existing row", async () => {
+    mockShelfFetch({
+      "to-read": [buildRssPage([{ title: "Test Goodreads Sync Brand New Book" }])],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany({
+      where: { title: "Test Goodreads Sync Brand New Book" },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].coverImagePath).toBeNull();
+    expect(items[0].coverCheckedAt).toBeNull();
   });
 });

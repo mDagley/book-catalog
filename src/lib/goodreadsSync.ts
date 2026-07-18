@@ -3,6 +3,7 @@ import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
+import { deleteCoverImage } from "@/lib/coverStorage";
 
 export interface GoodreadsBook {
   title: string;
@@ -197,12 +198,95 @@ async function applyShelfToBooks(
   }
 }
 
-// Full replace (not upsert-by-id) for GoodreadsTbrItem since Goodreads' RSS
-// feed exposes no stable per-item id to key on, and a book removed from the
-// to-read shelf should disappear from the TBR gap view too -- per the
-// original design spec. The currently-reading/read shelves are additionally
-// matched against existing Book rows to set readStatus/rating -- see
-// docs/superpowers/specs/2026-07-15-read-status-ratings-design.md.
+interface ExistingTbrItem {
+  id: string;
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  coverImagePath: string | null;
+}
+
+// Reconciles the "to-read" shelf against existing GoodreadsTbrItem rows
+// instead of the old delete+recreate approach -- a full replace would
+// destroy any fetched cover (coverImagePath/coverCheckedAt) every single
+// sync cycle, since Goodreads' RSS feed exposes no stable per-item id to
+// upsert on directly. Matches by exact ISBN first (O(1) via a Map), falling
+// back to fuzzy title matching (findBestTitleMatch, already used elsewhere
+// in this codebase for the same "match incoming data to existing rows with
+// no shared stable id" problem) for the remaining pool. A shelf item with no
+// match gets a fresh row; an existing row matched to nothing on the current
+// shelf (removed from Goodreads) gets deleted, with its cover file cleaned
+// up first -- same pattern as PR #19's orphaned-cover cleanup.
+//
+// Runs as sequential individual Prisma calls, not one large transaction --
+// deliberately avoiding the kind of long-held-transaction/connection-pool
+// risk that caused the PR #17 production incident (Prisma P2028, "Unable to
+// start a transaction in the given time").
+async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
+  const existing = await prisma.goodreadsTbrItem.findMany({
+    select: { id: true, title: true, author: true, isbn: true, coverImagePath: true },
+  });
+
+  const existingByIsbn = new Map<string, ExistingTbrItem>();
+  const fuzzyPool: ExistingTbrItem[] = [];
+  for (const item of existing) {
+    if (item.isbn) {
+      existingByIsbn.set(item.isbn, item);
+    } else {
+      fuzzyPool.push(item);
+    }
+  }
+
+  const matchedIds = new Set<string>();
+  const toCreate: { title: string; author: string | null; isbn: string | null }[] = [];
+
+  for (const shelfItem of shelfItems) {
+    let matched: ExistingTbrItem | null = null;
+    if (shelfItem.isbn && existingByIsbn.has(shelfItem.isbn)) {
+      matched = existingByIsbn.get(shelfItem.isbn)!;
+    } else {
+      const available = fuzzyPool.filter((item) => !matchedIds.has(item.id));
+      matched = findBestTitleMatch(available, shelfItem.title);
+    }
+
+    if (matched) {
+      matchedIds.add(matched.id);
+      if (
+        matched.title !== shelfItem.title ||
+        matched.author !== shelfItem.author ||
+        matched.isbn !== shelfItem.isbn
+      ) {
+        await prisma.goodreadsTbrItem.update({
+          where: { id: matched.id },
+          data: { title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn },
+        });
+      }
+    } else {
+      toCreate.push({ title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn });
+    }
+  }
+
+  if (toCreate.length > 0) {
+    await prisma.goodreadsTbrItem.createMany({ data: toCreate });
+  }
+
+  const toDelete = existing.filter((item) => !matchedIds.has(item.id));
+  for (const item of toDelete) {
+    if (item.coverImagePath) {
+      await deleteCoverImage(item.coverImagePath);
+    }
+  }
+  if (toDelete.length > 0) {
+    await prisma.goodreadsTbrItem.deleteMany({
+      where: { id: { in: toDelete.map((item) => item.id) } },
+    });
+  }
+}
+
+// See reconcileTbrItems above for how GoodreadsTbrItem rows are kept in
+// sync with the "to-read" shelf. The currently-reading/read shelves are
+// additionally matched against existing Book rows to set readStatus/rating
+// -- see docs/superpowers/specs/2026-07-15-read-status-ratings-design.md.
 export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number }> {
   const shelfItems = Object.fromEntries(
     await Promise.all(
@@ -212,26 +296,7 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
     ),
   ) as Record<GoodreadsShelf, GoodreadsBook[]>;
 
-  // Explicit maxWait/timeout (Prisma defaults: 2s/5s) as defense-in-depth on
-  // the resource-constrained production VPS -- even with the ABS and
-  // Goodreads syncs no longer scheduled/triggered concurrently (see
-  // instrumentation.ts and RefreshSyncButton.tsx), incidental concurrent
-  // load (e.g. a user browsing while a sync runs) could still starve this
-  // transaction's connection acquisition. This failed in production with
-  // Prisma P2028 ("Unable to start a transaction in the given time").
-  await prisma.$transaction(
-    [
-      prisma.goodreadsTbrItem.deleteMany(),
-      prisma.goodreadsTbrItem.createMany({
-        data: shelfItems["to-read"].map((book) => ({
-          title: book.title,
-          author: book.author,
-          isbn: book.isbn,
-        })),
-      }),
-    ],
-    { maxWait: 10000, timeout: 20000 },
-  );
+  await reconcileTbrItems(shelfItems["to-read"]);
 
   const books: StatusSyncBook[] = await prisma.book.findMany({ select: STATUS_SYNC_BOOK_SELECT });
   for (const shelf of STATUS_SYNC_SHELVES) {
