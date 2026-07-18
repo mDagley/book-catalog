@@ -28,6 +28,8 @@ export default async function EditCopyPage({
         defaultPublisher={copy.publisher ?? ""}
         defaultPublishYear={copy.publishYear?.toString() ?? ""}
         defaultSpecialNotes={copy.specialNotes ?? ""}
+        currentCoverPath={copy.coverImagePath}
+        bookIsbn={copy.book.isbn}
       />
     </main>
   );
