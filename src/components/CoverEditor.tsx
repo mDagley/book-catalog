@@ -8,6 +8,12 @@ interface CoverEditorProps {
   currentCoverPath: string | null;
   bookIsbn: string | null;
   allowCamera?: boolean;
+  // FileReader.readAsDataURL is async -- without this, a submit click that
+  // lands in the window between picking a file and the read resolving
+  // would submit the hidden fields' stale (empty) values, silently
+  // no-op'ing the cover change with no error shown. The parent form uses
+  // this to disable its own submit button until the read settles.
+  onBusyChange?: (busy: boolean) => void;
 }
 
 // Shared cover-picking UI reused across the physical/ebook/audiobook copy
@@ -19,6 +25,7 @@ export function CoverEditor({
   currentCoverPath,
   bookIsbn,
   allowCamera = false,
+  onBusyChange,
 }: CoverEditorProps) {
   const [selectedDataUrl, setSelectedDataUrl] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<"dataUrl" | "url" | null>(null);
@@ -55,15 +62,18 @@ export function CoverEditor({
       return;
     }
     setLookupError(null);
+    onBusyChange?.(true);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
         setSelectedDataUrl(reader.result);
         setSelectedSource("dataUrl");
       }
+      onBusyChange?.(false);
     };
     reader.onerror = () => {
       setLookupError("Couldn't read the selected file.");
+      onBusyChange?.(false);
     };
     reader.readAsDataURL(file);
     event.target.value = "";

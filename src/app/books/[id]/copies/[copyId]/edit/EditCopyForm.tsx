@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { updateCopy } from "@/lib/actions/copies";
 import type { CopyFormState } from "@/lib/copies";
 import { CopyFormFields } from "@/components/CopyFormFields";
@@ -31,6 +31,7 @@ export function EditCopyForm({
 }: EditCopyFormProps) {
   const updateThisCopy = updateCopy.bind(null, copyId, bookId);
   const [state, formAction, isPending] = useActionState(updateThisCopy, initialState);
+  const [isPreparingCover, setIsPreparingCover] = useState(false);
 
   return (
     <form action={formAction} className="space-y-4">
@@ -40,14 +41,19 @@ export function EditCopyForm({
         defaultPublishYear={defaultPublishYear}
         defaultSpecialNotes={defaultSpecialNotes}
       />
-      <CoverEditor currentCoverPath={currentCoverPath} bookIsbn={bookIsbn} allowCamera />
+      <CoverEditor
+        currentCoverPath={currentCoverPath}
+        bookIsbn={bookIsbn}
+        allowCamera
+        onBusyChange={setIsPreparingCover}
+      />
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isPending || isPreparingCover}
         className="w-full rounded bg-black p-2 text-white disabled:opacity-50"
       >
-        {isPending ? "Saving..." : "Save"}
+        {isPending ? "Saving..." : isPreparingCover ? "Preparing cover..." : "Save"}
       </button>
     </form>
   );
