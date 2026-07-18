@@ -40,6 +40,32 @@ Every `$` in the resulting hash must be escaped as `\$` when pasted into
 `${VAR}` interpolation and will otherwise silently corrupt the hash (see
 `.env.example`).
 
+## Running tests
+
+Tests run against a real Postgres database, but deliberately **not** the
+same one `npm run dev` uses — several sync functions run unscoped
+queries/writes across an entire table, and running the suite against a
+database that already has real synced data risks permanently corrupting it
+(this has happened once before: an unscoped `deleteMany()` wiped real synced
+data in an earlier phase of this project).
+
+Before running `npm test` for the first time:
+
+1. Create a dedicated test database, e.g.:
+   ```bash
+   psql -U bookcatalog -h localhost -c "CREATE DATABASE bookcatalog_test OWNER bookcatalog;"
+   ```
+2. Copy `.env` to `.env.test` and point its `DATABASE_URL` at that database
+   instead (same host/credentials, different database name).
+3. Apply migrations to it:
+   ```bash
+   DATABASE_URL="postgresql://.../bookcatalog_test" npx prisma migrate deploy
+   ```
+
+`vitest.config.ts` refuses to run the suite if `.env.test` is missing, or if
+it resolves to the same `DATABASE_URL` as `.env` — this is intentional; don't
+work around it by pointing `.env.test` back at the dev database.
+
 ## Deploying with Docker (e.g. EasyPanel on a VPS)
 
 The `Dockerfile` builds a self-contained production image (Next.js
