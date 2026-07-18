@@ -74,6 +74,25 @@ describe("getTbrGap", () => {
     );
   });
 
+  it("falls back to title when author is an empty string", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Zzz Title", author: "Aaa Author" },
+    });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Bbb Title", author: "" },
+    });
+
+    const gap = await getTbrGap();
+    const titles = gap
+      .filter((item) => item.title.startsWith("Test TBR"))
+      .map((item) => item.title);
+
+    // "Aaa Author" sorts before "Bbb Title" (its own sort key, since its author is empty)
+    expect(titles.indexOf("Test TBR Zzz Title")).toBeLessThan(
+      titles.indexOf("Test TBR Bbb Title"),
+    );
+  });
+
   it("filters by a case-insensitive title match when a query is given", async () => {
     await prisma.goodreadsTbrItem.create({
       data: { title: "Test TBR Mistborn", author: "Brandon Sanderson" },
@@ -144,6 +163,12 @@ describe("groupByInitial", () => {
     const groups = groupByInitial([item("1984", null)]);
 
     expect(groups).toEqual([{ letter: "#", items: [item("1984", null)] }]);
+  });
+
+  it("buckets an accented first letter under its unaccented equivalent, not '#'", () => {
+    const groups = groupByInitial([item("Zola", "Émile Zola")]);
+
+    expect(groups).toEqual([{ letter: "E", items: [item("Zola", "Émile Zola")] }]);
   });
 
   it("does not include a letter with zero matching items", () => {

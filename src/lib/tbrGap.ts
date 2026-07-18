@@ -19,6 +19,19 @@ function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
   return item.author?.trim() || item.title.trim();
 }
 
+// Strips diacritics before the A-Z test so bucketing agrees with sortKey's
+// locale-aware, base-letter-insensitive sort (an author like "Émile Zola"
+// sorts among the E's -- it should bucket under "E", not fall through to
+// "#" just because its first character isn't plain ASCII).
+function letterBucket(key: string): string {
+  const normalized = key
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase();
+  const firstChar = normalized.charAt(0);
+  return /[A-Z]/.test(firstChar) ? firstChar : "#";
+}
+
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const [tbrItems, books] = await Promise.all([
     prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, author: true } }),
@@ -87,8 +100,7 @@ export interface TbrGapGroup {
 export function groupByInitial(items: TbrGapItem[]): TbrGapGroup[] {
   const groups = new Map<string, TbrGapItem[]>();
   for (const item of items) {
-    const firstChar = sortKey(item).charAt(0).toUpperCase();
-    const letter = /[A-Z]/.test(firstChar) ? firstChar : "#";
+    const letter = letterBucket(sortKey(item));
     const group = groups.get(letter);
     if (group) {
       group.push(item);
