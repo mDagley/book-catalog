@@ -215,18 +215,43 @@ interface ExistingTbrItem {
 // upsert on directly. Matches by exact ISBN first (O(1) via existingByIsbn),
 // falling back to fuzzy title matching (findBestTitleMatch, already used
 // elsewhere in this codebase for the same "match incoming data to existing
-// rows with no shared stable id" problem) against the FULL remaining
-// (not-yet-matched) pool -- deliberately not a separate ISBN-less-only pool.
-// Two bugs already lived in an earlier, static-partition version of this
-// function: (1) two incoming shelf items sharing one ISBN would both match
-// the same existing row, silently dropping one book (last-write-wins, no
-// error, since isbn has no unique constraint); (2) an existing row WITH an
-// isbn became permanently unreachable by fuzzy fallback the moment its
-// incoming isbn stopped matching (drifted or vanished from the feed),
-// destroying the very cover-preservation this function exists for. Both are
-// why the ISBN branch below re-checks matchedIds before accepting a hit, and
-// why the fuzzy fallback pool is drawn from `existing` (all rows), not a
-// pre-filtered ISBN-less subset -- don't reintroduce a static partition here.
+// rows with no shared stable id" problem) for anything that doesn't
+// ISBN-match.
+//
+// The fuzzy fallback is deliberately two-tier, not one shared full-table
+// scan -- this caused a real production CPU incident (confirmed empirically:
+// fuzzy-matching 80 isbn-less shelf items against a full ~800-row pool took
+// 4.5s of synchronous, single-threaded work on a fast dev machine, run every
+// 30 minutes on the same process serving the app's own HTTP requests, on a
+// resource-constrained single-core VPS also hosting Audiobookshelf -- CPU
+// pegged solid enough that the ABS process starved too). Goodreads' RSS feed
+// regularly omits isbn for a meaningful fraction of shelf items (confirmed
+// via this file's own "Mistborn" test fixture), so isbn-less items are the
+// COMMON case, not an edge case -- scanning the full pool for each one is
+// what made the cost quadratic in practice.
+//
+// - Tier 1 (tried first, cheap): fuzzy-match against existingIsbnLess only.
+//   Resolves the common case -- an isbn-less shelf item whose real match is
+//   also isbn-less -- without ever touching the full table.
+// - Tier 2 (only reached when tier 1 finds nothing): fuzzy-match against the
+//   full remaining pool. Catches every isbn-drift shape tier 1 can't reach
+//   on its own: isbn changed to a different value, isbn appeared on a row
+//   that was previously isbn-less, or isbn disappeared from the feed for a
+//   row that's still stored WITH one (tier 1's isbn-less-only pool would
+//   never contain that row). Safe to be this broad here specifically
+//   because it only runs once tier 1 has already failed, so its cost is
+//   bounded by how often drift actually happens, not by how large the
+//   isbn-less population is.
+//
+// Two correctness bugs already lived in an earlier, single-pool version of
+// this function: (1) two incoming shelf items sharing one ISBN would both
+// match the same existing row, silently dropping one book (last-write-wins,
+// no error, since isbn has no unique constraint) -- fixed by the matchedIds
+// re-check on the ISBN branch below, independent of which fuzzy tier runs;
+// (2) an existing row WITH an isbn was permanently unreachable by fuzzy
+// fallback the moment its incoming isbn stopped matching -- fixed by tier 2
+// above. Don't collapse tiers 1 and 2 back into one shared full-pool
+// fallback; that's the exact change that caused the CPU incident.
 //
 // A shelf item with no match gets a fresh row; an existing row matched to
 // nothing on the current shelf (removed from Goodreads) gets deleted, with
@@ -243,9 +268,12 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   });
 
   const existingByIsbn = new Map<string, ExistingTbrItem>();
+  const existingIsbnLess: ExistingTbrItem[] = [];
   for (const item of existing) {
     if (item.isbn) {
       existingByIsbn.set(item.isbn, item);
+    } else {
+      existingIsbnLess.push(item);
     }
   }
 
@@ -258,8 +286,26 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
     if (isbnCandidate && !matchedIds.has(isbnCandidate.id)) {
       matched = isbnCandidate;
     } else {
-      const available = existing.filter((item) => !matchedIds.has(item.id));
-      matched = findBestTitleMatch(available, shelfItem.title);
+      // Tier 1: try the cheap isbn-less pool first, regardless of whether
+      // this shelf item itself has an isbn -- covers both the common case
+      // (isbn-less shelf item, isbn-less existing row) and the "isbn
+      // disappeared from the feed" drift case (isbn-less shelf item whose
+      // real match still has no isbn stored) without ever touching the full
+      // table for either.
+      const isbnLessAvailable = existingIsbnLess.filter((item) => !matchedIds.has(item.id));
+      matched = findBestTitleMatch(isbnLessAvailable, shelfItem.title);
+
+      // Tier 2: only reached when tier 1 found nothing. Falls back to the
+      // full remaining pool -- this is what catches the other isbn-drift
+      // shapes (isbn changed to a different value, or newly appeared on an
+      // existing row that was previously isbn-less). Safe to be this broad
+      // here specifically because it only runs once tier 1 has already
+      // failed, so its cost is bounded by how often drift actually happens,
+      // not by how large the isbn-less population is.
+      if (!matched) {
+        const fullAvailable = existing.filter((item) => !matchedIds.has(item.id));
+        matched = findBestTitleMatch(fullAvailable, shelfItem.title);
+      }
     }
 
     if (matched) {

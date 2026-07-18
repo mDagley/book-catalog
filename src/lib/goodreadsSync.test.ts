@@ -696,4 +696,63 @@ describe("syncGoodreadsTbr", () => {
 
     expect(lookupIsbn).toHaveBeenCalledTimes(25);
   });
+
+  it("stays fast when many isbn-less shelf items need fuzzy matching against a large existing table (regression: production CPU incident)", async () => {
+    // Real book titles commonly have colons/subtitles/series suffixes,
+    // which titleForms() expands into multiple normalized variants each --
+    // that multiplier is what made the original incident's cost so much
+    // higher than a naive estimate; a short, punctuation-free synthetic
+    // title (tried first while building this test) badly understates it,
+    // so this uses shapes closer to real titles instead.
+    function realisticTitle(i: number): string {
+      const templates = [
+        (n: number) => `The Chronicles of Something ${n}: A Tale of Adventure`,
+        (n: number) =>
+          `An Extremely Long Descriptive Title About Various Topics ${n}: A Subtitle Here`,
+        (n: number) => `The Book of ${n} (The Great Series, Book ${n % 12})`,
+      ];
+      return `Test Goodreads Sync Perf ${templates[i % templates.length](i)}`;
+    }
+
+    const isbnBearingCount = 400;
+    const isbnLessCount = 60;
+
+    const isbnBearingExisting = Array.from({ length: isbnBearingCount }, (_, i) => ({
+      title: realisticTitle(i),
+      isbn: `978111${String(i).padStart(7, "0")}`,
+    }));
+    const isbnLessExisting = Array.from({ length: isbnLessCount }, (_, i) => ({
+      title: realisticTitle(i + isbnBearingCount),
+    }));
+    await prisma.goodreadsTbrItem.createMany({
+      data: [...isbnBearingExisting, ...isbnLessExisting],
+    });
+
+    // isbn-less items go FIRST in feed order, before any isbn-bearing item
+    // has been matched-and-removed from the pool -- a real Goodreads feed
+    // has no guaranteed ordering, and putting isbn-bearing items first
+    // would let their O(1) isbn matches drain most of the pool before any
+    // fuzzy matching even starts, silently making a buggy full-pool
+    // fallback look just as fast as the fix (this was tried and caught
+    // while writing this test).
+    const shelfItems = [
+      ...isbnLessExisting.map((item) => ({ title: item.title })),
+      ...isbnBearingExisting.map((item) => ({ title: item.title, isbn13: item.isbn })),
+    ];
+    mockShelfFetch({ "to-read": [buildRssPage(shelfItems)] });
+
+    const start = Date.now();
+    await syncGoodreadsTbr("1993628");
+    const elapsedMs = Date.now() - start;
+
+    // Measured directly (isolated, this file's matching functions only, not
+    // the full sync): tier-1-only fallback (60 isbn-less shelf items x 60
+    // isbn-less existing rows, this test's shape after the fix) takes
+    // ~360ms; the pre-fix full-pool fallback (60 x the full 460-row table)
+    // takes ~4900ms at the same scale with these title shapes. 2000ms is a
+    // wide margin on both sides of that gap -- won't flake on a slow CI
+    // machine, but reliably catches a regression back to full-pool
+    // scanning.
+    expect(elapsedMs).toBeLessThan(2000);
+  }, 15000);
 });
