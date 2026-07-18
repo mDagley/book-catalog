@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { parseCopyFields } from "@/lib/books";
 import { resolveCoverUpdate, type CoverSelectionInput } from "@/lib/copyCovers";
+import { deleteCoverImage } from "@/lib/coverStorage";
 
 export interface CopyFormState {
   error?: string;
@@ -61,10 +62,14 @@ export async function deleteCopyData(
 ): Promise<{ bookId: string; bookDeleted: boolean }> {
   const copy = await prisma.physicalCopy.findUniqueOrThrow({
     where: { id: copyId },
-    select: { bookId: true },
+    select: { bookId: true, coverImagePath: true },
   });
 
   await prisma.physicalCopy.delete({ where: { id: copyId } });
+
+  if (copy.coverImagePath) {
+    await deleteCoverImage(copy.coverImagePath);
+  }
 
   const remaining = await prisma.physicalCopy.count({ where: { bookId: copy.bookId } });
 
