@@ -11,6 +11,7 @@ import { normalizeIsbn } from "@/lib/books";
 import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
 import { STATUS_FILTER_OPTIONS } from "@/components/ReadingProgressFields";
 import { resolveListingCover } from "@/lib/listingCover";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export default async function BooksPage({
   searchParams,
@@ -157,21 +158,7 @@ export default async function BooksPage({
             const coverImagePath = resolveListingCover(book);
             return (
               <li key={book.id} className="rounded border p-3">
-                {coverImagePath ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`/api/covers/${encodeURIComponent(coverImagePath)}`}
-                    alt="Cover"
-                    className="mb-2 h-32 w-24 rounded object-cover"
-                  />
-                ) : (
-                  <div
-                    className="mb-2 flex h-32 w-24 items-center justify-center rounded bg-gray-100 text-3xl text-gray-400"
-                    aria-hidden="true"
-                  >
-                    📖
-                  </div>
-                )}
+                <CoverThumbnail coverImagePath={coverImagePath} />
                 <Link href={`/books/${book.id}`} className="font-medium hover:underline">
                   {book.title}
                 </Link>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -68,21 +69,7 @@ export default async function TbrGapPage({
             <ul className="space-y-2">
               {group.items.map((item) => (
                 <li key={item.id} className="rounded border p-3">
-                  {item.coverImagePath ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={`/api/covers/${encodeURIComponent(item.coverImagePath)}`}
-                      alt="Cover"
-                      className="mb-2 h-32 w-24 rounded object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="mb-2 flex h-32 w-24 items-center justify-center rounded bg-gray-100 text-3xl text-gray-400"
-                      aria-hidden="true"
-                    >
-                      📖
-                    </div>
-                  )}
+                  <CoverThumbnail coverImagePath={item.coverImagePath} />
                   <p className="font-medium">{item.title}</p>
                   {item.author && <p className="text-sm text-gray-600">{item.author}</p>}
                 </li>

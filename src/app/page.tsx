@@ -14,6 +14,7 @@ import {
   ratingStars,
 } from "@/components/ReadingProgressFields";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -145,21 +146,7 @@ export default async function HomePage({
         <ul className="space-y-3">
           {results.map((result) => (
             <li key={result.bookId ?? result.title} className="rounded border p-3">
-              {result.coverImagePath ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={`/api/covers/${encodeURIComponent(result.coverImagePath)}`}
-                  alt="Cover"
-                  className="mb-2 h-32 w-24 rounded object-cover"
-                />
-              ) : (
-                <div
-                  className="mb-2 flex h-32 w-24 items-center justify-center rounded bg-gray-100 text-3xl text-gray-400"
-                  aria-hidden="true"
-                >
-                  📖
-                </div>
-              )}
+              <CoverThumbnail coverImagePath={result.coverImagePath} />
               <p className="font-medium">{result.title}</p>
               {result.author && <p className="text-sm text-gray-600">{result.author}</p>}
               <div className="mt-1 flex flex-wrap gap-2 text-sm">
