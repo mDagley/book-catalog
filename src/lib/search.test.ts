@@ -8,6 +8,11 @@ import {
   parseStatusModeParam,
   buildStatusWhere,
 } from "@/lib/search";
+import { saveCoverImage, deleteCoverImage } from "@/lib/coverStorage";
+
+const ONE_PX_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const savedCoverPaths: string[] = [];
 
 afterEach(async () => {
   await prisma.physicalCopy.deleteMany({
@@ -20,6 +25,10 @@ afterEach(async () => {
     where: { book: { title: { startsWith: "Test Search" } } },
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Search" } } });
+  for (const p of savedCoverPaths) {
+    await deleteCoverImage(p);
+  }
+  savedCoverPaths.length = 0;
 });
 
 describe("searchCatalog", () => {
@@ -357,6 +366,38 @@ describe("searchCatalog", () => {
     });
 
     expect(results.map((r) => r.title)).not.toContain("Test Search And Contradiction Book");
+  });
+
+  it("resolves a physical-copy cover over an ebook cover in results", async () => {
+    const physicalCoverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(physicalCoverPath);
+    const ebookCoverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(ebookCoverPath);
+
+    await prisma.book.create({
+      data: {
+        title: "Test Search Cover Priority Book",
+        hasEbook: true,
+        ebookCopies: {
+          create: { absItemId: "search-test-cover-priority-ebook", coverImagePath: ebookCoverPath },
+        },
+        copies: { create: { format: "PAPERBACK", coverImagePath: physicalCoverPath } },
+      },
+    });
+
+    const results = await searchCatalog({ query: "Test Search Cover Priority Book" });
+
+    expect(results[0].coverImagePath).toBe(physicalCoverPath);
+  });
+
+  it("returns null coverImagePath when nothing has a cover", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search No Cover Book", copies: { create: { format: "PAPERBACK" } } },
+    });
+
+    const results = await searchCatalog({ query: "Test Search No Cover Book" });
+
+    expect(results[0].coverImagePath).toBeNull();
   });
 });
 
