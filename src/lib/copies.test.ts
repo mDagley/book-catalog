@@ -211,4 +211,28 @@ describe("deleteCopyData", () => {
     expect(book).not.toBeNull();
     expect(book?.hasEbook).toBe(true);
   });
+
+  it("deletes the cover file when the copy being removed has one", async () => {
+    const bookId = await createTestBook();
+    const addResult = await addCopyData(bookId, {
+      format: "HARDCOVER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in addResult) throw new Error("test setup failed");
+
+    const ONE_PX_PNG_DATA_URL =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const coverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(coverPath);
+    await prisma.physicalCopy.update({
+      where: { id: addResult.copyId },
+      data: { coverImagePath: coverPath },
+    });
+
+    await deleteCopyData(addResult.copyId);
+
+    await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
+  });
 });
