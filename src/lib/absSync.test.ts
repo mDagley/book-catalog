@@ -1,11 +1,21 @@
 // src/lib/absSync.test.ts
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
 import { searchCatalog } from "@/lib/search";
+import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
 const originalFetch = global.fetch;
+const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
+const ONE_PX_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+// Explicitly cleaned up in afterEach (not left to cleanupTestAbsSyncBooks,
+// which only touches DB rows) so a test whose own assertion fails --
+// i.e. the fix under test regressing -- doesn't leak the file it wrote.
+const savedCoverPaths: string[] = [];
 
 async function cleanupTestAbsSyncBooks(): Promise<void> {
   await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test Abs Sync" } } } });
@@ -22,6 +32,10 @@ afterEach(async () => {
   global.fetch = originalFetch;
   vi.restoreAllMocks();
   await cleanupTestAbsSyncBooks();
+  for (const p of savedCoverPaths) {
+    await deleteCoverImage(p);
+  }
+  savedCoverPaths.length = 0;
 });
 
 describe("fetchAbsLibraries", () => {
@@ -632,6 +646,64 @@ describe("syncAbsCache", () => {
       include: { ebookCopies: true },
     });
     expect(stillThere.ebookCopies.map((c) => c.absItemId)).toEqual(["test-unreachable-1"]);
+  });
+
+  it("deletes the cover file when a stale ebook copy is removed", async () => {
+    const coverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(coverPath);
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Stale Ebook Cover Cleanup",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-stale-ebook-cover-1", coverImagePath: coverPath } },
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-stale-ebook-cover-other",
+            media: { metadata: { title: "Test Abs Sync Stale Ebook Cover Unrelated" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
+  });
+
+  it("deletes the cover file when a stale audiobook copy is removed", async () => {
+    const coverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
+    savedCoverPaths.push(coverPath);
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Stale Audiobook Cover Cleanup",
+        hasAudiobook: true,
+        audiobookCopies: {
+          create: { absItemId: "test-stale-audiobook-cover-1", coverImagePath: coverPath },
+        },
+      },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "audio-lib": [
+          {
+            id: "test-stale-audiobook-cover-other",
+            media: { metadata: { title: "Test Abs Sync Stale Audiobook Cover Unrelated" } },
+          },
+        ],
+      },
+      [{ id: "audio-lib", name: "Panda Audiobooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
   });
 });
 

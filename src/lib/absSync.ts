@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
+import { deleteCoverImage } from "@/lib/coverStorage";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -210,27 +211,37 @@ async function removeStaleAbsLinks(
   // in-memory Set lookup avoids ever putting the full seen-set into SQL.
   if (syncedMediaTypes.has("EBOOK")) {
     const allEbookCopies = await prisma.ebookCopy.findMany({
-      select: { id: true, bookId: true, absItemId: true },
+      select: { id: true, bookId: true, absItemId: true, coverImagePath: true },
     });
     const staleEbookCopies = allEbookCopies.filter((c) => !seenItemIds.has(c.absItemId));
     if (staleEbookCopies.length > 0) {
       await prisma.ebookCopy.deleteMany({
         where: { id: { in: staleEbookCopies.map((c) => c.id) } },
       });
-      for (const c of staleEbookCopies) affectedBookIds.add(c.bookId);
+      for (const c of staleEbookCopies) {
+        affectedBookIds.add(c.bookId);
+        if (c.coverImagePath) {
+          await deleteCoverImage(c.coverImagePath);
+        }
+      }
     }
   }
 
   if (syncedMediaTypes.has("AUDIOBOOK")) {
     const allAudiobookCopies = await prisma.audiobookCopy.findMany({
-      select: { id: true, bookId: true, absItemId: true },
+      select: { id: true, bookId: true, absItemId: true, coverImagePath: true },
     });
     const staleAudiobookCopies = allAudiobookCopies.filter((c) => !seenItemIds.has(c.absItemId));
     if (staleAudiobookCopies.length > 0) {
       await prisma.audiobookCopy.deleteMany({
         where: { id: { in: staleAudiobookCopies.map((c) => c.id) } },
       });
-      for (const c of staleAudiobookCopies) affectedBookIds.add(c.bookId);
+      for (const c of staleAudiobookCopies) {
+        affectedBookIds.add(c.bookId);
+        if (c.coverImagePath) {
+          await deleteCoverImage(c.coverImagePath);
+        }
+      }
     }
   }
 
