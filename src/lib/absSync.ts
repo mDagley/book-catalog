@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
-import { deleteCoverImage } from "@/lib/coverStorage";
+import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -293,6 +293,77 @@ async function removeStaleAbsLinks(
   }
 }
 
+const ABS_COVER_FETCH_CAP = 25;
+
+// Fetches a cover directly from Audiobookshelf's own REST API, using the
+// same trusted, already-authenticated connection this file uses for
+// everything else -- deliberately NOT saveCoverFromUrl's public-URL path,
+// which is SSRF-hardened against arbitrary user-supplied hosts (allowlisted
+// to covers.openlibrary.org/archive.org only) and would reject a
+// self-hosted ABS server outright. absItemId always comes from our own DB
+// (never user input), and baseUrl/token are admin-configured env vars, so
+// that allowlist doesn't apply to this call site.
+async function fetchAbsCoverAndSave(
+  baseUrl: string,
+  token: string,
+  absItemId: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(`${baseUrl}/api/items/${absItemId}/cover`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return null;
+
+    const arrayBuffer = await response.arrayBuffer();
+    const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
+    const contentType = rawContentType.split(";")[0].trim();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    return await saveCoverImage(`data:${contentType};base64,${base64}`);
+  } catch {
+    return null;
+  }
+}
+
+// Backfills a cover for any EbookCopy/AudiobookCopy that has never had a
+// cover-fetch attempt (coverCheckedAt null) and doesn't already have one --
+// capped per run, same rationale as fetchMissingTbrCovers in
+// goodreadsSync.ts: the first sync after this shipped has every existing
+// copy missing both fields, so fetching all of them in one run would be a
+// long-running burst against the ABS server. coverCheckedAt is always set
+// after an attempt, success or not, so a permanently-missing cover is never
+// retried.
+async function backfillAbsCovers(baseUrl: string, token: string): Promise<void> {
+  const [missingEbookCovers, missingAudiobookCovers] = await Promise.all([
+    prisma.ebookCopy.findMany({
+      where: { coverImagePath: null, coverCheckedAt: null },
+      select: { id: true, absItemId: true },
+    }),
+    prisma.audiobookCopy.findMany({
+      where: { coverImagePath: null, coverCheckedAt: null },
+      select: { id: true, absItemId: true },
+    }),
+  ]);
+
+  const pending = [
+    ...missingEbookCovers.map((c) => ({ table: "ebook" as const, id: c.id, absItemId: c.absItemId })),
+    ...missingAudiobookCovers.map((c) => ({
+      table: "audiobook" as const,
+      id: c.id,
+      absItemId: c.absItemId,
+    })),
+  ].slice(0, ABS_COVER_FETCH_CAP);
+
+  for (const copy of pending) {
+    const coverImagePath = await fetchAbsCoverAndSave(baseUrl, token, copy.absItemId);
+    const data = { coverCheckedAt: new Date(), ...(coverImagePath ? { coverImagePath } : {}) };
+    if (copy.table === "ebook") {
+      await prisma.ebookCopy.update({ where: { id: copy.id }, data });
+    } else {
+      await prisma.audiobookCopy.update({ where: { id: copy.id }, data });
+    }
+  }
+}
+
 // Syncs the "Panda EBooks" and "Panda Audiobooks" ABS libraries directly onto
 // Book rows (see docs/superpowers/specs/2026-07-14-catalog-data-model-unification-design.md
 // and docs/superpowers/specs/2026-07-16-unify-copy-types-design.md).
@@ -314,6 +385,15 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
       pendingItems.push({ item, mediaType });
     }
   }
+
+  // Backfilling covers for existing copies is independent of whether this
+  // pass found any new/changed items -- it targets rows that were already
+  // linked in a previous sync and just never had a cover-fetch attempt.
+  // Deliberately runs BEFORE the "zero pending items" early-return below, so
+  // a library sync that finds nothing new this pass (or a transient ABS
+  // hiccup that returns zero items) still makes backfill progress instead
+  // of being silently skipped every time.
+  await backfillAbsCovers(baseUrl, token);
 
   // A sync that fetched zero items at all is treated as suspicious rather
   // than "the user deleted their whole ABS ebook/audiobook collection" --

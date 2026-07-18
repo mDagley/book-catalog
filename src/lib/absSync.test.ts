@@ -705,6 +705,103 @@ describe("syncAbsCache", () => {
 
     await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
   });
+
+  it("backfills a cover for an existing EbookCopy missing one", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Backfill Ebook",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "backfill-ebook-1" } },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-ebook-1/cover")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-ebook-1" },
+    });
+    expect(updated.coverImagePath).not.toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+    if (updated.coverImagePath) {
+      savedCoverPaths.push(updated.coverImagePath);
+    }
+  });
+
+  it("sets coverCheckedAt without a coverImagePath when the ABS cover endpoint returns a non-OK response", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync No Cover Available",
+        hasAudiobook: true,
+        audiobookCopies: { create: { absItemId: "backfill-audiobook-404" } },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-audiobook-404/cover")) {
+        return { ok: false, status: 404 } as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.audiobookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-audiobook-404" },
+    });
+    expect(updated.coverImagePath).toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+  });
+
+  it("never re-attempts a cover fetch once coverCheckedAt is set", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Already Checked",
+        hasEbook: true,
+        ebookCopies: {
+          create: { absItemId: "backfill-already-checked", coverCheckedAt: new Date() },
+        },
+      },
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    });
+    global.fetch = fetchMock as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("backfill-already-checked/cover"),
+      expect.anything(),
+    );
+  });
 });
 
 describe("syncAbsCache + searchCatalog integration", () => {
