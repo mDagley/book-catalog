@@ -228,12 +228,9 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   });
 
   const existingByIsbn = new Map<string, ExistingTbrItem>();
-  const fuzzyPool: ExistingTbrItem[] = [];
   for (const item of existing) {
     if (item.isbn) {
       existingByIsbn.set(item.isbn, item);
-    } else {
-      fuzzyPool.push(item);
     }
   }
 
@@ -242,10 +239,11 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
 
   for (const shelfItem of shelfItems) {
     let matched: ExistingTbrItem | null = null;
-    if (shelfItem.isbn && existingByIsbn.has(shelfItem.isbn)) {
-      matched = existingByIsbn.get(shelfItem.isbn)!;
+    const isbnCandidate = shelfItem.isbn ? existingByIsbn.get(shelfItem.isbn) : undefined;
+    if (isbnCandidate && !matchedIds.has(isbnCandidate.id)) {
+      matched = isbnCandidate;
     } else {
-      const available = fuzzyPool.filter((item) => !matchedIds.has(item.id));
+      const available = existing.filter((item) => !matchedIds.has(item.id));
       matched = findBestTitleMatch(available, shelfItem.title);
     }
 

@@ -508,4 +508,53 @@ describe("syncGoodreadsTbr", () => {
     expect(items[0].coverImagePath).toBeNull();
     expect(items[0].coverCheckedAt).toBeNull();
   });
+
+  it("does not silently drop a book when two incoming shelf items share the same ISBN as one existing row", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Goodreads Sync Old Duplicate ISBN Book", isbn: "9780000000099" },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Duplicate ISBN Book A", isbn13: "9780000000099" },
+          { title: "Test Goodreads Sync Duplicate ISBN Book B", isbn13: "9780000000099" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync Duplicate ISBN Book" } },
+    });
+    expect(items).toHaveLength(2);
+    expect(items.some((i) => i.title === "Test Goodreads Sync Duplicate ISBN Book A")).toBe(true);
+    expect(items.some((i) => i.title === "Test Goodreads Sync Duplicate ISBN Book B")).toBe(true);
+  });
+
+  it("recovers an existing ISBN-bearing row by fuzzy title match when its incoming ISBN no longer matches", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Isbn Drift Book",
+        isbn: "9780000000088",
+        coverImagePath: "isbn-drift-cover.jpg",
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([{ title: "Test Goodreads Sync Isbn Drift Book" }]), // no isbn13 this time
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany({
+      where: { title: "Test Goodreads Sync Isbn Drift Book" },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(existing.id);
+    expect(items[0].coverImagePath).toBe("isbn-drift-cover.jpg");
+  });
 });
