@@ -10,6 +10,8 @@ import {
 import { normalizeIsbn } from "@/lib/books";
 import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
 import { STATUS_FILTER_OPTIONS } from "@/components/ReadingProgressFields";
+import { resolveListingCover } from "@/lib/listingCover";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export default async function BooksPage({
   searchParams,
@@ -65,7 +67,11 @@ export default async function BooksPage({
 
   const books = await prisma.book.findMany({
     where: { AND: filters },
-    include: { copies: true },
+    include: {
+      copies: true,
+      ebookCopies: { select: { coverImagePath: true } },
+      audiobookCopies: { select: { coverImagePath: true } },
+    },
     orderBy: { title: "asc" },
   });
 
@@ -148,17 +154,21 @@ export default async function BooksPage({
         <p className="text-gray-600">No books found.</p>
       ) : (
         <ul className="space-y-3">
-          {books.map((book) => (
-            <li key={book.id} className="rounded border p-3">
-              <Link href={`/books/${book.id}`} className="font-medium hover:underline">
-                {book.title}
-              </Link>
-              {book.author && <p className="text-sm text-gray-600">{book.author}</p>}
-              <p className="text-sm text-gray-500">
-                {book.copies.length} {book.copies.length === 1 ? "copy" : "copies"}
-              </p>
-            </li>
-          ))}
+          {books.map((book) => {
+            const coverImagePath = resolveListingCover(book);
+            return (
+              <li key={book.id} className="rounded border p-3">
+                <CoverThumbnail coverImagePath={coverImagePath} />
+                <Link href={`/books/${book.id}`} className="font-medium hover:underline">
+                  {book.title}
+                </Link>
+                {book.author && <p className="text-sm text-gray-600">{book.author}</p>}
+                <p className="text-sm text-gray-500">
+                  {book.copies.length} {book.copies.length === 1 ? "copy" : "copies"}
+                </p>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>

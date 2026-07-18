@@ -52,27 +52,31 @@ enum Format {
 }
 
 model EbookCopy {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   bookId         String
-  book           Book     @relation(fields: [bookId], references: [id])
-  absItemId      String   @unique
+  book           Book      @relation(fields: [bookId], references: [id])
+  absItemId      String    @unique
   coverImagePath String?
-  createdAt      DateTime @default(now())
+  coverCheckedAt DateTime?
+  createdAt      DateTime  @default(now())
 }
 
 model AudiobookCopy {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   bookId         String
-  book           Book     @relation(fields: [bookId], references: [id])
-  absItemId      String   @unique
+  book           Book      @relation(fields: [bookId], references: [id])
+  absItemId      String    @unique
   coverImagePath String?
-  createdAt      DateTime @default(now())
+  coverCheckedAt DateTime?
+  createdAt      DateTime  @default(now())
 }
 
 model GoodreadsTbrItem {
-  id           String   @id @default(cuid())
-  title        String
-  author       String?
-  isbn         String?
-  lastSyncedAt DateTime @default(now())
+  id             String    @id @default(cuid())
+  title          String
+  author         String?
+  isbn           String?
+  coverImagePath String?
+  coverCheckedAt DateTime?
+  lastSyncedAt   DateTime  @default(now())
 }

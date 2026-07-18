@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export default async function TbrGapPage({
             <ul className="space-y-2">
               {group.items.map((item) => (
                 <li key={item.id} className="rounded border p-3">
+                  <CoverThumbnail coverImagePath={item.coverImagePath} />
                   <p className="font-medium">{item.title}</p>
                   {item.author && <p className="text-sm text-gray-600">{item.author}</p>}
                 </li>

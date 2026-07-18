@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
+import { resolveListingCover } from "@/lib/listingCover";
 import type { Format, Prisma, ReadStatus } from "@prisma/client";
 
 export interface SearchResultCopy {
@@ -18,6 +19,7 @@ export interface SearchResult {
   hasAudiobook: boolean;
   readStatus: ReadStatus | null;
   rating: number | null;
+  coverImagePath: string | null;
 }
 
 export type OwnershipType = "physical" | "ebook" | "audiobook";
@@ -163,7 +165,11 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 
   const books = await prisma.book.findMany({
     where: { AND: filters },
-    include: { copies: { where: format ? { format } : undefined } },
+    include: {
+      copies: { where: format ? { format } : undefined },
+      ebookCopies: { select: { coverImagePath: true } },
+      audiobookCopies: { select: { coverImagePath: true } },
+    },
     orderBy: { id: "asc" },
   });
 
@@ -192,5 +198,6 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     hasAudiobook: includeAudiobook ? book.hasAudiobook : false,
     readStatus: book.readStatus,
     rating: book.rating,
+    coverImagePath: resolveListingCover(book),
   }));
 }

@@ -14,6 +14,7 @@ import {
   ratingStars,
 } from "@/components/ReadingProgressFields";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +146,7 @@ export default async function HomePage({
         <ul className="space-y-3">
           {results.map((result) => (
             <li key={result.bookId ?? result.title} className="rounded border p-3">
+              <CoverThumbnail coverImagePath={result.coverImagePath} />
               <p className="font-medium">{result.title}</p>
               {result.author && <p className="text-sm text-gray-600">{result.author}</p>}
               <div className="mt-1 flex flex-wrap gap-2 text-sm">

@@ -3,6 +3,9 @@ import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
+import { deleteCoverImage } from "@/lib/coverStorage";
+import { lookupIsbn } from "@/lib/isbnLookup";
+import { saveCoverFromUrl } from "@/lib/books";
 
 export interface GoodreadsBook {
   title: string;
@@ -197,12 +200,139 @@ async function applyShelfToBooks(
   }
 }
 
-// Full replace (not upsert-by-id) for GoodreadsTbrItem since Goodreads' RSS
-// feed exposes no stable per-item id to key on, and a book removed from the
-// to-read shelf should disappear from the TBR gap view too -- per the
-// original design spec. The currently-reading/read shelves are additionally
-// matched against existing Book rows to set readStatus/rating -- see
-// docs/superpowers/specs/2026-07-15-read-status-ratings-design.md.
+interface ExistingTbrItem {
+  id: string;
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  coverImagePath: string | null;
+}
+
+// Reconciles the "to-read" shelf against existing GoodreadsTbrItem rows
+// instead of the old delete+recreate approach -- a full replace would
+// destroy any fetched cover (coverImagePath/coverCheckedAt) every single
+// sync cycle, since Goodreads' RSS feed exposes no stable per-item id to
+// upsert on directly. Matches by exact ISBN first (O(1) via existingByIsbn),
+// falling back to fuzzy title matching (findBestTitleMatch, already used
+// elsewhere in this codebase for the same "match incoming data to existing
+// rows with no shared stable id" problem) against the FULL remaining
+// (not-yet-matched) pool -- deliberately not a separate ISBN-less-only pool.
+// Two bugs already lived in an earlier, static-partition version of this
+// function: (1) two incoming shelf items sharing one ISBN would both match
+// the same existing row, silently dropping one book (last-write-wins, no
+// error, since isbn has no unique constraint); (2) an existing row WITH an
+// isbn became permanently unreachable by fuzzy fallback the moment its
+// incoming isbn stopped matching (drifted or vanished from the feed),
+// destroying the very cover-preservation this function exists for. Both are
+// why the ISBN branch below re-checks matchedIds before accepting a hit, and
+// why the fuzzy fallback pool is drawn from `existing` (all rows), not a
+// pre-filtered ISBN-less subset -- don't reintroduce a static partition here.
+//
+// A shelf item with no match gets a fresh row; an existing row matched to
+// nothing on the current shelf (removed from Goodreads) gets deleted, with
+// its cover file cleaned up first -- same pattern as PR #19's orphaned-cover
+// cleanup.
+//
+// Runs as sequential individual Prisma calls, not one large transaction --
+// deliberately avoiding the kind of long-held-transaction/connection-pool
+// risk that caused the PR #17 production incident (Prisma P2028, "Unable to
+// start a transaction in the given time").
+async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
+  const existing = await prisma.goodreadsTbrItem.findMany({
+    select: { id: true, title: true, author: true, isbn: true, coverImagePath: true },
+  });
+
+  const existingByIsbn = new Map<string, ExistingTbrItem>();
+  for (const item of existing) {
+    if (item.isbn) {
+      existingByIsbn.set(item.isbn, item);
+    }
+  }
+
+  const matchedIds = new Set<string>();
+  const toCreate: { title: string; author: string | null; isbn: string | null }[] = [];
+
+  for (const shelfItem of shelfItems) {
+    let matched: ExistingTbrItem | null = null;
+    const isbnCandidate = shelfItem.isbn ? existingByIsbn.get(shelfItem.isbn) : undefined;
+    if (isbnCandidate && !matchedIds.has(isbnCandidate.id)) {
+      matched = isbnCandidate;
+    } else {
+      const available = existing.filter((item) => !matchedIds.has(item.id));
+      matched = findBestTitleMatch(available, shelfItem.title);
+    }
+
+    if (matched) {
+      matchedIds.add(matched.id);
+      if (
+        matched.title !== shelfItem.title ||
+        matched.author !== shelfItem.author ||
+        matched.isbn !== shelfItem.isbn
+      ) {
+        await prisma.goodreadsTbrItem.update({
+          where: { id: matched.id },
+          data: { title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn },
+        });
+      }
+    } else {
+      toCreate.push({ title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn });
+    }
+  }
+
+  if (toCreate.length > 0) {
+    await prisma.goodreadsTbrItem.createMany({ data: toCreate });
+  }
+
+  const toDelete = existing.filter((item) => !matchedIds.has(item.id));
+  for (const item of toDelete) {
+    if (item.coverImagePath) {
+      await deleteCoverImage(item.coverImagePath);
+    }
+  }
+  if (toDelete.length > 0) {
+    await prisma.goodreadsTbrItem.deleteMany({
+      where: { id: { in: toDelete.map((item) => item.id) } },
+    });
+  }
+}
+
+const TBR_COVER_FETCH_CAP = 25;
+
+// Fetches an Open Library cover for any TBR item that has an ISBN and has
+// never had a cover-fetch attempt (coverCheckedAt null), capped per run so
+// the initial backlog (every existing item, on the first sync after this
+// shipped) fills in gradually over several cron cycles instead of one long
+// burst against Open Library. coverCheckedAt is always set after an
+// attempt, whether or not a cover was found -- see reconcileTbrItems's
+// sibling concern above for why a permanently-missing cover must never be
+// retried.
+async function fetchMissingTbrCovers(): Promise<void> {
+  const pending = await prisma.goodreadsTbrItem.findMany({
+    where: { coverImagePath: null, coverCheckedAt: null, isbn: { not: null } },
+    select: { id: true, isbn: true },
+    take: TBR_COVER_FETCH_CAP,
+  });
+
+  for (const item of pending) {
+    const lookup = await lookupIsbn(item.isbn!);
+    let coverImagePath: string | undefined;
+    if (lookup.coverUrl) {
+      const result = await saveCoverFromUrl(lookup.coverUrl);
+      if (!("error" in result)) {
+        coverImagePath = result.coverImagePath;
+      }
+    }
+    await prisma.goodreadsTbrItem.update({
+      where: { id: item.id },
+      data: { coverCheckedAt: new Date(), ...(coverImagePath ? { coverImagePath } : {}) },
+    });
+  }
+}
+
+// See reconcileTbrItems above for how GoodreadsTbrItem rows are kept in
+// sync with the "to-read" shelf. The currently-reading/read shelves are
+// additionally matched against existing Book rows to set readStatus/rating
+// -- see docs/superpowers/specs/2026-07-15-read-status-ratings-design.md.
 export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number }> {
   const shelfItems = Object.fromEntries(
     await Promise.all(
@@ -212,26 +342,7 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
     ),
   ) as Record<GoodreadsShelf, GoodreadsBook[]>;
 
-  // Explicit maxWait/timeout (Prisma defaults: 2s/5s) as defense-in-depth on
-  // the resource-constrained production VPS -- even with the ABS and
-  // Goodreads syncs no longer scheduled/triggered concurrently (see
-  // instrumentation.ts and RefreshSyncButton.tsx), incidental concurrent
-  // load (e.g. a user browsing while a sync runs) could still starve this
-  // transaction's connection acquisition. This failed in production with
-  // Prisma P2028 ("Unable to start a transaction in the given time").
-  await prisma.$transaction(
-    [
-      prisma.goodreadsTbrItem.deleteMany(),
-      prisma.goodreadsTbrItem.createMany({
-        data: shelfItems["to-read"].map((book) => ({
-          title: book.title,
-          author: book.author,
-          isbn: book.isbn,
-        })),
-      }),
-    ],
-    { maxWait: 10000, timeout: 20000 },
-  );
+  await reconcileTbrItems(shelfItems["to-read"]);
 
   const books: StatusSyncBook[] = await prisma.book.findMany({ select: STATUS_SYNC_BOOK_SELECT });
   for (const shelf of STATUS_SYNC_SHELVES) {
@@ -239,5 +350,8 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
   }
 
   const synced = STATUS_SYNC_SHELVES.reduce((sum, shelf) => sum + shelfItems[shelf].length, 0);
+
+  await fetchMissingTbrCovers();
+
   return { synced };
 }
