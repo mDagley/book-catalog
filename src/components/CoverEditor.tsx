@@ -4,6 +4,11 @@
 import { useState, type ChangeEvent } from "react";
 import { CoverCamera } from "@/components/CoverCamera";
 
+// Must match src/lib/coverStorage.ts's MIME_TO_EXT exactly -- the server
+// only saves these three types, so accepting anything broader here just
+// defers a guaranteed failure to after a full round-trip.
+const ACCEPTED_COVER_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
 interface CoverEditorProps {
   currentCoverPath: string | null;
   bookIsbn: string | null;
@@ -56,8 +61,8 @@ export function CoverEditor({
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setLookupError("Please choose an image file.");
+    if (!ACCEPTED_COVER_TYPES.includes(file.type)) {
+      setLookupError("Please choose a PNG, JPEG, or WebP image.");
       event.target.value = "";
       return;
     }
@@ -97,7 +102,7 @@ export function CoverEditor({
           Upload a file
           <input
             type="file"
-            accept="image/*"
+            accept={ACCEPTED_COVER_TYPES.join(",")}
             onChange={handleFileChange}
             className="sr-only"
           />
