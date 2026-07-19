@@ -367,14 +367,28 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
 
     if (matched) {
       matchedIds.add(matched.id);
+      const isbnChanged = matched.isbn !== shelfItem.isbn;
       if (
         matched.title !== shelfItem.title ||
         matched.author !== shelfItem.author ||
-        matched.isbn !== shelfItem.isbn
+        isbnChanged
       ) {
         await prisma.goodreadsTbrItem.update({
           where: { id: matched.id },
-          data: { title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn },
+          data: {
+            title: shelfItem.title,
+            author: shelfItem.author,
+            isbn: shelfItem.isbn,
+            // A corrected isbn deserves a fresh cover-fetch attempt -- the
+            // previous attempt (if any) used the OLD, now-stale isbn.
+            // Only relevant when there's no cover yet; harmless no-op
+            // otherwise (coverCheckedAt may already be null, or the row
+            // already has a cover and the "pending" query for
+            // fetchMissingTbrCovers never considers rows with one).
+            ...(isbnChanged && matched.coverImagePath === null
+              ? { coverCheckedAt: null, coverFetchFailureReason: null }
+              : {}),
+          },
         });
       }
     } else {
