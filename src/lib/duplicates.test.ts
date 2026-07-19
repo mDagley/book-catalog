@@ -26,10 +26,33 @@ describe("findDuplicateBookGroups", () => {
       },
     });
 
-    const groups = await findDuplicateBookGroups();
+    const { groups, truncated } = await findDuplicateBookGroups();
 
+    expect(truncated).toBe(false);
     const group = groups.find((g) => g.books.some((book) => book.id === a.id));
     expect(group).toBeDefined();
+    expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("groups books whose titles differ only in formatting the exact-form tier normalizes away", async () => {
+    // "Way of Kings" vs "The Way of Kings: Stormlight Archive, Book 1" --
+    // colon-split, series-suffix-stripped, and "the"-stripped all reduce to
+    // the same titleForms() variant, so tier 1 should catch this without
+    // ever needing a fuzzy titleMatchScore call.
+    const a = await prisma.book.create({
+      data: { title: "Test Duplicates Way of Kings", copies: { create: { format: "HARDCOVER" } } },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates The Way of Kings: Stormlight Archive, Book 1",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-exact-form-ebook" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const group = groups.find((g) => g.books.some((book) => book.id === a.id));
     expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
   });
 
@@ -46,7 +69,7 @@ describe("findDuplicateBookGroups", () => {
       data: { title: "Test Duplicates Purely Physical Duplicate", copies: { create: { format: "PAPERBACK" } } },
     });
 
-    const groups = await findDuplicateBookGroups();
+    const { groups } = await findDuplicateBookGroups();
 
     const relevantGroups = groups.filter((g) =>
       g.books.some((book) => book.title === "Test Duplicates Purely Physical Duplicate"),
@@ -58,7 +81,7 @@ describe("findDuplicateBookGroups", () => {
     await prisma.book.create({ data: { title: "Test Duplicates Distinctly Different First Book" } });
     await prisma.book.create({ data: { title: "Test Duplicates Wholly Unrelated Second Volume" } });
 
-    const groups = await findDuplicateBookGroups();
+    const { groups } = await findDuplicateBookGroups();
 
     const relevantGroups = groups.filter((g) =>
       g.books.some((book) => book.title.startsWith("Test Duplicates")),
@@ -69,7 +92,7 @@ describe("findDuplicateBookGroups", () => {
   it("does not include a book that has no fuzzy-matching sibling", async () => {
     await prisma.book.create({ data: { title: "Test Duplicates Solo Book" } });
 
-    const groups = await findDuplicateBookGroups();
+    const { groups } = await findDuplicateBookGroups();
 
     const found = groups.some((g) => g.books.some((book) => book.title === "Test Duplicates Solo Book"));
     expect(found).toBe(false);
@@ -90,7 +113,7 @@ describe("findDuplicateBookGroups", () => {
       },
     });
 
-    const groups = await findDuplicateBookGroups();
+    const { groups } = await findDuplicateBookGroups();
     const group = groups.find((g) => g.books.some((book) => book.id === withCopy.id));
 
     const physical = group?.books.find((book) => book.id === withCopy.id);
@@ -98,6 +121,56 @@ describe("findDuplicateBookGroups", () => {
     expect(physical?.copiesCount).toBe(1);
     expect(ebook?.hasEbook).toBe(true);
     expect(ebook?.copiesCount).toBe(0);
+  });
+
+  it("stops attempting further fuzzy comparisons once the cap is hit, and reports truncated", async () => {
+    // Four digitally-owned books with genuinely dissimilar titles (no
+    // shared titleForms() variant, AND all pairwise titleMatchScore well
+    // under DEFAULT_MATCH_THRESHOLD -- verified directly -- so none of
+    // them get unioned along the way, which would otherwise let the
+    // already-grouped skip short-circuit later pairs before the cap is
+    // ever reached). That's 6 pairs, all requiring an actual
+    // titleMatchScore call. A cap of 3 must be hit partway through.
+    await prisma.book.createMany({
+      data: [
+        { title: "Test Duplicates Quantum Circuitry Repair Handbook", hasEbook: true },
+        { title: "Test Duplicates Bicycle Maintenance Companion Guide", hasEbook: true },
+        { title: "Test Duplicates Silent Orchard Evening Memories", hasEbook: true },
+        { title: "Test Duplicates Granite Bridge Construction Journal", hasEbook: true },
+      ],
+    });
+
+    const { truncated } = await findDuplicateBookGroups(3);
+
+    expect(truncated).toBe(true);
+  });
+
+  it("does not report truncated when comparisons stay under the cap", async () => {
+    await prisma.book.createMany({
+      data: [
+        { title: "Test Duplicates Undercap Alpha Volume", hasEbook: true },
+        { title: "Test Duplicates Undercap Bravo Volume", hasEbook: true },
+      ],
+    });
+
+    const { truncated } = await findDuplicateBookGroups(3);
+
+    expect(truncated).toBe(false);
+  });
+
+  it("completes quickly at a realistic catalog size (performance regression guard)", async () => {
+    const data = Array.from({ length: 700 }, (_, i) => ({
+      title: `Test Duplicates Perf Scale Unique Title Number ${i}`,
+      hasEbook: i % 2 === 0,
+      hasAudiobook: i % 3 === 0,
+    }));
+    await prisma.book.createMany({ data });
+
+    const start = Date.now();
+    await findDuplicateBookGroups();
+    const elapsedMs = Date.now() - start;
+
+    expect(elapsedMs).toBeLessThan(1000);
   });
 });
 
