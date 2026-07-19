@@ -78,6 +78,192 @@ describe("findDuplicateBookGroups", () => {
     expect(relevantGroups).toEqual([]);
   });
 
+  it("still does not group two purely physical books sharing a title but with different authors", async () => {
+    // Reinforces the general case above with explicit, differing authors
+    // (not just both-null) -- e.g. "Echo" by two unrelated real authors
+    // must never be treated as the sync-race signature below.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Different Authors Same Title",
+        author: "Author One",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Different Authors Same Title",
+        author: "Author Two",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Different Authors Same Title"),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
+  it("does not group two DIFFERENT physical books in the same series/author sharing only a stripped titleForms() variant", async () => {
+    // Copilot review finding on PR #27 (verified directly against
+    // titleForms()/normalizeTitle before accepting): "Mistborn: The Final
+    // Empire, Book 1" and "Mistborn: The Well of Ascension, Book 2" are
+    // genuinely different books, but titleForms()'s series-suffix-strip
+    // and colon-split both reduce them to a shared "mistborn" variant
+    // (their FULL normalized titles differ). Sharing a form is not the
+    // same as an exact-title match -- this is exactly the cross-
+    // contamination class already documented and fixed once in
+    // goodreadsSync.ts's own comments (colon-split prefix causing two
+    // different books in a series to score a perfect match). The
+    // physical-only exception must require full normalized-title
+    // equality, not merely a shared form, or it reintroduces this.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Mistborn: The Final Empire, Book 1",
+        author: "Brandon Sanderson",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Mistborn: The Well of Ascension, Book 2",
+        author: "Brandon Sanderson",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title.startsWith("Test Duplicates Mistborn:")),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
+  it("does not group two different physical books whose titles both normalize to an empty string", async () => {
+    // Low-confidence Copilot finding on PR #27, verified directly before
+    // accepting: normalizeTitle() strips every non-ASCII character, so
+    // two completely different non-Latin-script titles (verified: two
+    // real, different Japanese book titles) both normalize to "" --
+    // sharing that degenerate titleForms() variant AND trivially passing
+    // a naive normalizeTitle(a) === normalizeTitle(b) equality check
+    // ("" === ""). These fixtures deliberately skip the "Test Duplicates"
+    // prefix used elsewhere in this file -- an ASCII prefix would survive
+    // normalization and defeat the point of this test -- so they're
+    // cleaned up explicitly instead of via the shared afterEach above.
+    const a = await prisma.book.create({
+      data: { title: "銀河鉄道の夜", author: "Same Author", copies: { create: { format: "OTHER" } } },
+    });
+    const b = await prisma.book.create({
+      data: { title: "三体", author: "Same Author", copies: { create: { format: "OTHER" } } },
+    });
+
+    try {
+      const { groups } = await findDuplicateBookGroups();
+      const relevantGroups = groups.filter((g) =>
+        g.books.some((book) => book.id === a.id || book.id === b.id),
+      );
+      expect(relevantGroups).toEqual([]);
+    } finally {
+      await prisma.physicalCopy.deleteMany({ where: { bookId: { in: [a.id, b.id] } } });
+      await prisma.book.deleteMany({ where: { id: { in: [a.id, b.id] } } });
+    }
+  });
+
+  it("does not group two different physical books whose AUTHORS both normalize to an empty string", async () => {
+    // Same class of finding as the title case above, this time on the
+    // author side (also low-confidence Copilot, also verified real
+    // before accepting): two different real non-Latin-script author
+    // names both normalize to "" via normalizeTitle(), which
+    // authorsMatchNonNull() reuses. With a shared ASCII title (survives
+    // normalization, matches) and no ISBN conflict, this alone was
+    // enough to satisfy the exception even though the two books are by
+    // genuinely different people.
+    const a = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Empty Author Normalize Book",
+        author: "田中太郎",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Empty Author Normalize Book",
+        author: "王小明",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.id === a.id || book.id === b.id),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
+  it("groups two purely physical books that are the owned-physical sync's exact-duplicate signature", async () => {
+    // The real production bug this was built for: syncOwnedPhysicalBooks's
+    // create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md)
+    // produces two rows sharing an exact title AND author (both come from
+    // the same Goodreads shelf item), neither digitally owned, neither
+    // with an ISBN (Goodreads' feed regularly omits it). That specific
+    // signature is safe to group even though general physical-only pairs
+    // aren't.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Sync Race Signature Book",
+        author: "V.E. Schwab",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Sync Race Signature Book",
+        author: "V.E. Schwab",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Sync Race Signature Book"),
+    );
+    expect(relevantGroups).toHaveLength(1);
+    expect(relevantGroups[0].books).toHaveLength(2);
+  });
+
+  it("does not group the sync-race signature when ISBNs conflict", async () => {
+    // Same title and author, but two different non-null ISBNs -- a real
+    // signal of a different edition/printing, not a sync race, so this
+    // must stay excluded even though title+author match.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Isbn Conflict Book",
+        author: "Some Author",
+        isbn: "9781111111111",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Isbn Conflict Book",
+        author: "Some Author",
+        isbn: "9782222222222",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Isbn Conflict Book"),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
   it("does not group two books with dissimilar titles", async () => {
     await prisma.book.create({ data: { title: "Test Duplicates Distinctly Different First Book" } });
     await prisma.book.create({ data: { title: "Test Duplicates Wholly Unrelated Second Volume" } });

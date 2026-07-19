@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { titleMatchScore, titleForms, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { titleMatchScore, titleForms, normalizeTitle, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 
 export interface DuplicateCandidate {
   id: string;
@@ -31,6 +31,34 @@ export interface FindDuplicateGroupsResult {
 // findDuplicateBookGroups) purely so tests can exercise the cap without
 // needing thousands of fixture rows.
 const FUZZY_DUPLICATE_CAP = 1500;
+
+// Narrow exception to the "never group two physical-only books" rule below,
+// for the specific signature produced by syncOwnedPhysicalBooks's
+// create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md):
+// two rows sharing an exact title AND author, both created from the same
+// Goodreads shelf item by two concurrent sync runs. Requires BOTH authors
+// to be non-null and equal -- deliberately stricter than "both null counts
+// as a match," since the general "two different physical books share a
+// title with no author entered" case (e.g. "Echo") must stay excluded, and
+// a sync-race duplicate always carries whatever non-null author Goodreads
+// reported for that shelf item.
+function authorsMatchNonNull(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  // Same empty-normalization guard as the title check in
+  // findDuplicateBookGroups: normalizeTitle() strips every non-ASCII
+  // character, so two different non-Latin-script author names can both
+  // normalize to "" and otherwise pass this check as "equal."
+  const normalizedA = normalizeTitle(a);
+  return normalizedA !== "" && normalizedA === normalizeTitle(b);
+}
+
+// A different, non-null ISBN on each side is a real signal of a different
+// edition/printing, not a sync race, so that case is excluded. Either side
+// missing an ISBN (Goodreads regularly omits it) isn't a conflict.
+function isbnCompatible(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return true;
+  return a === b;
+}
 
 // One-time cleanup helper for the duplicate Book rows the ISBN-only-match
 // bug (fixed alongside this file -- see createBookWithCopyData) could have
@@ -131,7 +159,37 @@ export async function findDuplicateBookGroups(
       const bucket = byForm.get(form);
       if (bucket) {
         for (const occupant of bucket) {
-          if (!c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook) continue;
+          const neitherDigital = !c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook;
+          if (neitherDigital) {
+            // Physical-only pair: only union if it matches the narrow
+            // owned-physical-sync create-race signature -- an exact FULL
+            // title match (not merely sharing this form), plus matching
+            // non-null author and no ISBN conflict. Sharing a form is not
+            // enough on its own: titleForms()'s series-suffix-strip and
+            // colon-split can make two DIFFERENT volumes in the same
+            // series by the same author (e.g. "Mistborn: The Final
+            // Empire, Book 1" vs "Mistborn: The Well of Ascension, Book
+            // 2") share a stripped-down variant like "mistborn" despite
+            // having different full titles -- this is the exact
+            // cross-contamination class already documented and fixed once
+            // in goodreadsSync.ts (a colon-split prefix causing a false
+            // 100 score between different books). Requiring full-title
+            // equality closes it; every other case (general physical-only
+            // pairs) stays excluded exactly as before.
+            const normalizedTitle = normalizeTitle(c.title);
+            if (
+              // normalizeTitle() strips every non-ASCII character, so two
+              // completely different non-Latin-script titles can both
+              // normalize to "" -- guard against that degenerate case
+              // trivially satisfying the equality check below.
+              normalizedTitle === "" ||
+              normalizedTitle !== normalizeTitle(occupant.title) ||
+              !authorsMatchNonNull(c.author, occupant.author) ||
+              !isbnCompatible(c.isbn, occupant.isbn)
+            ) {
+              continue;
+            }
+          }
           union(c.id, occupant.id);
         }
         bucket.push(c);
