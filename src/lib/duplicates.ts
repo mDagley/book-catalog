@@ -44,7 +44,12 @@ const FUZZY_DUPLICATE_CAP = 1500;
 // reported for that shelf item.
 function authorsMatchNonNull(a: string | null, b: string | null): boolean {
   if (a === null || b === null) return false;
-  return normalizeTitle(a) === normalizeTitle(b);
+  // Same empty-normalization guard as the title check in
+  // findDuplicateBookGroups: normalizeTitle() strips every non-ASCII
+  // character, so two different non-Latin-script author names can both
+  // normalize to "" and otherwise pass this check as "equal."
+  const normalizedA = normalizeTitle(a);
+  return normalizedA !== "" && normalizedA === normalizeTitle(b);
 }
 
 // A different, non-null ISBN on each side is a real signal of a different

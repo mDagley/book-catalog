@@ -170,6 +170,38 @@ describe("findDuplicateBookGroups", () => {
     }
   });
 
+  it("does not group two different physical books whose AUTHORS both normalize to an empty string", async () => {
+    // Same class of finding as the title case above, this time on the
+    // author side (also low-confidence Copilot, also verified real
+    // before accepting): two different real non-Latin-script author
+    // names both normalize to "" via normalizeTitle(), which
+    // authorsMatchNonNull() reuses. With a shared ASCII title (survives
+    // normalization, matches) and no ISBN conflict, this alone was
+    // enough to satisfy the exception even though the two books are by
+    // genuinely different people.
+    const a = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Empty Author Normalize Book",
+        author: "田中太郎",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Empty Author Normalize Book",
+        author: "王小明",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.id === a.id || book.id === b.id),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
   it("groups two purely physical books that are the owned-physical sync's exact-duplicate signature", async () => {
     // The real production bug this was built for: syncOwnedPhysicalBooks's
     // create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md)
