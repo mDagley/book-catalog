@@ -30,6 +30,13 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
   const [corners, setCorners] = useState<Record<CornerName, Point> | null>(null);
   const draggingCorner = useRef<CornerName | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  // Mirrors displaySize so the ResizeObserver callback below (registered
+  // once on mount) can read the latest value without needing to
+  // tear down and recreate the observer every time displaySize changes.
+  const displaySizeRef = useRef<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    displaySizeRef.current = displaySize;
+  }, [displaySize]);
 
   function handleImageLoad() {
     const img = imgRef.current;
@@ -56,19 +63,55 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
       const y = Math.min(Math.max(event.clientY - rect.top, 0), displaySize.height);
       setCorners((prev) => (prev ? { ...prev, [corner]: { x, y } } : prev));
     }
-    function handlePointerUp() {
+    function handlePointerEnd() {
       draggingCorner.current = null;
     }
     // Listen on window (not just the handle) so a fast drag that outruns
     // the small circular hit-target doesn't drop the drag -- the pointer
     // stays "captured" to this corner until pointerup fires anywhere.
+    // pointercancel is also handled -- on mobile a drag can be interrupted
+    // by an OS-level gesture (e.g. a browser-chrome swipe) without ever
+    // firing pointerup, which would otherwise leave draggingCorner stuck
+    // and make the next unrelated pointermove keep dragging that corner.
     window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
     };
   }, [displaySize]);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
+    // Recomputes displaySize on any layout change to the image (viewport
+    // resize, device rotation, etc.) and rescales the traced corners
+    // proportionally so the crop selection stays visually aligned with
+    // the image instead of drifting out of sync with what's on screen.
+    const observer = new ResizeObserver(() => {
+      const newDisplay = { width: img.clientWidth, height: img.clientHeight };
+      const prevDisplay = displaySizeRef.current;
+      if (!prevDisplay || newDisplay.width === 0 || newDisplay.height === 0) return;
+      if (newDisplay.width === prevDisplay.width && newDisplay.height === prevDisplay.height) return;
+      const scaleX = newDisplay.width / prevDisplay.width;
+      const scaleY = newDisplay.height / prevDisplay.height;
+      setCorners((prev) =>
+        prev
+          ? (Object.fromEntries(
+              CORNER_ORDER.map((name) => [
+                name,
+                { x: prev[name].x * scaleX, y: prev[name].y * scaleY },
+              ]),
+            ) as Record<CornerName, Point>)
+          : prev,
+      );
+      setDisplaySize(newDisplay);
+    });
+    observer.observe(img);
+    return () => observer.disconnect();
+  }, []);
 
   async function handleConfirm() {
     if (!corners || !naturalSize || !displaySize || !imgRef.current) return;
