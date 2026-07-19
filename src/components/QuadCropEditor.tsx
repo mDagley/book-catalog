@@ -31,12 +31,12 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
   const draggingCorner = useRef<CornerName | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   // Mirrors displaySize so the ResizeObserver callback below (registered
-  // once on mount) can read the latest value without needing to
-  // tear down and recreate the observer every time displaySize changes.
+  // once on mount) can read the latest value without needing to tear down
+  // and recreate the observer every time displaySize changes. Written
+  // synchronously at every displaySize write site (not via a useEffect
+  // mirror) so a ResizeObserver firing again before React commits/runs
+  // effects for the previous update can't rescale from a stale baseline.
   const displaySizeRef = useRef<{ width: number; height: number } | null>(null);
-  useEffect(() => {
-    displaySizeRef.current = displaySize;
-  }, [displaySize]);
 
   function handleImageLoad() {
     const img = imgRef.current;
@@ -45,6 +45,7 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
     const display = { width: img.clientWidth, height: img.clientHeight };
     setNaturalSize(natural);
     setDisplaySize(display);
+    displaySizeRef.current = display;
     setCorners({
       topLeft: { x: 0, y: 0 },
       topRight: { x: display.width, y: 0 },
@@ -108,6 +109,7 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
           : prev,
       );
       setDisplaySize(newDisplay);
+      displaySizeRef.current = newDisplay;
     });
     observer.observe(img);
     return () => observer.disconnect();
