@@ -77,6 +77,94 @@ describe("findDuplicateBookGroups", () => {
     expect(relevantGroups).toEqual([]);
   });
 
+  it("still does not group two purely physical books sharing a title but with different authors", async () => {
+    // Reinforces the general case above with explicit, differing authors
+    // (not just both-null) -- e.g. "Echo" by two unrelated real authors
+    // must never be treated as the sync-race signature below.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Different Authors Same Title",
+        author: "Author One",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Different Authors Same Title",
+        author: "Author Two",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Different Authors Same Title"),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
+  it("groups two purely physical books that are the owned-physical sync's exact-duplicate signature", async () => {
+    // The real production bug this was built for: syncOwnedPhysicalBooks's
+    // create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md)
+    // produces two rows sharing an exact title AND author (both come from
+    // the same Goodreads shelf item), neither digitally owned, neither
+    // with an ISBN (Goodreads' feed regularly omits it). That specific
+    // signature is safe to group even though general physical-only pairs
+    // aren't.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Sync Race Signature Book",
+        author: "V.E. Schwab",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Sync Race Signature Book",
+        author: "V.E. Schwab",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Sync Race Signature Book"),
+    );
+    expect(relevantGroups).toHaveLength(1);
+    expect(relevantGroups[0].books).toHaveLength(2);
+  });
+
+  it("does not group the sync-race signature when ISBNs conflict", async () => {
+    // Same title and author, but two different non-null ISBNs -- a real
+    // signal of a different edition/printing, not a sync race, so this
+    // must stay excluded even though title+author match.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Isbn Conflict Book",
+        author: "Some Author",
+        isbn: "9781111111111",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Isbn Conflict Book",
+        author: "Some Author",
+        isbn: "9782222222222",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title === "Test Duplicates Isbn Conflict Book"),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
   it("does not group two books with dissimilar titles", async () => {
     await prisma.book.create({ data: { title: "Test Duplicates Distinctly Different First Book" } });
     await prisma.book.create({ data: { title: "Test Duplicates Wholly Unrelated Second Volume" } });

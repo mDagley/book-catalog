@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { titleMatchScore, titleForms, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { titleMatchScore, titleForms, normalizeTitle, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 
 export interface DuplicateCandidate {
   id: string;
@@ -31,6 +31,29 @@ export interface FindDuplicateGroupsResult {
 // findDuplicateBookGroups) purely so tests can exercise the cap without
 // needing thousands of fixture rows.
 const FUZZY_DUPLICATE_CAP = 1500;
+
+// Narrow exception to the "never group two physical-only books" rule below,
+// for the specific signature produced by syncOwnedPhysicalBooks's
+// create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md):
+// two rows sharing an exact title AND author, both created from the same
+// Goodreads shelf item by two concurrent sync runs. Requires BOTH authors
+// to be non-null and equal -- deliberately stricter than "both null counts
+// as a match," since the general "two different physical books share a
+// title with no author entered" case (e.g. "Echo") must stay excluded, and
+// a sync-race duplicate always carries whatever non-null author Goodreads
+// reported for that shelf item.
+function authorsMatchNonNull(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  return normalizeTitle(a) === normalizeTitle(b);
+}
+
+// A different, non-null ISBN on each side is a real signal of a different
+// edition/printing, not a sync race, so that case is excluded. Either side
+// missing an ISBN (Goodreads regularly omits it) isn't a conflict.
+function isbnCompatible(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return true;
+  return a === b;
+}
 
 // One-time cleanup helper for the duplicate Book rows the ISBN-only-match
 // bug (fixed alongside this file -- see createBookWithCopyData) could have
@@ -131,7 +154,18 @@ export async function findDuplicateBookGroups(
       const bucket = byForm.get(form);
       if (bucket) {
         for (const occupant of bucket) {
-          if (!c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook) continue;
+          const neitherDigital = !c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook;
+          if (neitherDigital) {
+            // Physical-only pair: only union if it matches the narrow
+            // owned-physical-sync create-race signature (exact title,
+            // already established by sharing this form -- plus matching
+            // non-null author and no ISBN conflict). Otherwise this is the
+            // general "two different physical books share a title" case,
+            // which stays excluded.
+            if (!authorsMatchNonNull(c.author, occupant.author) || !isbnCompatible(c.isbn, occupant.isbn)) {
+              continue;
+            }
+          }
           union(c.id, occupant.id);
         }
         bucket.push(c);
