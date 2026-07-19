@@ -332,6 +332,7 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   const toCreate: { title: string; author: string | null; isbn: string | null }[] = [];
   let fuzzyFallbackCount = 0;
   let hitFuzzyFallbackCap = false;
+  let deferredCount = 0;
 
   for (const shelfItem of shelfItems) {
     let matched: ExistingTbrItem | null = null;
@@ -345,7 +346,7 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
 
       if (!matched) {
         // Needs the fuzzy fallback -- capped as defense-in-depth (see
-        // FUZZY_FALLBACK_CAP's doc comment below). Once the cap is hit,
+        // FUZZY_FALLBACK_CAP's doc comment above). Once the cap is hit,
         // this and every remaining fuzzy-needing shelf item this run is
         // deferred: not added to toCreate (would risk a duplicate row for
         // an item that actually has a match, destroying its preserved
@@ -355,6 +356,7 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
         // the counter resets.
         if (fuzzyFallbackCount >= FUZZY_FALLBACK_CAP) {
           hitFuzzyFallbackCap = true;
+          deferredCount++;
           continue;
         }
         fuzzyFallbackCount++;
@@ -395,7 +397,7 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
     // correctness-bug fixes documented in the comment above this
     // function).
     console.warn(
-      `Goodreads TBR sync hit the fuzzy-fallback cap (${FUZZY_FALLBACK_CAP}) with shelf item(s) deferred to the next sync — row deletion skipped this run.`,
+      `Goodreads TBR sync hit the fuzzy-fallback cap (${FUZZY_FALLBACK_CAP}) with ${deferredCount} shelf item(s) deferred to the next sync — row deletion skipped this run.`,
     );
     return;
   }
