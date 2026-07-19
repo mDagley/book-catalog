@@ -52,34 +52,34 @@ enum Format {
 }
 
 model EbookCopy {
-  id             String    @id @default(cuid())
-  bookId         String
-  book           Book      @relation(fields: [bookId], references: [id])
-  absItemId      String    @unique
-  coverImagePath String?
-  coverCheckedAt DateTime?
+  id                      String    @id @default(cuid())
+  bookId                  String
+  book                    Book      @relation(fields: [bookId], references: [id])
+  absItemId               String    @unique
+  coverImagePath          String?
+  coverCheckedAt          DateTime?
   coverFetchFailureReason String?
-  createdAt      DateTime  @default(now())
+  createdAt               DateTime  @default(now())
 }
 
 model AudiobookCopy {
-  id             String    @id @default(cuid())
-  bookId         String
-  book           Book      @relation(fields: [bookId], references: [id])
-  absItemId      String    @unique
-  coverImagePath String?
-  coverCheckedAt DateTime?
+  id                      String    @id @default(cuid())
+  bookId                  String
+  book                    Book      @relation(fields: [bookId], references: [id])
+  absItemId               String    @unique
+  coverImagePath          String?
+  coverCheckedAt          DateTime?
   coverFetchFailureReason String?
-  createdAt      DateTime  @default(now())
+  createdAt               DateTime  @default(now())
 }
 
 model GoodreadsTbrItem {
-  id             String    @id @default(cuid())
-  title          String
-  author         String?
-  isbn           String?
-  coverImagePath String?
-  coverCheckedAt DateTime?
+  id                      String    @id @default(cuid())
+  title                   String
+  author                  String?
+  isbn                    String?
+  coverImagePath          String?
+  coverCheckedAt          DateTime?
   coverFetchFailureReason String?
-  lastSyncedAt   DateTime  @default(now())
+  lastSyncedAt            DateTime  @default(now())
 }
