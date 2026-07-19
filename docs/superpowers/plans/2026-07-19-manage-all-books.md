@@ -20,7 +20,7 @@ Full rationale: `docs/superpowers/specs/2026-07-19-manage-all-books-design.md`. 
 - Modify: `src/lib/search.ts`
 - Test: `src/lib/search.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add these tests inside the existing `describe("searchCatalog", ...)` block in `src/lib/search.test.ts`, right after the existing `"returns an empty array when there is no query and no filters"` test (around line 82):
 
@@ -71,13 +71,13 @@ Add these tests inside the existing `describe("searchCatalog", ...)` block in `s
   });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run src/lib/search.test.ts -t "browseAll|sortBy is 'title'|id-ascending order"`
 
 Expected: FAIL. `browseAll` and `sortBy` aren't recognized options yet (TypeScript will actually reject the extra properties on `SearchOptions` — if using `npx tsc --noEmit` shows type errors on the new test code, that's expected too at this point; the vitest run itself should fail at runtime with the empty-array-by-default and id-order behavior not matching the new tests' expectations).
 
-- [ ] **Step 3: Implement browseAll and sortBy**
+- [x] **Step 3: Implement browseAll and sortBy**
 
 In `src/lib/search.ts`, update the `SearchOptions` interface:
 
@@ -115,7 +115,13 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
       ebookCopies: { select: { coverImagePath: true } },
       audiobookCopies: { select: { coverImagePath: true } },
     },
-    orderBy: sortBy === "title" ? { title: "asc" } : { id: "asc" },
+    // Secondary `id` sort breaks ties for books sharing a title -- without
+    // it, Postgres doesn't guarantee stable ordering among tied rows, so
+    // the same query could return a different order across runs as the
+    // catalog grows. (Added post-implementation per a PR #29 Copilot
+    // review finding -- kept here so this plan's own snippet doesn't
+    // reintroduce nondeterministic ordering if followed again later.)
+    orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
   });
 
   // ... (return mapping unchanged) ...
@@ -124,19 +130,19 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 
 Note: with `browseAll: true` and no other filters, `filters` stays an empty array, so the query becomes `where: { AND: [] }`. This is already a verified-safe pattern in this codebase — the pre-existing `/books` page used exactly this shape (`where: { AND: filters }` with a potentially-empty `filters` array) for its own default unfiltered view, and PR #20's whole-branch review independently confirmed `{ AND: [] }` behaves identically to `{}` (matches everything) by querying the real dev DB both ways.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run src/lib/search.test.ts`
 
 Expected: ALL tests in this file pass (the 4 new ones, plus all existing ones — especially `"returns an empty array when there is no query and no filters"`, which must keep passing unmodified since `browseAll` defaults to `false`).
 
-- [ ] **Step 5: Typecheck and lint**
+- [x] **Step 5: Typecheck and lint**
 
 Run: `npx tsc --noEmit` and `npx eslint src/lib/search.ts src/lib/search.test.ts`
 
 Expected: both clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/search.ts src/lib/search.test.ts
@@ -159,7 +165,7 @@ function instead of a parallel physical-only query."
 
 This is a pure refactor — the home page's rendered HTML must not change. There's no dedicated test for this (this app has no page-rendering tests anywhere, per established convention); verification is via TypeScript/lint plus a manual visual check in Task 4's QA pass, and by diffing home's rendered output isn't practical without a browser, so this task's own verification is: `tsc`/`eslint` clean, `npm test` still green (nothing here should affect any existing test), and the code is a byte-for-byte-equivalent extraction (same JSX, same conditions, same classes) so there is no behavior to regress.
 
-- [ ] **Step 1: Create CatalogResultCard**
+- [x] **Step 1: Create CatalogResultCard**
 
 Read `src/app/page.tsx`'s current results-rendering block first (the `<li key={result.bookId ?? result.title} className="rounded border p-3">...</li>` block, currently around lines 148-188) to copy it exactly.
 
@@ -217,7 +223,7 @@ export function CatalogResultCard({ result }: { result: SearchResult }) {
 }
 ```
 
-- [ ] **Step 2: Update home to use CatalogResultCard**
+- [x] **Step 2: Update home to use CatalogResultCard**
 
 In `src/app/page.tsx`, replace the `<ul>...</ul>` results block with:
 
@@ -233,7 +239,7 @@ In `src/app/page.tsx`, replace the `<ul>...</ul>` results block with:
 
 Add the import: `import { CatalogResultCard } from "@/components/CatalogResultCard";`. Remove the now-unused `FORMAT_LABELS`, `READ_STATUS_LABELS`, `ratingStars`, `CoverThumbnail` imports from `src/app/page.tsx` if nothing else in that file still uses them (check first — `CoverThumbnail` and `FORMAT_LABELS` are only used in the block you just removed; `READ_STATUS_LABELS`/`ratingStars` likewise).
 
-- [ ] **Step 3: Create CatalogFilters**
+- [x] **Step 3: Create CatalogFilters**
 
 Read `src/app/page.tsx`'s current filter-row block (the `<div className="flex flex-wrap items-center gap-3 text-sm">...</div>` inside the `<form>`, currently around lines 69-129) to copy it exactly, ADDING the ownership-type checkboxes that don't exist on `/books` yet but do on home.
 
@@ -320,7 +326,7 @@ export function CatalogFilters({ types, status, statusMode, format }: CatalogFil
 }
 ```
 
-- [ ] **Step 4: Update home to use CatalogFilters**
+- [x] **Step 4: Update home to use CatalogFilters**
 
 In `src/app/page.tsx`, replace the filter-row `<div>` (the one just extracted) with:
 
@@ -330,17 +336,17 @@ In `src/app/page.tsx`, replace the filter-row `<div>` (the one just extracted) w
 
 Add the import: `import { CatalogFilters } from "@/components/CatalogFilters";`. Remove the now-inline `OWNERSHIP_TYPE_OPTIONS` constant from `src/app/page.tsx` (it moved into `CatalogFilters.tsx`) and its now-unused imports: `FORMAT_OPTIONS`/`STATUS_FILTER_OPTIONS`, and the `type OwnershipType` named import from the existing `@/lib/search` import line (it was only ever used to type `OWNERSHIP_TYPE_OPTIONS`, which no longer lives in this file) — `searchCatalog`/`parseFormatParam`/`parseTypesParam`/`parseStatusParam`/`parseStatusModeParam` are all still needed and stay.
 
-- [ ] **Step 5: Typecheck, lint, and run the full test suite**
+- [x] **Step 5: Typecheck, lint, and run the full test suite**
 
 Run: `npx tsc --noEmit`, `npx eslint src/app/page.tsx src/components/CatalogResultCard.tsx src/components/CatalogFilters.tsx`, `npm test`
 
 Expected: all clean, all tests passing (this refactor shouldn't change any test's outcome — no tests directly render `page.tsx`, but confirm nothing else broke).
 
-- [ ] **Step 6: Manually verify the home page still renders identically**
+- [x] **Step 6: Manually verify the home page still renders identically**
 
 Start the dev server (`npm run dev` if not already running) and visually confirm `/` looks and behaves exactly as before: type checkboxes, status checkboxes, Any/All radio, format select, search button all present and functional, results render with the same badges as before. This is the actual regression check for a refactor with no automated test coverage.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/page.tsx src/components/CatalogResultCard.tsx src/components/CatalogFilters.tsx
@@ -359,7 +365,7 @@ closing the exact kind of drift that already happened once between
 - Modify: `src/app/books/page.tsx`
 - Modify: `src/app/page.tsx` (update the "Manage physical books" link text)
 
-- [ ] **Step 1: Rewrite src/app/books/page.tsx**
+- [x] **Step 1: Rewrite src/app/books/page.tsx**
 
 Replace the entire file with:
 
@@ -453,7 +459,7 @@ export default async function BooksPage({
 
 Note: `results.length === 0` can now only happen with an active filter/query that matches nothing (or a genuinely empty catalog), since `browseAll: true` means no filters = show everything.
 
-- [ ] **Step 2: Update home's "Manage physical books" link text**
+- [x] **Step 2: Update home's "Manage physical books" link text**
 
 In `src/app/page.tsx`, find:
 
@@ -471,13 +477,13 @@ Change the link text to:
         </Link>
 ```
 
-- [ ] **Step 3: Typecheck, lint, and run the full test suite**
+- [x] **Step 3: Typecheck, lint, and run the full test suite**
 
 Run: `npx tsc --noEmit`, `npx eslint src/app/books/page.tsx src/app/page.tsx`, `npm test`
 
 Expected: all clean, all tests passing.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/app/books/page.tsx src/app/page.tsx
@@ -502,19 +508,19 @@ the page now shows."
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Run the full test suite one more time**
+- [x] **Step 1: Run the full test suite one more time**
 
 Run: `npm test`
 
 Expected: all tests passing (this confirms Tasks 1-3 together haven't introduced any interaction issues).
 
-- [ ] **Step 2: Typecheck and lint the whole project**
+- [x] **Step 2: Typecheck and lint the whole project**
 
 Run: `npx tsc --noEmit` and `npx eslint .`
 
 Expected: both clean (aside from any pre-existing, unrelated findings — confirm any such finding predates this branch via `git stash` + re-run, or `git diff master` to check it's not in a file this plan touched).
 
-- [ ] **Step 3: Manual browser QA**
+- [x] **Step 3: Manual browser QA**
 
 Using the app's established session-cookie-minting approach (see project conventions) or a real login, verify in a real browser:
 - `/books` loads and shows every book by default (physical, ebook, and audiobook), sorted alphabetically by title.
@@ -525,7 +531,7 @@ Using the app's established session-cookie-minting approach (see project convent
 - Each result card shows the same ownership badges as home's search results (physical format, ebook ✓, audiobook ✓, read status, rating stars where applicable) and links to `/books/[id]`.
 - Home page (`/`) still behaves exactly as before: empty by default, only shows results once you search or filter, and its own "Manage all books" link goes to `/books`.
 
-- [ ] **Step 4: Report findings**
+- [x] **Step 4: Report findings**
 
 If any of the manual QA checks fail, fix them before considering this plan complete. If everything passes, this plan is done.
 

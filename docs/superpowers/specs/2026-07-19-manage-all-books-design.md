@@ -12,8 +12,8 @@ This also resolves backlog item #7 (a Book with only digital ownership and zero 
 
 `searchCatalog` (`src/lib/search.ts`) already has everything `/books` needs — ownership-type filtering, format filtering, status/rating filtering, ISBN-aware text search — except two behaviors specific to a browse page:
 
-1. **Empty-by-default.** `searchCatalog` returns `[]` immediately when no query/types/format/status are active (`if (!trimmed && !types && !format && !statusValues) return [];`) — correct for home's search-first framing, wrong for a browse page that should show everything with no filters applied.
-2. **Sort order.** Results are ordered `id: asc` (creation order) — fine for a filtered/searched result set, not useful for browsing potentially hundreds of unfiltered books.
+1. **Empty-by-default.** Before this change, `searchCatalog` returns `[]` immediately when no query/types/format/status are active (`if (!trimmed && !types && !format && !statusValues) return [];`) — correct for home's search-first framing, wrong for a browse page that should show everything with no filters applied.
+2. **Sort order.** Before this change, results are ordered `id: asc` (creation order) — fine for a filtered/searched result set, not useful for browsing potentially hundreds of unfiltered books.
 
 Rather than giving `/books` its own separate copy of the ownership/format/status-filter query logic (real duplication risk — this exact kind of drift already happened once between `/books`' old physical-only query and `searchCatalog`, which is part of why item #7 existed), extend `searchCatalog` with two new, backward-compatible options:
 
