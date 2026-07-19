@@ -45,7 +45,12 @@ describe("GET /api/autocomplete", () => {
       data: { title: "Test Autocomplete Mistborn", author: "Brandon Sanderson" },
     });
 
-    const response = await GET(makeRequest({ scope: "home", q: "Mistborn" }));
+    // Query "Autocomplete Mistborn" rather than plain "Mistborn" -- the
+    // route's `contains` match runs against the whole table, not just this
+    // test's own "Test Autocomplete"-prefixed rows, so a generic word could
+    // collide with an unrelated row and break this exact-equality assertion.
+    // "Autocomplete Mistborn" is a substring unique to this test's fixture.
+    const response = await GET(makeRequest({ scope: "home", q: "Autocomplete Mistborn" }));
     const data = await response.json();
 
     expect(data).toEqual([{ title: "Test Autocomplete Mistborn", author: "Brandon Sanderson" }]);
@@ -53,10 +58,15 @@ describe("GET /api/autocomplete", () => {
 
   it("matches on author as well as title", async () => {
     await prisma.book.create({
-      data: { title: "Test Autocomplete Elantris", author: "Sanderson, Brandon" },
+      data: { title: "Test Autocomplete Elantris", author: "Test Autocomplete Sanderson, Brandon" },
     });
 
-    const response = await GET(makeRequest({ scope: "home", q: "Sanderson" }));
+    // The author field has no "Test Autocomplete" cleanup prefix convention
+    // of its own (afterEach only filters by title), so the fixture author
+    // above embeds the "Test Autocomplete" token itself, and the query below
+    // matches on that unique substring rather than the generic "Sanderson" --
+    // same collision-avoidance reasoning as the other tests in this file.
+    const response = await GET(makeRequest({ scope: "home", q: "Autocomplete Sanderson" }));
     const data = await response.json();
 
     expect(data.map((s: { title: string }) => s.title)).toContain("Test Autocomplete Elantris");
@@ -67,7 +77,7 @@ describe("GET /api/autocomplete", () => {
       data: { title: "Test Autocomplete Warbreaker", author: "Brandon Sanderson" },
     });
 
-    const response = await GET(makeRequest({ scope: "books", q: "Warbreaker" }));
+    const response = await GET(makeRequest({ scope: "books", q: "Autocomplete Warbreaker" }));
     const data = await response.json();
 
     expect(data).toEqual([{ title: "Test Autocomplete Warbreaker", author: "Brandon Sanderson" }]);
@@ -78,7 +88,7 @@ describe("GET /api/autocomplete", () => {
       data: { title: "Test Autocomplete Ebook Only", hasEbook: true },
     });
 
-    const response = await GET(makeRequest({ scope: "books", q: "Ebook Only" }));
+    const response = await GET(makeRequest({ scope: "books", q: "Autocomplete Ebook Only" }));
     const data = await response.json();
 
     expect(data).toEqual([{ title: "Test Autocomplete Ebook Only", author: null }]);
@@ -89,7 +99,7 @@ describe("GET /api/autocomplete", () => {
       data: { title: "Test Autocomplete Way of Kings", author: "Brandon Sanderson" },
     });
 
-    const response = await GET(makeRequest({ scope: "tbr", q: "Way of Kings" }));
+    const response = await GET(makeRequest({ scope: "tbr", q: "Autocomplete Way of Kings" }));
     const data = await response.json();
 
     expect(data).toEqual([{ title: "Test Autocomplete Way of Kings", author: "Brandon Sanderson" }]);
