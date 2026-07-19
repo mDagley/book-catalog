@@ -3,17 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { BurstFramePicker } from "@/components/BurstFramePicker";
 import { QuadCropEditor } from "@/components/QuadCropEditor";
+import { capDimensions } from "@/lib/perspectiveCrop";
 
 interface CoverCameraProps {
   onCapture: (dataUrl: string) => void;
   onSkip?: () => void;
 }
 
-// Cap the captured cover image's longest side to keep the payload small --
-// the app only ever displays covers at h-32 w-24 (roughly 128x96 CSS
-// pixels), so this leaves generous headroom for retina displays without
-// shipping a multi-MB full-resolution camera frame through the form.
-const MAX_CAPTURE_DIMENSION = 800;
 const BURST_SHOT_COUNT = 5;
 const BURST_INTERVAL_MS = 150;
 
@@ -37,10 +33,10 @@ type CaptureStep =
 function captureFrameFromVideo(video: HTMLVideoElement): string | null {
   const { videoWidth, videoHeight } = video;
   if (videoWidth === 0 || videoHeight === 0) return null;
-  const scale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(videoWidth, videoHeight));
+  const { width, height } = capDimensions(videoWidth, videoHeight);
   const canvas = document.createElement("canvas");
-  canvas.width = videoWidth * scale;
-  canvas.height = videoHeight * scale;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);

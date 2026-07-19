@@ -16,6 +16,35 @@ export interface PixelBuffer {
   data: Uint8ClampedArray;
 }
 
+// The captured/cropped cover image's longest side is capped to this many
+// pixels to keep the payload small -- the app only ever displays covers at
+// h-32 w-24 (roughly 128x96 CSS pixels), so this leaves generous headroom
+// for retina displays without shipping a multi-MB full-resolution image
+// through the form. Shared by both the raw camera capture
+// (CoverCamera.tsx's captureFrameFromVideo) and the perspective-corrected
+// crop output (QuadCropEditor.tsx) so there's a single source of truth for
+// the cap -- computeOutputDimensions below derives its result from the
+// traced quadrilateral's edge lengths, which can exceed the source image's
+// own capped dimension (e.g. a corner dragged near the diagonally-opposite
+// corner traces an edge approaching the image's diagonal, ~1.4x its longest
+// side), so the output needs its own independent cap.
+export const MAX_CAPTURE_DIMENSION = 800;
+
+// Scales width/height down (never up) so the longer side is at most
+// `maxDimension`, preserving aspect ratio. A no-op when both dimensions
+// already fit.
+export function capDimensions(
+  width: number,
+  height: number,
+  maxDimension: number = MAX_CAPTURE_DIMENSION,
+): { width: number; height: number } {
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 // Given the 4 corners of a traced quadrilateral, in order [topLeft,
 // topRight, bottomRight, bottomLeft], computes the output rectangle's
 // dimensions as the average of each pair of opposite edges -- avoids

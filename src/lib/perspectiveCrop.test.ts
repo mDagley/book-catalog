@@ -1,5 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { computeOutputDimensions, warpQuadrilateral, type Point, type PixelBuffer } from "./perspectiveCrop";
+import {
+  capDimensions,
+  computeOutputDimensions,
+  warpQuadrilateral,
+  type Point,
+  type PixelBuffer,
+} from "./perspectiveCrop";
+
+describe("capDimensions", () => {
+  it("leaves dimensions already within the cap untouched", () => {
+    expect(capDimensions(400, 300, 800)).toEqual({ width: 400, height: 300 });
+  });
+
+  it("scales down a landscape image so the longer (width) side hits the cap exactly", () => {
+    expect(capDimensions(1600, 800, 800)).toEqual({ width: 800, height: 400 });
+  });
+
+  it("scales down a portrait image so the longer (height) side hits the cap exactly", () => {
+    expect(capDimensions(800, 1600, 800)).toEqual({ width: 400, height: 800 });
+  });
+
+  it("scales down a diagonal-length quadrilateral crop past the cap, preserving aspect ratio", () => {
+    // Simulates computeOutputDimensions producing a result larger than
+    // MAX_CAPTURE_DIMENSION because a traced corner approached the source
+    // image's diagonal -- the exact scenario this function was added to
+    // guard against in QuadCropEditor.
+    const result = capDimensions(1130, 800, 800);
+    expect(result.width).toBe(800);
+    expect(result.height).toBe(Math.round((800 * 800) / 1130));
+  });
+
+  it("defaults to MAX_CAPTURE_DIMENSION when no explicit cap is given", () => {
+    expect(capDimensions(1600, 1200)).toEqual({ width: 800, height: 600 });
+  });
+});
 
 describe("computeOutputDimensions", () => {
   it("matches a perfect axis-aligned rectangle's width/height exactly", () => {

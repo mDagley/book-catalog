@@ -2,7 +2,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { computeOutputDimensions, warpQuadrilateral, type Point } from "@/lib/perspectiveCrop";
+import {
+  capDimensions,
+  computeOutputDimensions,
+  warpQuadrilateral,
+  type Point,
+} from "@/lib/perspectiveCrop";
 
 interface QuadCropEditorProps {
   imageDataUrl: string;
@@ -84,7 +89,19 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
       sourceCtx.drawImage(imgRef.current, 0, 0);
       const sourceImageData = sourceCtx.getImageData(0, 0, naturalSize.width, naturalSize.height);
 
-      const { width: outputWidth, height: outputHeight } = computeOutputDimensions(naturalCorners);
+      // computeOutputDimensions derives its result from the traced
+      // quadrilateral's edge lengths, which can exceed the source image's
+      // own MAX_CAPTURE_DIMENSION cap (e.g. dragging a corner toward the
+      // diagonally-opposite one traces an edge approaching the image's
+      // diagonal) -- cap again here so the perspective-corrected output
+      // never balloons past the size the rest of the app (coverStorage.ts)
+      // assumes captured covers are capped to.
+      const { width: rawOutputWidth, height: rawOutputHeight } =
+        computeOutputDimensions(naturalCorners);
+      const { width: outputWidth, height: outputHeight } = capDimensions(
+        rawOutputWidth,
+        rawOutputHeight,
+      );
       const outputPixels = warpQuadrilateral(
         { width: sourceImageData.width, height: sourceImageData.height, data: sourceImageData.data },
         naturalCorners,
