@@ -25,6 +25,22 @@ export function SearchAutocomplete({
   placeholder,
 }: SearchAutocompleteProps) {
   const [value, setValue] = useState(defaultValue);
+  // Tracks the defaultValue this component last synced `value` from, so the
+  // render-time check below (React's documented "adjusting state when a
+  // prop changes" pattern -- see https://react.dev/learn/you-might-not-need-an-effect)
+  // can detect when defaultValue itself changes on a re-render without a
+  // full remount (e.g. a future client-side navigation swapping ?q= while
+  // staying on the same page -- not something this app's current native-GET
+  // -form navigation does today, but a cheap guard against future
+  // staleness). Deliberately not a useEffect: calling setState directly in
+  // the render body here is the pattern React recommends for this exact
+  // case, and it avoids both an extra render pass and a
+  // react-hooks/set-state-in-effect lint violation.
+  const [syncedDefaultValue, setSyncedDefaultValue] = useState(defaultValue);
+  if (defaultValue !== syncedDefaultValue) {
+    setSyncedDefaultValue(defaultValue);
+    setValue(defaultValue);
+  }
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);

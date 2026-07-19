@@ -34,6 +34,9 @@ describe("GET /api/autocomplete", () => {
     const response = await GET(makeRequest({ scope: "home", q: "T" }));
     const data = await response.json();
 
+    // The fixture above WOULD match if the DB were queried (its title contains "T") --
+    // asserting an empty result here is what proves the length check short-circuits
+    // before any query runs, not just that this particular query returned nothing.
     expect(data).toEqual([]);
   });
 
