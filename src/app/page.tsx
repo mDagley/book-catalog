@@ -15,6 +15,7 @@ import {
 } from "@/components/ReadingProgressFields";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
+import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 
 export const dynamic = "force-dynamic";
 
@@ -59,12 +60,11 @@ export default async function HomePage({
       </div>
 
       <form action="/" method="get" className="mb-4 space-y-2">
-        <input
-          type="text"
+        <SearchAutocomplete
+          scope="home"
           name="q"
           defaultValue={query}
           placeholder="Do I already own this?"
-          className="w-full rounded border p-2"
         />
         <div className="flex flex-wrap items-center gap-3 text-sm">
           {OWNERSHIP_TYPE_OPTIONS.map((opt) => (

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
+import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +33,11 @@ export default async function TbrGapPage({
       </div>
 
       <form action="/tbr" method="get" className="mb-4">
-        <input
-          type="text"
+        <SearchAutocomplete
+          scope="tbr"
           name="q"
           defaultValue={query}
           placeholder="Search by title or author"
-          className="w-full rounded border p-2"
         />
       </form>
 
