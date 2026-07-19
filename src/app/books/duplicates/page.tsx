@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { findDuplicateBookGroups } from "@/lib/duplicates";
 import { mergeBooks } from "@/lib/actions/duplicates";
+import { MergeButton } from "@/app/books/duplicates/MergeButton";
 
 export const dynamic = "force-dynamic";
 
@@ -47,9 +48,7 @@ export default async function DuplicateBooksPage() {
                         group.books.filter((other) => other.id !== book.id).map((other) => other.id),
                       )}
                     >
-                      <button type="submit" className="mt-1 rounded border px-2 py-1 text-xs">
-                        Keep this one, merge the others into it
-                      </button>
+                      <MergeButton />
                     </form>
                   </li>
                 ))}
