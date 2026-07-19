@@ -230,6 +230,20 @@ function mockShelfFetch(pages: Partial<Record<GoodreadsShelf, string[]>>): void 
   });
 }
 
+// Deterministic pseudo-random multi-token titles for cap-testing, not a
+// simple "Book ${i}" numeric suffix -- verified exhaustively (all pairs,
+// see scratchpad verification during planning) that a shared literal
+// prefix plus only a short differentiator (e.g. a bare index number)
+// scores well above DEFAULT_MATCH_THRESHOLD via titleMatchScore's
+// character-overlap algorithm, even for genuinely-meant-to-be-distinct
+// fixture titles -- this shape keeps every pairwise score under ~70.
+function fuzzyCapTitle(i: number): string {
+  const tokens = [2654435761, 2246822519, 3266489917, 668265263].map((mult) =>
+    (((i + 1) * mult) >>> 0).toString(36),
+  );
+  return `Test Goodreads Sync Fuzzy Cap ${tokens.join(" ")}`;
+}
+
 describe("syncGoodreadsTbr", () => {
   // These tests exercise syncGoodreadsTbr's real full-table-replace
   // (GoodreadsTbrItem) and real Book-matching behavior directly against the
@@ -735,6 +749,76 @@ describe("syncGoodreadsTbr", () => {
     await syncGoodreadsTbr("1993628");
 
     expect(lookupIsbn).toHaveBeenCalledTimes(25);
+  });
+
+  it("stops attempting further fuzzy fallback once the cap is hit, defers the rest, and skips deletion for the run", async () => {
+    // A pre-existing row that is NOT on the incoming shelf below -- if
+    // deletion runs normally, this gets removed. If the cap correctly
+    // makes the whole run skip deletion, it must survive.
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Goodreads Sync Cap Stale Survivor", author: "Someone" },
+    });
+
+    // 51 brand-new, isbn-less, mutually distinct titles -- none of them
+    // matches anything existing (there's nothing else on the shelf or in
+    // the table besides the stale survivor above, and titleMatchScore
+    // between these distinct titles and "Cap Stale Survivor" is well
+    // under threshold), so every single one reaches the fuzzy tier. With
+    // FUZZY_FALLBACK_CAP at 50, the 51st must be deferred.
+    const items = Array.from({ length: 51 }, (_, i) => ({ title: fuzzyCapTitle(i) }));
+    mockShelfFetch({ "to-read": [buildRssPage(items)] });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await syncGoodreadsTbr("1993628");
+
+    const created = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync Fuzzy Cap" } },
+    });
+    expect(created).toHaveLength(50);
+
+    // Deletion was skipped for this run -- the stale survivor is still there.
+    const survivor = await prisma.goodreadsTbrItem.findFirst({
+      where: { title: "Test Goodreads Sync Cap Stale Survivor" },
+    });
+    expect(survivor).not.toBeNull();
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("fuzzy-fallback cap"));
+  });
+
+  it("lets a deferred item reconcile on a later sync once the cap isn't hit", async () => {
+    // Reuses fuzzyCapTitle (not a "Book ${i}" numeric-suffix pattern) for
+    // the same reason as the previous test, PLUS a second reason specific
+    // to this test: on the second sync below, the deferred item's fuzzy
+    // search pool includes whichever of the 50 already-created siblings
+    // haven't been matched-and-excluded YET in that run's iteration order
+    // -- if sibling titles were too similar to each other (verified they
+    // are NOT, with this generator), the deferred item could wrongly
+    // fuzzy-match an unrelated sibling instead of correctly falling
+    // through to "create new."
+    const items = Array.from({ length: 51 }, (_, i) => ({
+      title: fuzzyCapTitle(i).replace("Fuzzy Cap", "Deferred Reconcile"),
+    }));
+    mockShelfFetch({ "to-read": [buildRssPage(items)] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await syncGoodreadsTbr("1993628");
+    const afterFirstSync = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync Deferred Reconcile" } },
+    });
+    expect(afterFirstSync).toHaveLength(50);
+
+    // Same 51 shelf items again -- the 50 already-created rows now match
+    // via the cheap exact-title tier (no fuzzy fallback needed at all),
+    // leaving only the 1 previously-deferred item to reach the fuzzy
+    // tier this run, well under the cap.
+    mockShelfFetch({ "to-read": [buildRssPage(items)] });
+
+    await syncGoodreadsTbr("1993628");
+    const afterSecondSync = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync Deferred Reconcile" } },
+    });
+    expect(afterSecondSync).toHaveLength(51);
   });
 
   it("does not let an imperfect isbn-less decoy match steal an isbn-drifted item's true match (regression: caught in code review)", async () => {
