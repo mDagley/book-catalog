@@ -204,10 +204,13 @@ describe("syncOwnedPhysicalBooks", () => {
         { title: "Test Owned Physical Concurrent Race Book", isbn13: "9780001112223" },
       ]),
     );
-    const findManySpy = vi.spyOn(prisma.book, "findMany").mockResolvedValueOnce([]);
+    // No manual restore needed here -- the file's own afterEach above
+    // unconditionally calls vi.restoreAllMocks(), which vitest guarantees
+    // runs after every test regardless of pass/fail/throw, so this can't
+    // leak into later tests even if syncOwnedPhysicalBooks throws.
+    vi.spyOn(prisma.book, "findMany").mockResolvedValueOnce([]);
 
     await syncOwnedPhysicalBooks("1993628", "owned-physical");
-    findManySpy.mockRestore();
 
     const matches = await prisma.book.findMany({
       where: { title: "Test Owned Physical Concurrent Race Book" },
