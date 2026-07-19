@@ -106,7 +106,12 @@ export function SearchAutocomplete({
       setHighlightedIndex((i) => (i + 1) % suggestions.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setHighlightedIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+      // Not simple modulo decrement -- (i - 1 + length) % length gives the
+      // wrong answer at the i === -1 "nothing highlighted" sentinel (it
+      // lands one short of the last index instead of on it), so i <= 0
+      // (nothing highlighted, or already at the first item) is special-cased
+      // to wrap straight to the last index.
+      setHighlightedIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
     } else if (event.key === "Enter") {
       // Only intercept Enter when a suggestion is actually highlighted --
       // otherwise let the keypress fall through to the browser's native
