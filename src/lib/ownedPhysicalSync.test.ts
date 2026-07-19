@@ -186,6 +186,38 @@ describe("syncOwnedPhysicalBooks", () => {
     await prisma.physicalCopy.deleteMany({ where: { bookId: existing.id } });
   });
 
+  it("re-checks the database for a concurrently-created book before creating a duplicate", async () => {
+    // Simulates the exact race confirmed in production (three duplicate
+    // "A Conjuring of Light" rows): another process (e.g. the cron sync
+    // overlapping a manual "Refresh now", which has no mutual-exclusion
+    // against the cron) creates a matching Book AFTER this sync's initial
+    // candidate snapshot was taken but BEFORE it decides whether to
+    // create one itself. Forcing the initial `book.findMany()` to return
+    // empty mirrors that timing -- the concurrently-created row is
+    // already really in the database throughout.
+    const concurrentlyCreated = await prisma.book.create({
+      data: { title: "Test Owned Physical Concurrent Race Book", isbn: "9780001112223" },
+    });
+
+    mockShelfFetch(
+      buildRssPage([
+        { title: "Test Owned Physical Concurrent Race Book", isbn13: "9780001112223" },
+      ]),
+    );
+    const findManySpy = vi.spyOn(prisma.book, "findMany").mockResolvedValueOnce([]);
+
+    await syncOwnedPhysicalBooks("1993628", "owned-physical");
+    findManySpy.mockRestore();
+
+    const matches = await prisma.book.findMany({
+      where: { title: "Test Owned Physical Concurrent Race Book" },
+      include: { copies: true },
+    });
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe(concurrentlyCreated.id);
+    expect(matches[0].copies).toHaveLength(1);
+  });
+
   it("defaults to the owned-physical shelf when no shelf name is given", async () => {
     const fetchMock = vi
       .fn()

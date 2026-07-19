@@ -27,44 +27,72 @@ function toCandidate(book: {
   return { id: book.id, title: book.title, isbn: book.isbn, copiesCount: book._count.copies };
 }
 
-// Attaches a placeholder physical copy (format: "OTHER", since Goodreads has
-// no concept of hardcover/paperback/etc.) to an existing Book matched by
-// ISBN or fuzzy title -- or creates a new Book + copy when nothing matches.
-// Never overwrites the matched book's title/author/isbn (same safeguard
-// every other fuzzy-match-then-attach path in this codebase uses), and
-// never adds a second copy to a book that already has one -- see the design
-// spec's Scope section for why (no way to tell a sync-created copy apart
-// from a user-entered one, so this sync only ever adds, never removes).
+// `candidates` is fetched with `orderBy: createdAt asc`, so the first array
+// match is deterministically the oldest -- same rule createBookWithCopyData's
+// ISBN branch uses for the same reason (Book.isbn has no unique constraint).
+function matchAgainstPool(
+  item: GoodreadsBook,
+  pool: OwnedPhysicalCandidate[],
+): OwnedPhysicalCandidate | null {
+  if (item.isbn) {
+    const isbnMatch = pool.find((c) => c.isbn === item.isbn);
+    if (isbnMatch) return isbnMatch;
+  }
+  return findBestTitleMatch(pool, item.title);
+}
+
+// Adds a placeholder physical copy (format: "OTHER", since Goodreads has no
+// concept of hardcover/paperback/etc.) to `match`, unless it already has
+// one -- never adds a second copy to a book that already has one, see the
+// design spec's Scope section for why (no way to tell a sync-created copy
+// apart from a user-entered one, so this sync only ever adds, never
+// removes).
+async function attachPlaceholderCopy(match: OwnedPhysicalCandidate): Promise<void> {
+  if (match.copiesCount > 0) return;
+  // match.copiesCount can be a snapshot from an earlier read, so it can go
+  // stale if another sync run (cron vs. manual refresh) adds a copy to the
+  // same book while this loop is in progress. Re-check right before
+  // creating to avoid a duplicate placeholder copy.
+  const currentCount = await prisma.physicalCopy.count({ where: { bookId: match.id } });
+  if (currentCount > 0) {
+    match.copiesCount = currentCount;
+    return;
+  }
+  await prisma.physicalCopy.create({ data: { bookId: match.id, format: "OTHER" } });
+  match.copiesCount += 1;
+}
+
+// Matches an incoming shelf item against an existing Book by ISBN or fuzzy
+// title -- or creates a new Book + copy when nothing matches. Never
+// overwrites a matched book's title/author/isbn (same safeguard every other
+// fuzzy-match-then-attach path in this codebase uses).
 async function applyShelfItem(
   item: GoodreadsBook,
   candidates: OwnedPhysicalCandidate[],
 ): Promise<void> {
-  let match: OwnedPhysicalCandidate | null = null;
-
-  if (item.isbn) {
-    // `candidates` is fetched with `orderBy: createdAt asc`, so the first
-    // array match is deterministically the oldest -- same rule
-    // createBookWithCopyData's ISBN branch uses for the same reason
-    // (Book.isbn has no unique constraint).
-    match = candidates.find((c) => c.isbn === item.isbn) ?? null;
-  }
-  if (!match) {
-    match = findBestTitleMatch(candidates, item.title);
-  }
+  const match = matchAgainstPool(item, candidates);
 
   if (match) {
-    if (match.copiesCount > 0) return;
-    // match.copiesCount is a snapshot from the initial candidate read, so it
-    // can go stale if another sync run (cron vs. manual refresh) adds a copy
-    // to the same book while this loop is in progress. Re-check right before
-    // creating to avoid a duplicate placeholder copy.
-    const currentCount = await prisma.physicalCopy.count({ where: { bookId: match.id } });
-    if (currentCount > 0) {
-      match.copiesCount = currentCount;
-      return;
-    }
-    await prisma.physicalCopy.create({ data: { bookId: match.id, format: "OTHER" } });
-    match.copiesCount += 1;
+    await attachPlaceholderCopy(match);
+    return;
+  }
+
+  // No match in `candidates` (a snapshot taken once at the start of the
+  // whole sync run) -- before concluding this is a genuinely new book,
+  // re-check the database fresh. The 30-minute cron tick has `noOverlap`
+  // protection against overlapping ITSELF, but nothing prevents it from
+  // overlapping a manual "Refresh now" click (or two manual clicks);
+  // without this recheck, two concurrent runs both see "no match" against
+  // their own stale snapshot and both create a separate Book for the same
+  // title -- confirmed in production (three duplicate rows for the same
+  // book, from a race between a cron tick and a manual refresh).
+  const freshCandidates = (
+    await prisma.book.findMany({ select: CANDIDATE_SELECT, orderBy: { createdAt: "asc" } })
+  ).map(toCandidate);
+  const freshMatch = matchAgainstPool(item, freshCandidates);
+  if (freshMatch) {
+    candidates.push(freshMatch);
+    await attachPlaceholderCopy(freshMatch);
     return;
   }
 
