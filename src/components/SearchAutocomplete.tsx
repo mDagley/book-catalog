@@ -37,13 +37,21 @@ export function SearchAutocomplete({
   // case, and it avoids both an extra render pass and a
   // react-hooks/set-state-in-effect lint violation.
   const [syncedDefaultValue, setSyncedDefaultValue] = useState(defaultValue);
-  if (defaultValue !== syncedDefaultValue) {
-    setSyncedDefaultValue(defaultValue);
-    setValue(defaultValue);
-  }
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  if (defaultValue !== syncedDefaultValue) {
+    setSyncedDefaultValue(defaultValue);
+    setValue(defaultValue);
+    // Also clear any dropdown state left over from the OLD query -- without
+    // this, stale suggestions could stay visible/open after defaultValue
+    // changes out from under the component. All conditioned on the same
+    // single `if`, not on each other, so this doesn't change the "fires
+    // once, terminates on next render" safety of the branch above.
+    setSuggestions([]);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+  }
   // Bumped (never reset) on every suggestion selection, unconditionally --
   // unlike gating a submit-effect on `value` itself, this fires even when
   // the selected suggestion's title is character-for-character identical to
