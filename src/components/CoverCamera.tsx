@@ -71,8 +71,28 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [step, setStep] = useState<CaptureStep>({ kind: "preview" });
-
+  // Guards the burst-capture loop (handleTakePhoto), which awaits a sleep()
+  // between shots -- a ~600ms window in which the component could unmount
+  // (e.g. the user navigates away mid-burst). Without this, the loop would
+  // keep running and eventually call setState on an unmounted component.
+  const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Tied to `step.kind` (not mount) so the stream's lifecycle matches the
+  // preview screen's: leaving preview for picking/cropping stops the
+  // camera (no point keeping it live -- and it stops battery/torch drain
+  // during that window), and returning to preview via Retake re-acquires
+  // a fresh stream and attaches it to the freshly-mounted <video> element
+  // (the old one was unmounted, nulling videoRef.current, when we left
+  // preview -- a one-time mount effect would never re-attach to it).
+  useEffect(() => {
+    if (step.kind !== "preview") return;
+
     let stopped = false;
 
     navigator.mediaDevices
@@ -89,6 +109,7 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
         const track = stream.getVideoTracks()[0];
         const capabilities = track.getCapabilities?.();
         setTorchSupported(Boolean(capabilities?.torch));
+        setTorchOn(false);
       })
       .catch((err: Error) => {
         if (stopped) return;
@@ -98,8 +119,9 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
     return () => {
       stopped = true;
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     };
-  }, []);
+  }, [step.kind]);
 
   function toggleTorch() {
     const track = streamRef.current?.getVideoTracks()[0];
@@ -129,7 +151,9 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
       if (i < BURST_SHOT_COUNT - 1) {
         await sleep(BURST_INTERVAL_MS);
       }
+      if (!isMountedRef.current) return;
     }
+    if (!isMountedRef.current) return;
     setIsCapturingBurst(false);
 
     if (shots.length === 0) return;
@@ -137,6 +161,14 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
   }
 
   function handleRetake() {
+    // Reset here (not in the stream-acquisition effect below) so the reset
+    // is tied to the user action that re-enters preview, not to the effect
+    // body -- calling setState synchronously in an effect body causes
+    // cascading renders and is flagged by react-hooks/set-state-in-effect.
+    // On initial mount isReady/error already hold these same default
+    // values, so no reset is needed there.
+    setIsReady(false);
+    setError(null);
     setStep({ kind: "preview" });
   }
 
