@@ -288,6 +288,21 @@ interface ExistingTbrItem {
 // deliberately avoiding the kind of long-held-transaction/connection-pool
 // risk that caused the PR #17 production incident (Prisma P2028, "Unable to
 // start a transaction in the given time").
+
+// Hard cap on how many shelf items may reach the fuzzy-fallback tier in a
+// single sync run -- defense-in-depth, not a fix for a known bug. The
+// exact-match tiers above are now O(1) per shelf item, closing the
+// specific bug that caused the 2026-07-18 production incident (every
+// isbn-less item doing a full fuzzy scan). But the fuzzy tier itself is
+// still O(pool) per item that reaches it, with no upper bound on how many
+// items can reach it in one run -- today's safety margin ("most shelf
+// items are exact-title repeats, so fuzzy rarely runs") is an assumption,
+// not an enforced limit. 50 sits comfortably below the actual incident's
+// 80-isbn-less-items number while still covering realistic legitimate
+// traffic (a normal sync sees at most a handful of genuinely new/renamed
+// items, not dozens). See docs/superpowers/specs/2026-07-19-fuzzy-fallback-cost-ceiling-design.md.
+const FUZZY_FALLBACK_CAP = 50;
+
 async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   const existing = await prisma.goodreadsTbrItem.findMany({
     select: { id: true, title: true, author: true, isbn: true, coverImagePath: true },
@@ -315,6 +330,9 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
 
   const matchedIds = new Set<string>();
   const toCreate: { title: string; author: string | null; isbn: string | null }[] = [];
+  let fuzzyFallbackCount = 0;
+  let hitFuzzyFallbackCap = false;
+  let deferredCount = 0;
 
   for (const shelfItem of shelfItems) {
     let matched: ExistingTbrItem | null = null;
@@ -327,6 +345,21 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
       matched = exactCandidates?.find((item) => !matchedIds.has(item.id)) ?? null;
 
       if (!matched) {
+        // Needs the fuzzy fallback -- capped as defense-in-depth (see
+        // FUZZY_FALLBACK_CAP's doc comment above). Once the cap is hit,
+        // this and every remaining fuzzy-needing shelf item this run is
+        // deferred: not added to toCreate (would risk a duplicate row for
+        // an item that actually has a match, destroying its preserved
+        // cover -- the exact bug this whole reconciliation rework exists
+        // to prevent), and its corresponding existing row (if any) is left
+        // alone. It's simply an ordinary shelf item again next sync, when
+        // the counter resets.
+        if (fuzzyFallbackCount >= FUZZY_FALLBACK_CAP) {
+          hitFuzzyFallbackCap = true;
+          deferredCount++;
+          continue;
+        }
+        fuzzyFallbackCount++;
         const available = existing.filter((item) => !matchedIds.has(item.id));
         matched = findBestTitleMatch(available, shelfItem.title);
       }
@@ -351,6 +384,22 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
 
   if (toCreate.length > 0) {
     await prisma.goodreadsTbrItem.createMany({ data: toCreate });
+  }
+
+  if (hitFuzzyFallbackCap) {
+    // Can't safely tell "genuinely removed from the shelf" apart from
+    // "the true match for a deferred item" without doing the fuzzy match
+    // -- skip deletion entirely this run rather than risk destroying a
+    // row (and its cover) that a deferred item would have matched. A
+    // stale row lingering one extra cycle is an acceptable trade for
+    // guaranteed no data loss -- the same trade-off already made
+    // deliberately elsewhere in this function's history (see the two
+    // correctness-bug fixes documented in the comment above this
+    // function).
+    console.warn(
+      `Goodreads TBR sync hit the fuzzy-fallback cap (${FUZZY_FALLBACK_CAP}) with ${deferredCount} shelf item(s) deferred to the next sync — row deletion skipped this run.`,
+    );
+    return;
   }
 
   const toDelete = existing.filter((item) => !matchedIds.has(item.id));
