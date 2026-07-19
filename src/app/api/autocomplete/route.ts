@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getTbrGap } from "@/lib/tbrGap";
 
 const SCOPES = ["home", "books", "tbr"] as const;
 type Scope = (typeof SCOPES)[number];
@@ -19,21 +20,13 @@ function isScope(value: string | null): value is Scope {
 // "home" and "books" both suggest across the same Book table/shape, deliberately
 // mirroring each page's own current search behavior -- including /books' own
 // not-yet-fixed listing behavior of not requiring a physical copy (see backlog
-// item #7, tracked in project memory, not fixed here). "tbr" queries the
-// separate GoodreadsTbrItem table, matching /tbr's own search.
+// item #7, tracked in project memory, not fixed here). "tbr" reuses getTbrGap,
+// the same not-yet-owned-filtered, query-matched source /tbr itself renders
+// from, so a suggested title always has a real result on the /tbr page.
 async function fetchSuggestions(scope: Scope, q: string): Promise<Suggestion[]> {
   if (scope === "tbr") {
-    return prisma.goodreadsTbrItem.findMany({
-      where: {
-        OR: [
-          { title: { contains: q, mode: "insensitive" } },
-          { author: { contains: q, mode: "insensitive" } },
-        ],
-      },
-      select: { title: true, author: true },
-      take: SUGGESTION_LIMIT,
-      orderBy: { title: "asc" },
-    });
+    const gap = await getTbrGap(q);
+    return gap.slice(0, SUGGESTION_LIMIT).map(({ title, author }) => ({ title, author }));
   }
 
   return prisma.book.findMany({

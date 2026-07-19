@@ -92,14 +92,33 @@ describe("GET /api/autocomplete", () => {
     expect(data).toEqual([{ title: "Test Autocomplete Way of Kings", author: "Brandon Sanderson" }]);
   });
 
+  it("excludes tbr items that are already owned, matching /tbr's not-yet-owned gap", async () => {
+    await prisma.book.create({ data: { title: "Test Autocomplete Owned Title" } });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Autocomplete Owned Title", author: "Some Author" },
+    });
+
+    const response = await GET(makeRequest({ scope: "tbr", q: "Test Autocomplete Owned" }));
+    const data = await response.json();
+
+    expect(data).toEqual([]);
+  });
+
   it("does not leak Book rows into the tbr scope or GoodreadsTbrItem rows into the home/books scopes", async () => {
-    await prisma.book.create({ data: { title: "Test Autocomplete Cross Scope Book" } });
-    await prisma.goodreadsTbrItem.create({ data: { title: "Test Autocomplete Cross Scope Tbr" } });
+    // Titles are deliberately dissimilar (not just "...Book" vs "...Tbr")
+    // beyond their shared query prefix -- getTbrGap fuzzy-matches titles
+    // against owned Books (see the dedicated ownership-exclusion test below),
+    // so two near-identical titles here would make this test conflate that
+    // filtering with the cross-table leak this test actually targets.
+    await prisma.book.create({ data: { title: "Test Autocomplete Cross Scope Physical Book" } });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Autocomplete Cross Scope Wishlist Entry" },
+    });
 
     const tbrResponse = await GET(makeRequest({ scope: "tbr", q: "Test Autocomplete Cross Scope" }));
     const tbrData = await tbrResponse.json();
     expect(tbrData.map((s: { title: string }) => s.title)).toEqual([
-      "Test Autocomplete Cross Scope Tbr",
+      "Test Autocomplete Cross Scope Wishlist Entry",
     ]);
 
     const homeResponse = await GET(
@@ -107,7 +126,7 @@ describe("GET /api/autocomplete", () => {
     );
     const homeData = await homeResponse.json();
     expect(homeData.map((s: { title: string }) => s.title)).toEqual([
-      "Test Autocomplete Cross Scope Book",
+      "Test Autocomplete Cross Scope Physical Book",
     ]);
   });
 
