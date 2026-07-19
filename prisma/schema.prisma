@@ -58,6 +58,7 @@ model EbookCopy {
   absItemId      String    @unique
   coverImagePath String?
   coverCheckedAt DateTime?
+  coverFetchFailureReason String?
   createdAt      DateTime  @default(now())
 }
 
@@ -68,6 +69,7 @@ model AudiobookCopy {
   absItemId      String    @unique
   coverImagePath String?
   coverCheckedAt DateTime?
+  coverFetchFailureReason String?
   createdAt      DateTime  @default(now())
 }
 
@@ -78,5 +80,6 @@ model GoodreadsTbrItem {
   isbn           String?
   coverImagePath String?
   coverCheckedAt DateTime?
+  coverFetchFailureReason String?
   lastSyncedAt   DateTime  @default(now())
 }
