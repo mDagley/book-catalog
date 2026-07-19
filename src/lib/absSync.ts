@@ -357,14 +357,23 @@ async function backfillAbsCovers(baseUrl: string, token: string): Promise<void> 
     }),
   ]);
 
-  const pending = [
-    ...missingEbookCovers.map((c) => ({ table: "ebook" as const, id: c.id, absItemId: c.absItemId })),
-    ...missingAudiobookCovers.map((c) => ({
-      table: "audiobook" as const,
-      id: c.id,
-      absItemId: c.absItemId,
-    })),
-  ].slice(0, ABS_COVER_FETCH_CAP);
+  // Interleaved (not concatenated-then-sliced) so a large backlog in one
+  // media type can't starve the other of any attempts this run -- each
+  // type gets roughly half the per-run budget when both have a backlog.
+  const pending: { table: "ebook" | "audiobook"; id: string; absItemId: string }[] = [];
+  for (
+    let i = 0;
+    pending.length < ABS_COVER_FETCH_CAP &&
+    (i < missingEbookCovers.length || i < missingAudiobookCovers.length);
+    i++
+  ) {
+    if (i < missingEbookCovers.length && pending.length < ABS_COVER_FETCH_CAP) {
+      pending.push({ table: "ebook", ...missingEbookCovers[i] });
+    }
+    if (i < missingAudiobookCovers.length && pending.length < ABS_COVER_FETCH_CAP) {
+      pending.push({ table: "audiobook", ...missingAudiobookCovers[i] });
+    }
+  }
 
   for (const copy of pending) {
     const result = await fetchAbsCoverAndSave(baseUrl, token, copy.absItemId);

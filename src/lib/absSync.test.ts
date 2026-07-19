@@ -887,6 +887,41 @@ describe("syncAbsCache", () => {
       expect.anything(),
     );
   });
+
+  it("interleaves ebook and audiobook cover backfill instead of draining ebooks first", async () => {
+    // 30 ebook copies missing covers (more than ABS_COVER_FETCH_CAP's 25) and
+    // 1 audiobook copy missing one. Under the old concatenate-then-slice
+    // behavior, the audiobook candidate would never be reached (the first
+    // 25 slots are entirely ebooks). Interleaving must give it a slot.
+    const book = await prisma.book.create({
+      data: { title: "Test Abs Sync Interleave Backfill Book", hasEbook: true, hasAudiobook: true },
+    });
+    for (let i = 0; i < 30; i++) {
+      await prisma.ebookCopy.create({
+        data: { bookId: book.id, absItemId: `interleave-ebook-${i}` },
+      });
+    }
+    await prisma.audiobookCopy.create({
+      data: { bookId: book.id, absItemId: "interleave-audiobook-1" },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      // Every cover request "succeeds" with a 404 -- this test only cares
+      // about which absItemIds get REQUESTED, not what comes back.
+      return { ok: false, status: 404 } as Response;
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updatedAudiobook = await prisma.audiobookCopy.findUniqueOrThrow({
+      where: { absItemId: "interleave-audiobook-1" },
+    });
+    expect(updatedAudiobook.coverCheckedAt).not.toBeNull();
+  });
 });
 
 describe("syncAbsCache + searchCatalog integration", () => {
