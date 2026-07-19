@@ -476,7 +476,7 @@ describe("syncGoodreadsTbr", () => {
     expect(items[0].author).toBe("New Author");
   });
 
-  it("preserves an existing item's id and coverImagePath when matched by fuzzy title (no ISBN)", async () => {
+  it("preserves an existing item's id and coverImagePath when matched by exact title (no ISBN)", async () => {
     const existing = await prisma.goodreadsTbrItem.create({
       data: {
         title: "Test Goodreads Sync The Way of Kings",
@@ -499,6 +499,46 @@ describe("syncGoodreadsTbr", () => {
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe(existing.id);
     expect(items[0].coverImagePath).toBe("way-of-kings-cover.jpg");
+  });
+
+  it("preserves an existing item's id and coverImagePath when matched by real fuzzy scoring, not exact title equality", async () => {
+    // Unlike the exact-title test above, this title pair is deliberately
+    // NOT normalizeTitle-equal (a parenthetical edition note only
+    // titleForms()'s series-suffix stripping removes), so this can only
+    // pass via reconcileTbrItems actually falling through to
+    // findBestTitleMatch -- confirmed empirically: normalizeTitle() on
+    // these two strings differs, but titleMatchScore() still clears the
+    // default 85 threshold (scores 100, via the stripped-suffix form).
+    // Without this test, every other "no ISBN" test in this file happens
+    // to use byte-identical titles and is fully resolved by the cheap
+    // exact-match pass alone, leaving the real fuzzy-matching wiring
+    // inside reconcileTbrItems untested.
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync The Way of Kings",
+        author: "Brandon Sanderson",
+        coverImagePath: "way-of-kings-fuzzy-cover.jpg",
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          {
+            title: "Test Goodreads Sync The Way of Kings (2010 Edition)",
+            author: "Brandon Sanderson",
+          },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany();
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(existing.id);
+    expect(items[0].coverImagePath).toBe("way-of-kings-fuzzy-cover.jpg");
+    expect(items[0].title).toBe("Test Goodreads Sync The Way of Kings (2010 Edition)");
   });
 
   it("deletes an existing item's cover file when the item is removed from the shelf", async () => {
@@ -555,7 +595,7 @@ describe("syncGoodreadsTbr", () => {
     expect(items.some((i) => i.title === "Test Goodreads Sync Duplicate ISBN Book B")).toBe(true);
   });
 
-  it("recovers an existing ISBN-bearing row by fuzzy title match when its incoming ISBN no longer matches", async () => {
+  it("recovers an existing ISBN-bearing row by exact title match when its incoming ISBN no longer matches", async () => {
     const existing = await prisma.goodreadsTbrItem.create({
       data: {
         title: "Test Goodreads Sync Isbn Drift Book",
@@ -851,11 +891,13 @@ describe("syncGoodreadsTbr", () => {
     await syncGoodreadsTbr("1993628");
     const elapsedMs = Date.now() - start;
 
-    // Measured directly (isolated, this file's matching functions only, not
-    // the full sync): tier-1-only fallback (60 isbn-less shelf items x 60
-    // isbn-less existing rows, this test's shape after the fix) takes
-    // ~360ms; the pre-fix full-pool fallback (60 x the full 460-row table)
-    // takes ~4900ms at the same scale with these title shapes. 2000ms is a
+    // This shape (60 isbn-less shelf items, all exact-title matches against
+    // the isbn-less existing rows) resolves entirely through the cheap
+    // normalizeTitle exact-match pass -- consistently under 500ms measured
+    // during this fix's development. A version that always falls through to
+    // real fuzzy scoring (findBestTitleMatch) for every one of those 60
+    // items, against the full 460-row table, took several seconds at this
+    // same scale/title-shape during that same investigation. 2000ms is a
     // wide margin on both sides of that gap -- won't flake on a slow CI
     // machine, but reliably catches a regression back to full-pool
     // scanning.
