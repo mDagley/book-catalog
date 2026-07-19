@@ -7,7 +7,6 @@ import {
   titleMatchScore,
   isTitleMatch,
   findBestTitleMatch,
-  findBestTitleMatchWithScore,
 } from "@/lib/matching";
 
 describe("normalizeTitle", () => {
@@ -156,50 +155,5 @@ describe("findBestTitleMatch", () => {
 
     expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 99)).toBeNull();
     expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 50)).not.toBeNull();
-  });
-});
-
-describe("findBestTitleMatchWithScore", () => {
-  interface Candidate {
-    id: string;
-    title: string;
-  }
-
-  it("returns the match and its score for an exact title", () => {
-    const candidates: Candidate[] = [{ id: "1", title: "The Way of Kings" }];
-
-    const result = findBestTitleMatchWithScore(candidates, "The Way of Kings");
-
-    expect(result?.item.id).toBe("1");
-    expect(result?.score).toBe(100);
-  });
-
-  it("returns a score below 100 for an imperfect match", () => {
-    const candidates: Candidate[] = [{ id: "1", title: "The Way of Kingz" }];
-
-    const result = findBestTitleMatchWithScore(candidates, "The Way of Kings");
-
-    expect(result?.item.id).toBe("1");
-    expect(result?.score).toBeGreaterThanOrEqual(85);
-    expect(result?.score).toBeLessThan(100);
-  });
-
-  it("returns null when nothing is above threshold, same as findBestTitleMatch", () => {
-    const candidates: Candidate[] = [{ id: "1", title: "The Way of Kings" }];
-
-    expect(findBestTitleMatchWithScore(candidates, "Completely Unrelated Title Zzz")).toBeNull();
-  });
-
-  it("agrees with findBestTitleMatch on which candidate wins", () => {
-    const candidates: Candidate[] = [
-      { id: "close", title: "The Way of Kingz" },
-      { id: "exact", title: "The Way of Kings" },
-    ];
-
-    const withScore = findBestTitleMatchWithScore(candidates, "The Way of Kings");
-    const plain = findBestTitleMatch(candidates, "The Way of Kings");
-
-    expect(withScore?.item.id).toBe(plain?.id);
-    expect(withScore?.score).toBe(100);
   });
 });

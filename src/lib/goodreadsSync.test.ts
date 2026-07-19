@@ -752,6 +752,57 @@ describe("syncGoodreadsTbr", () => {
     expect(decoyRow?.coverImagePath).toBe("decoy-cover.jpg");
   });
 
+  it("does not cross-match two different books that share a series name before a colon (regression: caught in code review)", async () => {
+    // titleMatchScore takes the max over every titleForms() variant,
+    // including a colon-split prefix -- so "Mistborn: The Final Empire" and
+    // "Mistborn: The Well of Ascension" score a PERFECT 100 against each
+    // other via the shared "Mistborn" form, despite being two different
+    // books. An earlier version of this fix trusted any tier-1 match that
+    // scored exactly 100, assuming that meant "the normalized title
+    // strings are identical" -- which is false; this is exactly the case
+    // that assumption gets wrong. Fixed by using a literal normalizeTitle
+    // string-equality check (immune to per-form scoring) instead of relying
+    // on titleMatchScore's 100 at all.
+    const finalEmpire = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Mistborn: The Final Empire",
+        coverImagePath: "final-empire-cover.jpg",
+      }, // isbn-less
+    });
+    const wellOfAscension = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Mistborn: The Well of Ascension",
+        isbn: "9780000000066",
+        coverImagePath: "well-of-ascension-cover.jpg",
+      },
+    });
+
+    // "The Well of Ascension" is listed FIRST with its isbn dropped this
+    // sync (drift), then "The Final Empire" -- same ordering concern as the
+    // decoy test above.
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Mistborn: The Well of Ascension" },
+          { title: "Test Goodreads Sync Mistborn: The Final Empire" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const items = await prisma.goodreadsTbrItem.findMany({
+      where: { title: { startsWith: "Test Goodreads Sync Mistborn" } },
+    });
+    expect(items).toHaveLength(2);
+    const finalEmpireRow = items.find((i) => i.id === finalEmpire.id);
+    const wellOfAscensionRow = items.find((i) => i.id === wellOfAscension.id);
+    expect(finalEmpireRow?.title).toBe("Test Goodreads Sync Mistborn: The Final Empire");
+    expect(finalEmpireRow?.coverImagePath).toBe("final-empire-cover.jpg");
+    expect(wellOfAscensionRow?.title).toBe("Test Goodreads Sync Mistborn: The Well of Ascension");
+    expect(wellOfAscensionRow?.coverImagePath).toBe("well-of-ascension-cover.jpg");
+  });
+
   it("stays fast when many isbn-less shelf items need fuzzy matching against a large existing table (regression: production CPU incident)", async () => {
     // Real book titles commonly have colons/subtitles/series suffixes,
     // which titleForms() expands into multiple normalized variants each --

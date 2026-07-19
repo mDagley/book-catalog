@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
-import { findBestTitleMatch, findBestTitleMatchWithScore } from "@/lib/matching";
+import { findBestTitleMatch, normalizeTitle } from "@/lib/matching";
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { lookupIsbn } from "@/lib/isbnLookup";
 import { saveCoverFromUrl } from "@/lib/books";
@@ -218,53 +218,61 @@ interface ExistingTbrItem {
 // rows with no shared stable id" problem) for anything that doesn't
 // ISBN-match.
 //
-// The fuzzy fallback is deliberately two-tier, not one shared full-table
-// scan -- this caused a real production CPU incident (confirmed empirically:
-// fuzzy-matching 80 isbn-less shelf items against a full ~800-row pool took
-// 4.5s of synchronous, single-threaded work on a fast dev machine, run every
-// 30 minutes on the same process serving the app's own HTTP requests, on a
+// The fuzzy fallback tries a cheap exact-title check across the full pool
+// FIRST, only falling back to real fuzzy scoring (findBestTitleMatch) when
+// that finds nothing -- this caused a real production CPU incident when it
+// was just "always fuzzy-match" (confirmed empirically: fuzzy-matching 80
+// isbn-less shelf items against a full ~800-row pool took 4.5s of
+// synchronous, single-threaded work on a fast dev machine, run every 30
+// minutes on the same process serving the app's own HTTP requests, on a
 // resource-constrained single-core VPS also hosting Audiobookshelf -- CPU
 // pegged solid enough that the ABS process starved too). Goodreads' RSS feed
 // regularly omits isbn for a meaningful fraction of shelf items (confirmed
-// via this file's own "Mistborn" test fixture), so isbn-less items are the
-// COMMON case, not an edge case -- scanning the full pool for each one is
-// what made the cost quadratic in practice.
+// via this file's own "Mistborn" test fixture), so isbn-less items needing
+// this fallback are the COMMON case, not an edge case.
 //
-// - Tier 1 (tried first, cheap): fuzzy-match against existingIsbnLess only,
-//   but ONLY trust the result if it scores a PERFECT 100 (the normalized
-//   title strings are identical) -- resolves the dominant, performance-
-//   critical case (an isbn-less book whose title hasn't changed since the
-//   last sync) without ever touching the full table.
-// - Tier 2 (reached whenever tier 1 didn't return a perfect match -- no
-//   match, or only an ambiguous one): fuzzy-match against the full
-//   remaining pool, exactly like the original single-pool implementation.
-//   Guaranteed correct (finds the single true global-best candidate,
-//   including re-examining the isbn-less candidates tier 1 already looked
-//   at) since it scans everything. Handles every isbn-drift shape (isbn
-//   changed, appeared, or disappeared since the last sync) AND protects
-//   against a tier-1 false positive: findBestTitleMatch only finds the best
-//   candidate WITHIN the pool it's given, so a merely-above-threshold
-//   isbn-less match (e.g. two isbn-less books sharing a series-name prefix
-//   before a colon, which titleForms() compares as its own form) could be
-//   worse than a true match sitting in the isbn-bearing pool -- trusting
-//   ANY tier-1 match regardless of score, not just a perfect one, was tried
-//   and caught in code review: it silently attaches the wrong row and
-//   deletes the real isbn-drifted one, cover and all. Tier 2's cost is
-//   bounded by how often a shelf item ISN'T a clean, unchanged, isbn-less
-//   repeat, not by the isbn-less population's size.
+// The fix is NOT restricting which rows get scanned (an earlier version
+// tried an isbn-less-only candidate pool, and that version's own attempt to
+// stay correct -- trusting a tier-1 match only above some score threshold --
+// was caught in code review reintroducing data loss: titleMatchScore takes
+// the max over EVERY titleForms() variant, including a colon-split prefix,
+// so two DIFFERENT books sharing a series name before a colon (e.g.
+// "Mistborn: The Final Empire" vs "Mistborn: The Well of Ascension") score
+// a perfect 100 against each other despite not being the same book at all --
+// no score threshold on a restricted pool is safe). The fix is restricting
+// WHICH KIND of comparison runs against the full pool:
 //
-// Two correctness bugs already lived in an earlier, single-pool version of
-// this function: (1) two incoming shelf items sharing one ISBN would both
-// match the same existing row, silently dropping one book (last-write-wins,
-// no error, since isbn has no unique constraint) -- fixed by the matchedIds
-// re-check on the ISBN branch below, independent of which fuzzy tier runs;
-// (2) an existing row WITH an isbn was permanently unreachable by fuzzy
-// fallback the moment its incoming isbn stopped matching -- fixed by tier 2
-// above, which is why tier 1 must stay conservative (perfect-score-only)
-// rather than trusting any above-threshold match. Don't collapse tiers 1
-// and 2 back into one shared full-pool fallback (the CPU incident), and
-// don't widen tier 1's trust condition below a perfect score (the data-loss
-// bug) -- both were real, both were caught, this shape is the fix for both.
+// - Cheap pass (tried first): a literal `normalizeTitle` string-equality
+//   scan across the ENTIRE remaining pool -- ordinary string comparison,
+//   not titleForms()'s multi-variant fuzzy scoring, so it can't produce the
+//   colon-prefix false positive above (two different titles are never
+//   string-equal after normalization just because they share a substring).
+//   Measured at ~2ms for 80 lookups against an 800-row pool -- multiple
+//   orders of magnitude cheaper than fuzzy scoring at the same scale,
+//   because string equality skips the expensive Ratcliff/Obershelp
+//   matching-blocks algorithm entirely. Scanning the FULL pool here (not
+//   an isbn-less-only subset) matters too: restricting it could miss a
+//   literal title match sitting on the isbn-bearing side.
+// - Fuzzy pass (only reached when the cheap pass finds nothing): identical
+//   to the original single-pool implementation -- scans the same full
+//   remaining pool with findBestTitleMatch, guaranteed to find the single
+//   true global-best candidate. Its cost is bounded by how often a shelf
+//   item ISN'T a literal, unchanged repeat of something already in the
+//   table (genuinely new additions, or a title that changed cosmetically),
+//   not by table size.
+//
+// Two correctness bugs already lived in earlier versions of this function:
+// (1) two incoming shelf items sharing one ISBN would both match the same
+// existing row, silently dropping one book (last-write-wins, no error,
+// since isbn has no unique constraint) -- fixed by the matchedIds re-check
+// on the ISBN branch below, independent of which pass below it resolves in;
+// (2) an existing row WITH an isbn was permanently unreachable once its
+// incoming isbn stopped matching -- fixed by always falling through to a
+// full-pool pass (cheap-exact then fuzzy) rather than a restricted one. Both
+// the CPU incident (a full fuzzy scan on every fallback) and the
+// reintroduced data-loss bug (a restricted, score-thresholded fuzzy pool)
+// were real; this cheap-exact-then-fuzzy-on-full-pool shape is what fixes
+// both without reintroducing the other.
 //
 // A shelf item with no match gets a fresh row; an existing row matched to
 // nothing on the current shelf (removed from Goodreads) gets deleted, with
@@ -281,12 +289,9 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   });
 
   const existingByIsbn = new Map<string, ExistingTbrItem>();
-  const existingIsbnLess: ExistingTbrItem[] = [];
   for (const item of existing) {
     if (item.isbn) {
       existingByIsbn.set(item.isbn, item);
-    } else {
-      existingIsbnLess.push(item);
     }
   }
 
@@ -299,43 +304,14 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
     if (isbnCandidate && !matchedIds.has(isbnCandidate.id)) {
       matched = isbnCandidate;
     } else {
-      // Tier 1: try the cheap isbn-less pool first. A PERFECT score (100 --
-      // the normalized title strings are identical) is trusted outright:
-      // this is the dominant, performance-critical case (an isbn-less book
-      // whose title hasn't changed since the last sync), so accepting it
-      // immediately is what avoids the full-table scan for the common case.
-      //
-      // Anything less than a perfect score is NOT trusted on its own --
-      // findBestTitleMatch only finds the best candidate WITHIN the pool
-      // it's given, so a merely-above-threshold match here (e.g. two
-      // isbn-less books sharing a series-name prefix before a colon, which
-      // titleForms() compares as its own form) could be a false positive
-      // that's actually worse than a true match sitting in the isbn-bearing
-      // pool. An earlier version of this function short-circuited on ANY
-      // tier-1 match regardless of score, which reintroduced exactly the
-      // isbn-drift data-loss bug this rework exists to prevent (a
-      // wrongly-"matched" isbn-less decoy causes the real isbn-drifted row
-      // to be deleted, cover and all) -- caught in code review before ever
-      // shipping. Falling through to a full-pool scan re-examines the
-      // isbn-less candidates too (existing is a superset of
-      // existingIsbnLess), so no candidate is ever lost by trying tier 1
-      // first; it only adds the isbn-bearing candidates to the comparison.
-      const isbnLessAvailable = existingIsbnLess.filter((item) => !matchedIds.has(item.id));
-      const tier1 = findBestTitleMatchWithScore(isbnLessAvailable, shelfItem.title);
+      const available = existing.filter((item) => !matchedIds.has(item.id));
+      const normalizedShelfTitle = normalizeTitle(shelfItem.title);
 
-      if (tier1 && tier1.score === 100) {
-        matched = tier1.item;
-      } else {
-        // Tier 2: reached whenever tier 1 didn't find a perfect match --
-        // no match at all, or only an ambiguous one. Guaranteed correct
-        // (finds the single true global-best candidate) since it scans the
-        // full remaining pool, exactly like the original single-pool
-        // implementation. Its cost is bounded by how often a shelf item
-        // *isn't* a clean, unchanged, isbn-less repeat -- i.e. by how often
-        // ambiguity or drift actually happens, not by the isbn-less
-        // population's size.
-        const fullAvailable = existing.filter((item) => !matchedIds.has(item.id));
-        matched = findBestTitleMatch(fullAvailable, shelfItem.title);
+      matched =
+        available.find((item) => normalizeTitle(item.title) === normalizedShelfTitle) ?? null;
+
+      if (!matched) {
+        matched = findBestTitleMatch(available, shelfItem.title);
       }
     }
 
