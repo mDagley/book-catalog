@@ -171,8 +171,14 @@ export async function findDuplicateBookGroups(
             // 100 score between different books). Requiring full-title
             // equality closes it; every other case (general physical-only
             // pairs) stays excluded exactly as before.
+            const normalizedTitle = normalizeTitle(c.title);
             if (
-              normalizeTitle(c.title) !== normalizeTitle(occupant.title) ||
+              // normalizeTitle() strips every non-ASCII character, so two
+              // completely different non-Latin-script titles can both
+              // normalize to "" -- guard against that degenerate case
+              // trivially satisfying the equality check below.
+              normalizedTitle === "" ||
+              normalizedTitle !== normalizeTitle(occupant.title) ||
               !authorsMatchNonNull(c.author, occupant.author) ||
               !isbnCompatible(c.isbn, occupant.isbn)
             ) {

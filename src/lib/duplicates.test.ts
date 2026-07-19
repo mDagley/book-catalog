@@ -140,6 +140,36 @@ describe("findDuplicateBookGroups", () => {
     expect(relevantGroups).toEqual([]);
   });
 
+  it("does not group two different physical books whose titles both normalize to an empty string", async () => {
+    // Low-confidence Copilot finding on PR #27, verified directly before
+    // accepting: normalizeTitle() strips every non-ASCII character, so
+    // two completely different non-Latin-script titles (verified: two
+    // real, different Japanese book titles) both normalize to "" --
+    // sharing that degenerate titleForms() variant AND trivially passing
+    // a naive normalizeTitle(a) === normalizeTitle(b) equality check
+    // ("" === ""). These fixtures deliberately skip the "Test Duplicates"
+    // prefix used elsewhere in this file -- an ASCII prefix would survive
+    // normalization and defeat the point of this test -- so they're
+    // cleaned up explicitly instead of via the shared afterEach above.
+    const a = await prisma.book.create({
+      data: { title: "銀河鉄道の夜", author: "Same Author", copies: { create: { format: "OTHER" } } },
+    });
+    const b = await prisma.book.create({
+      data: { title: "三体", author: "Same Author", copies: { create: { format: "OTHER" } } },
+    });
+
+    try {
+      const { groups } = await findDuplicateBookGroups();
+      const relevantGroups = groups.filter((g) =>
+        g.books.some((book) => book.id === a.id || book.id === b.id),
+      );
+      expect(relevantGroups).toEqual([]);
+    } finally {
+      await prisma.physicalCopy.deleteMany({ where: { bookId: { in: [a.id, b.id] } } });
+      await prisma.book.deleteMany({ where: { id: { in: [a.id, b.id] } } });
+    }
+  });
+
   it("groups two purely physical books that are the owned-physical sync's exact-duplicate signature", async () => {
     // The real production bug this was built for: syncOwnedPhysicalBooks's
     // create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md)
