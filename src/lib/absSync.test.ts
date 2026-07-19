@@ -775,6 +775,40 @@ describe("syncAbsCache", () => {
     expect(updated.coverCheckedAt).not.toBeNull();
   });
 
+  it("sets coverFetchFailureReason when the ABS cover is in an unsupported format", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Unsupported Cover Format",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "backfill-unsupported-format" } },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-unsupported-format/cover")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/gif" }),
+          arrayBuffer: async () => Buffer.from("not-really-a-gif"),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-unsupported-format" },
+    });
+    expect(updated.coverImagePath).toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBe("unsupported_format");
+  });
+
   it("never re-attempts a cover fetch once coverCheckedAt is set", async () => {
     await prisma.book.create({
       data: {

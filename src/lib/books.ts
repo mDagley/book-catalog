@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { saveCoverImage, SAFE_COVER_FILENAME } from "@/lib/coverStorage";
+import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { findBestTitleMatch } from "@/lib/matching";
 
 export interface BookFormState {
@@ -188,7 +188,7 @@ function isAllowedCoverUrl(url: string): boolean {
 
 export async function saveCoverFromUrl(
   url: string,
-): Promise<{ coverImagePath: string } | { error: string }> {
+): Promise<{ coverImagePath: string } | { error: string; reason?: "unsupported_format" }> {
   try {
     let currentUrl = url;
 
@@ -226,7 +226,10 @@ export async function saveCoverFromUrl(
       const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
       return { coverImagePath };
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof UnsupportedCoverFormatError) {
+      return { error: "Unsupported cover image format", reason: "unsupported_format" };
+    }
     return { error: "Failed to fetch cover image" };
   }
 }

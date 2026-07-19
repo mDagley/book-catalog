@@ -752,6 +752,52 @@ describe("syncGoodreadsTbr", () => {
     expect(lookupIsbn).toHaveBeenCalledTimes(25);
   });
 
+  it("sets coverFetchFailureReason when the TBR item's cover is in an unsupported format", async () => {
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000099-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Unsupported Cover Format", isbn13: "9780000000099" },
+        ]),
+      ],
+    });
+    // mockShelfFetch installs the RSS-serving fetch mock FIRST -- capture
+    // that as the delegate before layering the cover-request interceptor on
+    // top, so shelf requests still resolve correctly. This mirrors the
+    // existing "fetches and stores a cover for a new TBR item that has an
+    // ISBN" test's wrapping pattern -- the item must arrive via the shelf
+    // feed itself (not a direct prisma.create), since reconcileTbrItems
+    // deletes any pre-existing row that isn't matched on the incoming shelf
+    // before fetchMissingTbrCovers ever runs.
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/gif" }),
+          arrayBuffer: async () => Buffer.from("not-really-a-gif"),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Unsupported Cover Format" },
+    });
+    expect(updated.coverImagePath).toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBe("unsupported_format");
+  });
+
   it("stops attempting further fuzzy fallback once the cap is hit, defers the rest, and skips deletion for the run", async () => {
     // A pre-existing row that is NOT on the incoming shelf below -- if
     // deletion runs normally, this gets removed. If the cap correctly

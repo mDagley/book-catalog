@@ -475,6 +475,29 @@ describe("saveCoverFromUrl", () => {
     expect(result.coverImagePath).toMatch(/^[a-f0-9-]+\.png$/);
   });
 
+  it("returns reason: 'unsupported_format' when the fetched cover's content-type isn't saveable", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ "content-type": "image/gif" }),
+      arrayBuffer: async () => Buffer.from("not-really-a-gif"),
+    } as unknown as Response);
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({
+      error: "Unsupported cover image format",
+      reason: "unsupported_format",
+    });
+  });
+
+  it("does not set reason on a plain fetch failure", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+
+    const result = await saveCoverFromUrl("https://covers.openlibrary.org/b/id/12345-M.jpg");
+
+    expect(result).toEqual({ error: "Failed to fetch cover image" });
+  });
+
   it("rejects a URL whose host isn't the Open Library covers CDN, without fetching", async () => {
     global.fetch = vi.fn();
 

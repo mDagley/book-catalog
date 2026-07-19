@@ -435,15 +435,22 @@ async function fetchMissingTbrCovers(): Promise<void> {
   for (const item of pending) {
     const lookup = await lookupIsbn(item.isbn!);
     let coverImagePath: string | undefined;
+    let failureReason: "unsupported_format" | null = null;
     if (lookup.coverUrl) {
       const result = await saveCoverFromUrl(lookup.coverUrl);
-      if (!("error" in result)) {
+      if ("error" in result) {
+        failureReason = result.reason ?? null;
+      } else {
         coverImagePath = result.coverImagePath;
       }
     }
     await prisma.goodreadsTbrItem.update({
       where: { id: item.id },
-      data: { coverCheckedAt: new Date(), ...(coverImagePath ? { coverImagePath } : {}) },
+      data: {
+        coverCheckedAt: new Date(),
+        coverFetchFailureReason: failureReason,
+        ...(coverImagePath ? { coverImagePath } : {}),
+      },
     });
   }
 }
