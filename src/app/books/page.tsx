@@ -12,6 +12,7 @@ import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
 import { STATUS_FILTER_OPTIONS } from "@/components/ReadingProgressFields";
 import { resolveListingCover } from "@/lib/listingCover";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
+import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 
 export default async function BooksPage({
   searchParams,
@@ -91,12 +92,11 @@ export default async function BooksPage({
       </div>
 
       <form action="/books" method="get" className="mb-4 space-y-2">
-        <input
-          type="text"
+        <SearchAutocomplete
+          scope="books"
           name="q"
           defaultValue={query}
           placeholder="Search by title, author, or ISBN"
-          className="w-full rounded border p-2"
         />
         <div className="flex flex-wrap items-center gap-3 text-sm">
           {STATUS_FILTER_OPTIONS.map((opt) => (
