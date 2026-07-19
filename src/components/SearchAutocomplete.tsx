@@ -45,9 +45,12 @@ export function SearchAutocomplete({
 
   useEffect(() => {
     const trimmed = value.trim();
+    // The sub-threshold reset itself lives in onChange (a direct response to
+    // the user's keystroke, not something needing effect-based
+    // synchronization) -- calling setState synchronously here would trip
+    // react-hooks/set-state-in-effect. This guard just keeps a too-short
+    // query from scheduling a fetch at all.
     if (trimmed.length < MIN_QUERY_LENGTH) {
-      setSuggestions([]);
-      setIsOpen(false);
       return;
     }
 
@@ -132,7 +135,14 @@ export function SearchAutocomplete({
         type="text"
         name={name}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setValue(next);
+          if (next.trim().length < MIN_QUERY_LENGTH) {
+            setSuggestions([]);
+            setIsOpen(false);
+          }
+        }}
         onKeyDown={handleKeyDown}
         onFocus={() => setIsOpen(suggestions.length > 0)}
         placeholder={placeholder}
