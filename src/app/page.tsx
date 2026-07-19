@@ -59,7 +59,7 @@ export default async function HomePage({
 
       <div className="mb-4 flex gap-4 text-sm">
         <Link href="/books" className="underline">
-          Manage physical books
+          Manage all books
         </Link>
         <Link href="/tbr" className="underline">
           TBR gap view
