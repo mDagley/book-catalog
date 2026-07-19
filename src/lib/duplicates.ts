@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { titleMatchScore, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { titleMatchScore, titleForms, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 
 export interface DuplicateCandidate {
   id: string;
@@ -15,6 +15,23 @@ export interface DuplicateGroup {
   books: DuplicateCandidate[];
 }
 
+export interface FindDuplicateGroupsResult {
+  groups: DuplicateGroup[];
+  truncated: boolean;
+}
+
+// Hard cap on total titleMatchScore calls per run -- defense-in-depth
+// against the O(n^2) all-pairs shape below. Measured directly against this
+// function (not assumed from the unrelated 2026-07-18 incident's numbers,
+// which turned out not to transfer): ~2,500 titleMatchScore calls/second on
+// this hardware, so 1500 bounds the fuzzy tier's worst case to roughly
+// 0.6s, leaving headroom under the 1-second target even in the degenerate
+// case where tier 1 resolves nothing (see the performance regression test
+// in duplicates.test.ts). Exposed as an optional param (see
+// findDuplicateBookGroups) purely so tests can exercise the cap without
+// needing thousands of fixture rows.
+const FUZZY_DUPLICATE_CAP = 1500;
+
 // One-time cleanup helper for the duplicate Book rows the ISBN-only-match
 // bug (fixed alongside this file -- see createBookWithCopyData) could have
 // already created in production: any book previously scanned as a physical
@@ -23,7 +40,29 @@ export interface DuplicateGroup {
 // the same fuzzy title match used everywhere else in this codebase, purely
 // for a human to review and confirm before merging -- it never merges
 // anything on its own.
-export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
+//
+// Matching runs in two tiers to stay fast at real catalog scale (a naive
+// all-pairs fuzzy scan over ~700+ books, most digitally owned, measured
+// 111 seconds in production and blocked the server for unrelated
+// navigation -- see docs/superpowers/specs/2026-07-19-duplicates-page-performance-design.md):
+//
+// - Tier 1 (free): this tool exists specifically to catch a physical scan
+//   whose title differs from its ebook/audiobook sibling only in
+//   formatting (series suffix, colon subtitle, "the/a/an") -- exactly what
+//   titleForms() already normalizes into a small set of variant strings.
+//   Two books sharing an exact normalized form are guaranteed to score 100,
+//   so they're unioned directly with zero titleMatchScore calls.
+// - Tier 2 (capped fuzzy fallback): the existing O(n^2) pair iteration
+//   stays (cheap on its own -- plain comparisons over a few hundred rows
+//   are sub-millisecond), but a pair only reaches the expensive
+//   titleMatchScore call if it's digitally-relevant AND not already
+//   unioned by tier 1. This is capped at fuzzyCap total calls; once hit,
+//   remaining pairs are skipped for this run and `truncated: true` is
+//   returned, since this page is human-reviewed and a silently incomplete
+//   result could read as "no more duplicates."
+export async function findDuplicateBookGroups(
+  fuzzyCap: number = FUZZY_DUPLICATE_CAP,
+): Promise<FindDuplicateGroupsResult> {
   const books = await prisma.book.findMany({
     select: {
       id: true,
@@ -47,15 +86,28 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
     hasAudiobook: book.hasAudiobook,
   }));
 
-  // Simple union-find: any two books whose titles fuzzy-match end up in the
-  // same group, transitively (A~B and B~C group A, B, and C together even if
-  // A and C alone wouldn't score above threshold).
+  // Simple union-find: any two books whose titles match (exact-form or
+  // fuzzy) end up in the same group, transitively (A~B and B~C group A, B,
+  // and C together even if A and C alone wouldn't score above threshold).
   const parent = new Map<string, string>();
   for (const c of candidates) parent.set(c.id, c.id);
 
   function find(id: string): string {
     let root = id;
     while (parent.get(root) !== root) root = parent.get(root)!;
+    // Path compression: repoint every visited node directly at the root, so
+    // later find() calls on the same chain are O(1) instead of O(chain
+    // length). Without this, a large group of candidates that all
+    // fuzzy-match each other (e.g. many near-identical titles) can degrade
+    // union() into building an O(n) linked chain, making repeated find()
+    // calls during the same tier-2 pass quadratic overall -- exactly the
+    // shape of blowup this rewrite exists to avoid.
+    let node = id;
+    while (parent.get(node) !== root) {
+      const next = parent.get(node)!;
+      parent.set(node, root);
+      node = next;
+    }
     return root;
   }
   function union(a: string, b: string): void {
@@ -64,7 +116,35 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
     if (rootA !== rootB) parent.set(rootA, rootB);
   }
 
-  for (let i = 0; i < candidates.length; i++) {
+  // Tier 1: bucket every candidate under each of its titleForms() variants.
+  // When a variant already has occupants, union with every one of them
+  // (subject to the same digital-ownership rule tier 2 applies below) --
+  // an exact normalized-form match is guaranteed to score 100, so no
+  // titleMatchScore call is needed. Checking every prior occupant (not
+  // just one representative) keeps this correct when 3+ candidates share
+  // a form with mixed digital ownership: a single "current occupant"
+  // slot would only ever compare a new arrival against the most recent
+  // occupant, missing a required union with an earlier one.
+  const byForm = new Map<string, DuplicateCandidate[]>();
+  for (const c of candidates) {
+    for (const form of titleForms(c.title)) {
+      const bucket = byForm.get(form);
+      if (bucket) {
+        for (const occupant of bucket) {
+          if (!c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook) continue;
+          union(c.id, occupant.id);
+        }
+        bucket.push(c);
+      } else {
+        byForm.set(form, [c]);
+      }
+    }
+  }
+
+  // Tier 2: capped fuzzy fallback for pairs tier 1 didn't already group.
+  let fuzzyCalls = 0;
+  let truncated = false;
+  outer: for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
       const a = candidates[i];
       const b = candidates[j];
@@ -77,10 +157,24 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
       // createBookWithCopyData's fuzzy-match fallback applies to its own
       // candidate pool, for the same false-positive-risk reason.
       if (!a.hasEbook && !a.hasAudiobook && !b.hasEbook && !b.hasAudiobook) continue;
+      // Already grouped by tier 1 (or a prior tier-2 match) -- no need to
+      // spend a fuzzy comparison confirming what's already known.
+      if (find(a.id) === find(b.id)) continue;
+      if (fuzzyCalls >= fuzzyCap) {
+        truncated = true;
+        break outer;
+      }
+      fuzzyCalls++;
       if (titleMatchScore(a.title, b.title) >= DEFAULT_MATCH_THRESHOLD) {
         union(a.id, b.id);
       }
     }
+  }
+
+  if (truncated) {
+    console.warn(
+      `findDuplicateBookGroups hit the fuzzy-comparison cap (${fuzzyCap}) -- some duplicates may not have been detected this run.`,
+    );
   }
 
   const groups = new Map<string, DuplicateCandidate[]>();
@@ -91,9 +185,12 @@ export async function findDuplicateBookGroups(): Promise<DuplicateGroup[]> {
     else groups.set(root, [c]);
   }
 
-  return Array.from(groups.values())
-    .filter((group) => group.length > 1)
-    .map((books) => ({ books }));
+  return {
+    groups: Array.from(groups.values())
+      .filter((group) => group.length > 1)
+      .map((books) => ({ books })),
+    truncated,
+  };
 }
 
 // Moves every PhysicalCopy/EbookCopy/AudiobookCopy from `mergeIds` onto

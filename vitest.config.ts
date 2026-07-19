@@ -48,13 +48,17 @@ if (fs.existsSync(devEnvPath)) {
 export default defineConfig({
   test: {
     environment: "node",
-    // Extend (not replace) Vitest's own defaults — .next/ isn't covered by
-    // them, and next build's standalone output copies the whole traced
-    // source tree (including *.test.ts files) under .next/standalone.
-    // Without this, running tests after a build picks up those stray
-    // copies too, racing duplicate test runs against the same isolated
-    // test database.
-    exclude: [...defaultExclude, "**/.next/**"],
+    // Extend (not replace) Vitest's own defaults — neither .next/ nor
+    // .worktrees/ is covered by them. .next/ needs it because next build's
+    // standalone output copies the whole traced source tree (including
+    // *.test.ts files) under .next/standalone. .worktrees/ needs it because
+    // each linked worktree (superpowers:using-git-worktrees) is a full,
+    // separate checkout of this repo on its own branch, so its own
+    // *.test.ts files (potentially stale relative to whatever branch is
+    // checked out here) get matched too. Either way, without this, running
+    // tests from the main checkout picks up those stray copies and races
+    // duplicate test runs against the same isolated test database.
+    exclude: [...defaultExclude, "**/.next/**", "**/.worktrees/**"],
     // Several tests across different files use overlapping fixture
     // titles/tables (e.g. full-table deleteMany() setup calls), so running
     // test files in parallel causes real, reproducible cross-file races

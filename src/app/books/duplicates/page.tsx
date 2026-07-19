@@ -6,7 +6,7 @@ import { MergeButton } from "@/app/books/duplicates/MergeButton";
 export const dynamic = "force-dynamic";
 
 export default async function DuplicateBooksPage() {
-  const groups = await findDuplicateBookGroups();
+  const { groups, truncated } = await findDuplicateBookGroups();
 
   return (
     <main className="mx-auto max-w-2xl p-4">
@@ -23,6 +23,12 @@ export default async function DuplicateBooksPage() {
         — its title, author, and ISBN are kept as-is; the others&apos; physical copies and
         ebook/audiobook ownership move onto it, and the other rows are removed.
       </p>
+      {truncated && (
+        <p className="mb-4 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">
+          Duplicate detection stopped early to stay fast — some duplicates may not be shown below.
+          Try again later, or run this less often if it keeps happening.
+        </p>
+      )}
 
       {groups.length === 0 ? (
         <p className="text-gray-600">No likely duplicates found.</p>
