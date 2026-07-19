@@ -140,4 +140,19 @@ describe("GET /api/autocomplete", () => {
 
     expect(data).toHaveLength(8);
   });
+
+  // The tbr scope caps in route.ts itself (gap.slice(0, SUGGESTION_LIMIT)),
+  // not via a Prisma `take`, since getTbrGap returns the full not-yet-owned
+  // gap with no limit param -- a materially different code path from the
+  // other two scopes' DB-level cap, so it needs its own coverage.
+  it("caps results at 8 entries for the tbr scope", async () => {
+    for (let i = 0; i < 10; i++) {
+      await prisma.goodreadsTbrItem.create({ data: { title: `Test Autocomplete Cap ${i}` } });
+    }
+
+    const response = await GET(makeRequest({ scope: "tbr", q: "Test Autocomplete Cap" }));
+    const data = await response.json();
+
+    expect(data).toHaveLength(8);
+  });
 });
