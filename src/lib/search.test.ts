@@ -116,6 +116,20 @@ describe("searchCatalog", () => {
     ]);
   });
 
+  it("breaks title ties by id ascending, for stable ordering as the catalog grows", async () => {
+    // Copilot review finding on PR #29: sorting by title alone doesn't
+    // guarantee stable order for two books sharing a title -- Postgres
+    // makes no ordering promise among tied rows without a tiebreaker.
+    const first = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+    const second = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+    const third = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title" });
+
+    const ourResults = results.filter((r) => r.title === "Test Search Sort Tie");
+    expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id, third.id]);
+  });
+
   it("defaults to id-ascending order when sortBy is omitted (preserves existing behavior)", async () => {
     const first = await prisma.book.create({ data: { title: "Test Search Sort Order Beta" } });
     const second = await prisma.book.create({ data: { title: "Test Search Sort Order Alpha" } });

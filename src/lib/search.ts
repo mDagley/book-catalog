@@ -174,7 +174,11 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
       ebookCopies: { select: { coverImagePath: true } },
       audiobookCopies: { select: { coverImagePath: true } },
     },
-    orderBy: sortBy === "title" ? { title: "asc" } : { id: "asc" },
+    // Secondary `id` sort breaks ties for books sharing a title -- without
+    // it, Postgres doesn't guarantee stable ordering among tied rows, so
+    // the same query could return a different order across runs as the
+    // catalog grows.
+    orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
   });
 
   return books.map((book) => ({
