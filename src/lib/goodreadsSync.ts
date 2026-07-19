@@ -243,15 +243,20 @@ interface ExistingTbrItem {
 // WHICH KIND of comparison runs against the full pool:
 //
 // - Cheap pass (tried first): a literal `normalizeTitle` string-equality
-//   scan across the ENTIRE remaining pool -- ordinary string comparison,
-//   not titleForms()'s multi-variant fuzzy scoring, so it can't produce the
-//   colon-prefix false positive above (two different titles are never
-//   string-equal after normalization just because they share a substring).
-//   Measured at ~2ms for 80 lookups against an 800-row pool -- multiple
-//   orders of magnitude cheaper than fuzzy scoring at the same scale,
-//   because string equality skips the expensive Ratcliff/Obershelp
-//   matching-blocks algorithm entirely. Scanning the FULL pool here (not
-//   an isbn-less-only subset) matters too: restricting it could miss a
+//   lookup against the ENTIRE remaining pool, via a Map keyed by normalized
+//   title (existingByNormalizedTitle, built once up front, alongside
+//   existingByIsbn) -- ordinary string comparison, not titleForms()'s
+//   multi-variant fuzzy scoring, so it can't produce the colon-prefix false
+//   positive above (two different titles are never string-equal after
+//   normalization just because they share a substring). Precomputing the
+//   map (rather than calling normalizeTitle() fresh inside a linear scan
+//   for every shelf item) turns this into an O(1) lookup per shelf item
+//   after one O(existing.length) setup pass, instead of O(pool) per shelf
+//   item -- both are far cheaper than fuzzy scoring at any scale, since
+//   string equality skips the expensive Ratcliff/Obershelp matching-blocks
+//   algorithm entirely, but the map avoids even the cheap version's
+//   redundant re-normalization. Considering the FULL pool here (not an
+//   isbn-less-only subset) matters too: restricting it could miss a
 //   literal title match sitting on the isbn-bearing side.
 // - Fuzzy pass (only reached when the cheap pass finds nothing): identical
 //   to the original single-pool implementation -- scans the same full
@@ -289,9 +294,22 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   });
 
   const existingByIsbn = new Map<string, ExistingTbrItem>();
+  // Precomputed once, not recomputed by normalizeTitle() inside the match
+  // loop below for every (shelf item x candidate) pair -- normalizeTitle
+  // does NFKD normalization plus several regex passes, so redoing it per
+  // comparison adds real, avoidable CPU work at the scale this function
+  // already had one production incident over.
+  const existingByNormalizedTitle = new Map<string, ExistingTbrItem[]>();
   for (const item of existing) {
     if (item.isbn) {
       existingByIsbn.set(item.isbn, item);
+    }
+    const normalized = normalizeTitle(item.title);
+    const bucket = existingByNormalizedTitle.get(normalized);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      existingByNormalizedTitle.set(normalized, [item]);
     }
   }
 
@@ -304,13 +322,12 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
     if (isbnCandidate && !matchedIds.has(isbnCandidate.id)) {
       matched = isbnCandidate;
     } else {
-      const available = existing.filter((item) => !matchedIds.has(item.id));
       const normalizedShelfTitle = normalizeTitle(shelfItem.title);
-
-      matched =
-        available.find((item) => normalizeTitle(item.title) === normalizedShelfTitle) ?? null;
+      const exactCandidates = existingByNormalizedTitle.get(normalizedShelfTitle);
+      matched = exactCandidates?.find((item) => !matchedIds.has(item.id)) ?? null;
 
       if (!matched) {
+        const available = existing.filter((item) => !matchedIds.has(item.id));
         matched = findBestTitleMatch(available, shelfItem.title);
       }
     }

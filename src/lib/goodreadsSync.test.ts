@@ -843,7 +843,7 @@ describe("syncGoodreadsTbr", () => {
     expect(wellOfAscensionRow?.coverImagePath).toBe("well-of-ascension-cover.jpg");
   });
 
-  it("stays fast when many isbn-less shelf items need fuzzy matching against a large existing table (regression: production CPU incident)", async () => {
+  it("stays fast when many isbn-less shelf items each need a fallback title match against a large existing table (regression: production CPU incident)", async () => {
     // Real book titles commonly have colons/subtitles/series suffixes,
     // which titleForms() expands into multiple normalized variants each --
     // that multiplier is what made the original incident's cost so much
