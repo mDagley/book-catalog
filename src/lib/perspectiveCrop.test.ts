@@ -55,6 +55,13 @@ describe("warpQuadrilateral", () => {
     return [buffer.data[i], buffer.data[i + 1], buffer.data[i + 2], buffer.data[i + 3]];
   }
 
+  // This test and the sub-rectangle-crop test below only exercise affine
+  // cases (identity, and axis-aligned scale/crop) -- both are degenerate
+  // homographies with zero perspective skew, so neither one actually
+  // proves the perspective-divide term (the thing that makes
+  // `warpQuadrilateral` a true 4-degree-of-freedom projective transform
+  // rather than a plain affine remap) is wired correctly. See the
+  // "genuinely skewed" test further below for that.
   it("reproduces the source image when the traced quadrilateral is the whole image (identity transform)", () => {
     const width = 8;
     const height = 8;
@@ -125,5 +132,65 @@ describe("warpQuadrilateral", () => {
         expect(g).toBeLessThan(30);
       }
     }
+  });
+
+  it("un-skews a genuinely trapezoidal quadrilateral (non-affine perspective case)", () => {
+    // Unlike the identity and axis-aligned-crop tests above, this traced
+    // quadrilateral is a real trapezoid: the top edge (width 6) and bottom
+    // edge (width 15) are parallel to each other, but the left edge
+    // (dx/dy ~ -0.385) and right edge (dx/dy ~ +0.308) are slanted with
+    // different, non-matching slopes -- neither vertical nor parallel to
+    // one another. An affine transform always maps parallelograms to
+    // parallelograms (it preserves parallelism of *both* opposite-side
+    // pairs), so it cannot map a shape with only one parallel pair onto a
+    // rectangle (which has both pairs parallel). Only a true projective
+    // homography -- exercising the perspective-divide (`coeffs[6]`,
+    // `coeffs[7]`) terms -- can pull this into a rectangle, which is
+    // exactly what's needed to un-skew a book cover photographed at an
+    // angle.
+    const width = 16;
+    const height = 16;
+    const source = makePixelBuffer(width, height, (x, y) => {
+      const isRight = x >= width / 2;
+      const isBottom = y >= height / 2;
+      if (!isRight && !isBottom) return [255, 0, 0, 255];
+      if (isRight && !isBottom) return [0, 255, 0, 255];
+      if (!isRight && isBottom) return [0, 0, 255, 255];
+      return [255, 255, 0, 255];
+    });
+    const corners: [Point, Point, Point, Point] = [
+      { x: 5, y: 1 }, // topLeft, inside the red quadrant
+      { x: 11, y: 1 }, // topRight, inside the green quadrant
+      { x: 15, y: 14 }, // bottomRight, inside the yellow quadrant
+      { x: 0, y: 14 }, // bottomLeft, inside the blue quadrant
+    ];
+
+    const result = warpQuadrilateral(source, corners, 10, 14);
+
+    // Sample well inside each corner region (verified empirically against
+    // this implementation to have several pixels' margin from any color
+    // boundary in both directions) so the assertions prove the correct
+    // source REGION follows the traced (skewed) shape into the correct
+    // output region, without depending on hand-derived homography
+    // coefficients.
+    const [r1, g1, b1] = readPixel(result, 1, 1);
+    expect(r1).toBeGreaterThan(200);
+    expect(g1).toBeLessThan(30);
+    expect(b1).toBeLessThan(30);
+
+    const [r2, g2, b2] = readPixel(result, 8, 1);
+    expect(g2).toBeGreaterThan(200);
+    expect(r2).toBeLessThan(30);
+    expect(b2).toBeLessThan(30);
+
+    const [r3, g3, b3] = readPixel(result, 1, 12);
+    expect(b3).toBeGreaterThan(200);
+    expect(r3).toBeLessThan(30);
+    expect(g3).toBeLessThan(30);
+
+    const [r4, g4, b4] = readPixel(result, 8, 12);
+    expect(r4).toBeGreaterThan(200);
+    expect(g4).toBeGreaterThan(200);
+    expect(b4).toBeLessThan(30);
   });
 });
