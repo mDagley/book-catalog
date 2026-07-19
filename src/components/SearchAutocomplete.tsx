@@ -28,15 +28,16 @@ export function SearchAutocomplete({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  // Bumped (never reset) on every suggestion selection, unconditionally --
+  // unlike gating a submit-effect on `value` itself, this fires even when
+  // the selected suggestion's title is character-for-character identical to
+  // what's already typed (a common case: user typed the full title before
+  // the dropdown could offer anything else), where setValue would otherwise
+  // be a no-op React bails out of and the effect below would never re-run.
+  const [submitTrigger, setSubmitTrigger] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Set true right before setValue() in selectSuggestion, so the effect
-  // below (which runs after React commits the new value to the DOM) submits
-  // the form once the input's real DOM value actually matches the selection
-  // -- calling requestSubmit() synchronously in the same handler as setValue
-  // would race React's batched state update and could submit the OLD value.
-  const submitPendingRef = useRef(false);
   // Bumped on every keystroke; a debounced fetch response only applies if
   // its id still matches the latest one when it resolves, so a slow response
   // to an earlier keystroke can never clobber a newer one that resolved first.
@@ -71,11 +72,14 @@ export function SearchAutocomplete({
   }, [value, scope]);
 
   useEffect(() => {
-    if (submitPendingRef.current) {
-      submitPendingRef.current = false;
-      inputRef.current?.form?.requestSubmit();
-    }
-  }, [value]);
+    // Skip the initial mount (submitTrigger starts at 0) -- only fire on an
+    // actual selection. setValue/setSubmitTrigger are called together in
+    // selectSuggestion, so React batches them into the same commit; by the
+    // time this effect runs, the input's real DOM value already reflects
+    // the selection, so requestSubmit() can't race an unflushed update.
+    if (submitTrigger === 0) return;
+    inputRef.current?.form?.requestSubmit();
+  }, [submitTrigger]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -88,8 +92,8 @@ export function SearchAutocomplete({
   }, []);
 
   function selectSuggestion(suggestion: Suggestion) {
-    submitPendingRef.current = true;
     setValue(suggestion.title);
+    setSubmitTrigger((n) => n + 1);
     setIsOpen(false);
     setHighlightedIndex(-1);
   }
