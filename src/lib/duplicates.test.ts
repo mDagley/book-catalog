@@ -104,6 +104,42 @@ describe("findDuplicateBookGroups", () => {
     expect(relevantGroups).toEqual([]);
   });
 
+  it("does not group two DIFFERENT physical books in the same series/author sharing only a stripped titleForms() variant", async () => {
+    // Copilot review finding on PR #27 (verified directly against
+    // titleForms()/normalizeTitle before accepting): "Mistborn: The Final
+    // Empire, Book 1" and "Mistborn: The Well of Ascension, Book 2" are
+    // genuinely different books, but titleForms()'s series-suffix-strip
+    // and colon-split both reduce them to a shared "mistborn" variant
+    // (their FULL normalized titles differ). Sharing a form is not the
+    // same as an exact-title match -- this is exactly the cross-
+    // contamination class already documented and fixed once in
+    // goodreadsSync.ts's own comments (colon-split prefix causing two
+    // different books in a series to score a perfect match). The
+    // physical-only exception must require full normalized-title
+    // equality, not merely a shared form, or it reintroduces this.
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Mistborn: The Final Empire, Book 1",
+        author: "Brandon Sanderson",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Mistborn: The Well of Ascension, Book 2",
+        author: "Brandon Sanderson",
+        copies: { create: { format: "OTHER" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const relevantGroups = groups.filter((g) =>
+      g.books.some((book) => book.title.startsWith("Test Duplicates Mistborn:")),
+    );
+    expect(relevantGroups).toEqual([]);
+  });
+
   it("groups two purely physical books that are the owned-physical sync's exact-duplicate signature", async () => {
     // The real production bug this was built for: syncOwnedPhysicalBooks's
     // create-race (see docs/superpowers/specs/2026-07-19-owned-physical-sync-duplicate-race-design.md)

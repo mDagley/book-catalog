@@ -157,12 +157,25 @@ export async function findDuplicateBookGroups(
           const neitherDigital = !c.hasEbook && !c.hasAudiobook && !occupant.hasEbook && !occupant.hasAudiobook;
           if (neitherDigital) {
             // Physical-only pair: only union if it matches the narrow
-            // owned-physical-sync create-race signature (exact title,
-            // already established by sharing this form -- plus matching
-            // non-null author and no ISBN conflict). Otherwise this is the
-            // general "two different physical books share a title" case,
-            // which stays excluded.
-            if (!authorsMatchNonNull(c.author, occupant.author) || !isbnCompatible(c.isbn, occupant.isbn)) {
+            // owned-physical-sync create-race signature -- an exact FULL
+            // title match (not merely sharing this form), plus matching
+            // non-null author and no ISBN conflict. Sharing a form is not
+            // enough on its own: titleForms()'s series-suffix-strip and
+            // colon-split can make two DIFFERENT volumes in the same
+            // series by the same author (e.g. "Mistborn: The Final
+            // Empire, Book 1" vs "Mistborn: The Well of Ascension, Book
+            // 2") share a stripped-down variant like "mistborn" despite
+            // having different full titles -- this is the exact
+            // cross-contamination class already documented and fixed once
+            // in goodreadsSync.ts (a colon-split prefix causing a false
+            // 100 score between different books). Requiring full-title
+            // equality closes it; every other case (general physical-only
+            // pairs) stays excluded exactly as before.
+            if (
+              normalizeTitle(c.title) !== normalizeTitle(occupant.title) ||
+              !authorsMatchNonNull(c.author, occupant.author) ||
+              !isbnCompatible(c.isbn, occupant.isbn)
+            ) {
               continue;
             }
           }

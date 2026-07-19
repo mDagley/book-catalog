@@ -86,10 +86,28 @@ async function applyShelfItem(
   // their own stale snapshot and both create a separate Book for the same
   // title -- confirmed in production (three duplicate rows for the same
   // book, from a race between a cron tick and a manual refresh).
-  const freshCandidates = (
-    await prisma.book.findMany({ select: CANDIDATE_SELECT, orderBy: { createdAt: "asc" } })
-  ).map(toCandidate);
-  const freshMatch = matchAgainstPool(item, freshCandidates);
+  //
+  // ISBN is checked first via a narrow, targeted query -- cheap regardless
+  // of catalog size, and covers the common case (Goodreads usually
+  // provides isbn13 for well-known books). Only falls through to a full
+  // fresh candidate fetch (for the fuzzy-title path) when ISBN alone
+  // doesn't resolve it, so a large initial sync (many genuinely new items)
+  // doesn't pay an O(total_books) query for every single one of them.
+  let freshMatch: OwnedPhysicalCandidate | null = null;
+  if (item.isbn) {
+    const isbnMatch = await prisma.book.findFirst({
+      where: { isbn: item.isbn },
+      orderBy: { createdAt: "asc" },
+      select: CANDIDATE_SELECT,
+    });
+    if (isbnMatch) freshMatch = toCandidate(isbnMatch);
+  }
+  if (!freshMatch) {
+    const freshCandidates = (
+      await prisma.book.findMany({ select: CANDIDATE_SELECT, orderBy: { createdAt: "asc" } })
+    ).map(toCandidate);
+    freshMatch = findBestTitleMatch(freshCandidates, item.title);
+  }
   if (freshMatch) {
     candidates.push(freshMatch);
     await attachPlaceholderCopy(freshMatch);
