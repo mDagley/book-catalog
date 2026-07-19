@@ -13,7 +13,7 @@ export default async function DuplicateBooksPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Possible Duplicate Books</h1>
         <Link href="/books" className="text-sm underline">
-          Back to Physical Books
+          Back to All Books
         </Link>
       </div>
       <p className="mb-4 text-sm text-gray-600">
