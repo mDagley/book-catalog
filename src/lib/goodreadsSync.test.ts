@@ -798,6 +798,71 @@ describe("syncGoodreadsTbr", () => {
     expect(updated.coverFetchFailureReason).toBe("unsupported_format");
   });
 
+  it("clears a stale coverFetchFailureReason when a retry succeeds", async () => {
+    // Simulates what Task 5's ISBN-drift reset will later produce: a row
+    // that already recorded an unsupported-format failure from a prior
+    // attempt, but has since had coverCheckedAt cleared back to null so
+    // it's eligible to be retried by fetchMissingTbrCovers's query.
+    // Seeded directly (not via the shelf feed) since it must exist BEFORE
+    // reconcileTbrItems runs; its title/isbn match what the shelf below
+    // reports so reconcile matches (by ISBN) rather than deletes it, and
+    // reconcile itself never touches coverCheckedAt/coverFetchFailureReason
+    // either way.
+    await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Retry Clears Reason",
+        isbn: "9780000000098",
+        coverImagePath: null,
+        coverCheckedAt: null,
+        coverFetchFailureReason: "unsupported_format",
+      },
+    });
+
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000098-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Retry Clears Reason", isbn13: "9780000000098" },
+        ]),
+      ],
+    });
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Retry Clears Reason" },
+    });
+    expect(updated.coverImagePath).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBeNull();
+    if (updated.coverImagePath) {
+      await deleteCoverImage(updated.coverImagePath);
+    }
+  });
+
   it("stops attempting further fuzzy fallback once the cap is hit, defers the rest, and skips deletion for the run", async () => {
     // A pre-existing row that is NOT on the incoming shelf below -- if
     // deletion runs normally, this gets removed. If the cap correctly

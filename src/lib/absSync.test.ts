@@ -809,6 +809,57 @@ describe("syncAbsCache", () => {
     expect(updated.coverFetchFailureReason).toBe("unsupported_format");
   });
 
+  it("clears a stale coverFetchFailureReason when a retry succeeds", async () => {
+    // Simulates what Task 5's ISBN-drift reset will later produce: a row
+    // that already recorded an unsupported-format failure from a prior
+    // attempt, but has since had coverCheckedAt cleared back to null so
+    // it's eligible to be retried by this same backfill query.
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Retry Clears Reason",
+        hasEbook: true,
+        ebookCopies: {
+          create: {
+            absItemId: "backfill-retry-clears-reason",
+            coverImagePath: null,
+            coverCheckedAt: null,
+            coverFetchFailureReason: "unsupported_format",
+          },
+        },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-retry-clears-reason/cover")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-retry-clears-reason" },
+    });
+    expect(updated.coverImagePath).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBeNull();
+    if (updated.coverImagePath) {
+      savedCoverPaths.push(updated.coverImagePath);
+    }
+  });
+
   it("never re-attempts a cover fetch once coverCheckedAt is set", async () => {
     await prisma.book.create({
       data: {
