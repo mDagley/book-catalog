@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { findDuplicateBookGroups, mergeBooksData } from "@/lib/duplicates";
+import { titleForms } from "@/lib/matching";
 
 afterEach(async () => {
   await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test Duplicates" } } } });
@@ -123,6 +124,40 @@ describe("findDuplicateBookGroups", () => {
     expect(ebook?.copiesCount).toBe(0);
   });
 
+  it("groups two books via genuine tier-2 fuzzy matching when they share no exact titleForms() variant", async () => {
+    // "The Way of Kings" vs "The Way of King" -- a one-character typo, not
+    // a formatting difference titleForms() normalizes away. Only real
+    // fuzzy scoring (98.4, well above the 85 threshold) finds this. Without
+    // this test, tier 2's actual match-and-union path (the titleMatchScore
+    // call, the cap increment, its interaction with the already-grouped
+    // skip) had no positive-case coverage at all -- every other passing
+    // case was already resolved by tier 1.
+    const titleA = "Test Duplicates The Way of Kings";
+    const titleB = "Test Duplicates The Way of King";
+    // Asserted, not just claimed in a comment (Copilot review finding on
+    // PR #26): if a future titleForms() change ever made these share a
+    // form, this test would silently stop proving what its name says --
+    // it'd pass via tier 1 instead, with zero tier-2 coverage.
+    const sharedForms = titleForms(titleA).filter((form) => titleForms(titleB).includes(form));
+    expect(sharedForms).toEqual([]);
+
+    const a = await prisma.book.create({
+      data: { title: titleA, copies: { create: { format: "HARDCOVER" } } },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: titleB,
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-tier2-fuzzy-ebook" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+
+    const group = groups.find((g) => g.books.some((book) => book.id === a.id));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
   it("stops attempting further fuzzy comparisons once the cap is hit, and reports truncated", async () => {
     // Four digitally-owned books with genuinely dissimilar titles (no
     // shared titleForms() variant, AND all pairwise titleMatchScore well
@@ -159,8 +194,27 @@ describe("findDuplicateBookGroups", () => {
   });
 
   it("completes quickly at a realistic catalog size (performance regression guard)", async () => {
+    // An earlier version of this fixture generated titles as
+    // `...Unique Title Number ${i}` -- identical ~48-char strings
+    // differing only in a trailing number. That's NOT a realistic-scale
+    // stress case: all 700 titles fuzzy-matched each other (a long shared
+    // prefix plus a short numeric suffix scores well above threshold) and
+    // collapsed into a single union-find group after only ~699
+    // comparisons, nowhere near exercising the fuzzy cap. perfTitle()
+    // below was verified (exhaustively, all 244,650 pairs, see
+    // duplicates-page-performance-design.md's follow-up) to keep every
+    // pairwise titleMatchScore comfortably under DEFAULT_MATCH_THRESHOLD
+    // (max observed: ~70 vs. the 85 threshold), so this fixture actually
+    // stresses the "many genuinely distinct books" path the two-tier
+    // rewrite is meant to handle fast.
+    function perfTitle(i: number): string {
+      const tokens = [2654435761, 2246822519, 3266489917, 668265263].map((mult) =>
+        (((i + 1) * mult) >>> 0).toString(36),
+      );
+      return `Test Duplicates ${tokens.join(" ")}`;
+    }
     const data = Array.from({ length: 700 }, (_, i) => ({
-      title: `Test Duplicates Perf Scale Unique Title Number ${i}`,
+      title: perfTitle(i),
       hasEbook: i % 2 === 0,
       hasAudiobook: i % 3 === 0,
     }));
