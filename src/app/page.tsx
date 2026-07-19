@@ -5,25 +5,13 @@ import {
   parseTypesParam,
   parseStatusParam,
   parseStatusModeParam,
-  type OwnershipType,
 } from "@/lib/search";
-import { FORMAT_OPTIONS, FORMAT_LABELS } from "@/components/CopyFormFields";
-import {
-  READ_STATUS_LABELS,
-  STATUS_FILTER_OPTIONS,
-  ratingStars,
-} from "@/components/ReadingProgressFields";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
-import { CoverThumbnail } from "@/components/CoverThumbnail";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
+import { CatalogResultCard } from "@/components/CatalogResultCard";
+import { CatalogFilters } from "@/components/CatalogFilters";
 
 export const dynamic = "force-dynamic";
-
-const OWNERSHIP_TYPE_OPTIONS: { value: OwnershipType; label: string }[] = [
-  { value: "physical", label: "Physical" },
-  { value: "ebook", label: "Ebook" },
-  { value: "audiobook", label: "Audiobook" },
-];
 
 export default async function HomePage({
   searchParams,
@@ -66,67 +54,7 @@ export default async function HomePage({
           defaultValue={query}
           placeholder="Do I already own this?"
         />
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          {OWNERSHIP_TYPE_OPTIONS.map((opt) => (
-            <label key={opt.value} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                name="types"
-                value={opt.value}
-                defaultChecked={types?.includes(opt.value) ?? false}
-              />
-              {opt.label}
-            </label>
-          ))}
-          {STATUS_FILTER_OPTIONS.map((opt) => (
-            <label key={opt.value} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                name="status"
-                value={opt.value}
-                defaultChecked={status?.includes(opt.value) ?? false}
-              />
-              {opt.label}
-            </label>
-          ))}
-          <span className="flex items-center gap-1 text-gray-500">
-            Match:
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                name="statusMode"
-                value="or"
-                defaultChecked={statusMode === "or"}
-              />
-              Any
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                name="statusMode"
-                value="and"
-                defaultChecked={statusMode === "and"}
-              />
-              All
-            </label>
-          </span>
-          <select
-            name="format"
-            defaultValue={format ?? ""}
-            className="rounded border p-1"
-            aria-label="Filter by physical format"
-          >
-            <option value="">Any format</option>
-            {FORMAT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className="rounded bg-black px-3 py-1 text-white">
-            Search
-          </button>
-        </div>
+        <CatalogFilters types={types} status={status} statusMode={statusMode} format={format} />
       </form>
 
       <div className="mb-4 flex gap-4 text-sm">
@@ -145,47 +73,7 @@ export default async function HomePage({
       {results.length > 0 && (
         <ul className="space-y-3">
           {results.map((result) => (
-            <li key={result.bookId ?? result.title} className="rounded border p-3">
-              <CoverThumbnail coverImagePath={result.coverImagePath} />
-              <p className="font-medium">{result.title}</p>
-              {result.author && <p className="text-sm text-gray-600">{result.author}</p>}
-              <div className="mt-1 flex flex-wrap gap-2 text-sm">
-                {result.physicalCopies.map((copy) => (
-                  <span key={copy.id} className="rounded bg-gray-100 px-2 py-0.5">
-                    Physical ({FORMAT_LABELS[copy.format]}
-                    {copy.publisher ? `, ${copy.publisher}` : ""}
-                    {copy.publishYear ? ` ${copy.publishYear}` : ""})
-                  </span>
-                ))}
-                {result.hasEbook && (
-                  <span className="rounded bg-gray-100 px-2 py-0.5">Ebook ✓</span>
-                )}
-                {result.hasAudiobook && (
-                  <span className="rounded bg-gray-100 px-2 py-0.5">Audiobook ✓</span>
-                )}
-                {result.readStatus && (
-                  <span className="rounded bg-gray-100 px-2 py-0.5">
-                    {READ_STATUS_LABELS[result.readStatus]}
-                  </span>
-                )}
-                {result.rating !== null && (
-                  <span
-                    className="rounded bg-gray-100 px-2 py-0.5"
-                    aria-label={`Rated ${result.rating} out of 5`}
-                  >
-                    {ratingStars(result.rating)}
-                  </span>
-                )}
-              </div>
-              {result.bookId && (
-                <Link
-                  href={`/books/${result.bookId}`}
-                  className="mt-1 inline-block text-sm underline"
-                >
-                  View details
-                </Link>
-              )}
-            </li>
+            <CatalogResultCard key={result.bookId ?? result.title} result={result} />
           ))}
         </ul>
       )}
