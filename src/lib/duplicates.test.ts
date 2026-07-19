@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { findDuplicateBookGroups, mergeBooksData } from "@/lib/duplicates";
+import { titleForms } from "@/lib/matching";
 
 afterEach(async () => {
   await prisma.ebookCopy.deleteMany({ where: { book: { title: { startsWith: "Test Duplicates" } } } });
@@ -125,19 +126,27 @@ describe("findDuplicateBookGroups", () => {
 
   it("groups two books via genuine tier-2 fuzzy matching when they share no exact titleForms() variant", async () => {
     // "The Way of Kings" vs "The Way of King" -- a one-character typo, not
-    // a formatting difference titleForms() normalizes away, so tier 1
-    // can't resolve this (verified directly: zero shared forms). Only
-    // real fuzzy scoring (98.4, well above the 85 threshold) finds it.
-    // Without this test, tier 2's actual match-and-union path (the
-    // titleMatchScore call, the cap increment, its interaction with the
-    // already-grouped skip) had no positive-case coverage at all -- every
-    // other passing case was already resolved by tier 1.
+    // a formatting difference titleForms() normalizes away. Only real
+    // fuzzy scoring (98.4, well above the 85 threshold) finds this. Without
+    // this test, tier 2's actual match-and-union path (the titleMatchScore
+    // call, the cap increment, its interaction with the already-grouped
+    // skip) had no positive-case coverage at all -- every other passing
+    // case was already resolved by tier 1.
+    const titleA = "Test Duplicates The Way of Kings";
+    const titleB = "Test Duplicates The Way of King";
+    // Asserted, not just claimed in a comment (Copilot review finding on
+    // PR #26): if a future titleForms() change ever made these share a
+    // form, this test would silently stop proving what its name says --
+    // it'd pass via tier 1 instead, with zero tier-2 coverage.
+    const sharedForms = titleForms(titleA).filter((form) => titleForms(titleB).includes(form));
+    expect(sharedForms).toEqual([]);
+
     const a = await prisma.book.create({
-      data: { title: "Test Duplicates The Way of Kings", copies: { create: { format: "HARDCOVER" } } },
+      data: { title: titleA, copies: { create: { format: "HARDCOVER" } } },
     });
     const b = await prisma.book.create({
       data: {
-        title: "Test Duplicates The Way of King",
+        title: titleB,
         hasEbook: true,
         ebookCopies: { create: { absItemId: "dup-test-tier2-fuzzy-ebook" } },
       },
