@@ -49,8 +49,15 @@ export function SearchAutocomplete({
     // the user's keystroke, not something needing effect-based
     // synchronization) -- calling setState synchronously here would trip
     // react-hooks/set-state-in-effect. This guard just keeps a too-short
-    // query from scheduling a fetch at all.
+    // query from scheduling a fetch at all. Bumping requestIdRef here too
+    // (even though no new fetch is scheduled) is required: without it, a
+    // fetch already in flight from a prior valid-length keystroke keeps its
+    // captured requestId equal to requestIdRef.current, so the staleness
+    // check in that fetch's .then() below wouldn't catch it -- it would
+    // resolve later and silently repopulate/reopen the dropdown for text
+    // that's no longer even in the input.
     if (trimmed.length < MIN_QUERY_LENGTH) {
+      requestIdRef.current++;
       return;
     }
 
