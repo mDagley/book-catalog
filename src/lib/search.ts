@@ -30,6 +30,8 @@ export interface SearchOptions {
   format?: Format;
   status?: ReadStatusFilterValue[];
   statusMode?: StatusFilterMode;
+  browseAll?: boolean;
+  sortBy?: "id" | "title";
 }
 
 export type ReadStatusFilterValue = "to_read" | "reading" | "read" | "unrated";
@@ -111,8 +113,10 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const types = options.types && options.types.length > 0 ? options.types : undefined;
   const format = options.format;
   const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
+  const browseAll = options.browseAll ?? false;
+  const sortBy = options.sortBy ?? "id";
 
-  if (!trimmed && !types && !format && !statusValues) return [];
+  if (!browseAll && !trimmed && !types && !format && !statusValues) return [];
 
   const includePhysical = !types || types.includes("physical");
   const includeEbook = !types || types.includes("ebook");
@@ -170,7 +174,11 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
       ebookCopies: { select: { coverImagePath: true } },
       audiobookCopies: { select: { coverImagePath: true } },
     },
-    orderBy: { id: "asc" },
+    // Secondary `id` sort breaks ties for books sharing a title -- without
+    // it, Postgres doesn't guarantee stable ordering among tied rows, so
+    // the same query could return a different order across runs as the
+    // catalog grows.
+    orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
   });
 
   return books.map((book) => ({

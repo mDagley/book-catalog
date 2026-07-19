@@ -81,6 +81,65 @@ describe("searchCatalog", () => {
     expect(results).toEqual([]);
   });
 
+  it("returns every book when browseAll is true and no other filters are set", async () => {
+    const countBefore = await prisma.book.count();
+    await prisma.book.create({ data: { title: "Test Search Browse All One" } });
+    await prisma.book.create({ data: { title: "Test Search Browse All Two" } });
+
+    const results = await searchCatalog({ browseAll: true });
+
+    expect(results).toHaveLength(countBefore + 2);
+    const titles = results.map((r) => r.title);
+    expect(titles).toContain("Test Search Browse All One");
+    expect(titles).toContain("Test Search Browse All Two");
+  });
+
+  it("still returns an empty array with no filters when browseAll is false or omitted", async () => {
+    await prisma.book.create({ data: { title: "Test Search Browse All Omitted" } });
+
+    expect(await searchCatalog({})).toEqual([]);
+    expect(await searchCatalog({ browseAll: false })).toEqual([]);
+  });
+
+  it("sorts by title ascending when sortBy is 'title'", async () => {
+    await prisma.book.create({ data: { title: "Test Search Sort Zebra" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Apple" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Mango" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title" });
+
+    const ourTitles = results.map((r) => r.title).filter((t) => t.startsWith("Test Search Sort"));
+    expect(ourTitles).toEqual([
+      "Test Search Sort Apple",
+      "Test Search Sort Mango",
+      "Test Search Sort Zebra",
+    ]);
+  });
+
+  it("breaks title ties by id ascending, for stable ordering as the catalog grows", async () => {
+    // Copilot review finding on PR #29: sorting by title alone doesn't
+    // guarantee stable order for two books sharing a title -- Postgres
+    // makes no ordering promise among tied rows without a tiebreaker.
+    const first = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+    const second = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+    const third = await prisma.book.create({ data: { title: "Test Search Sort Tie" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title" });
+
+    const ourResults = results.filter((r) => r.title === "Test Search Sort Tie");
+    expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id, third.id]);
+  });
+
+  it("defaults to id-ascending order when sortBy is omitted (preserves existing behavior)", async () => {
+    const first = await prisma.book.create({ data: { title: "Test Search Sort Order Beta" } });
+    const second = await prisma.book.create({ data: { title: "Test Search Sort Order Alpha" } });
+
+    const results = await searchCatalog({ browseAll: true });
+
+    const ourResults = results.filter((r) => r.title.startsWith("Test Search Sort Order"));
+    expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id]);
+  });
+
   it("supports standalone browse by ownership type with no query text", async () => {
     await prisma.book.create({
       data: {
