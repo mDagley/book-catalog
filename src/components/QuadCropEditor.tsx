@@ -154,19 +154,32 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
               strokeWidth={2}
             />
             {CORNER_ORDER.map((name) => (
-              <circle
-                key={name}
-                cx={corners[name].x}
-                cy={corners[name].y}
-                r={12}
-                fill="white"
-                stroke="black"
-                strokeWidth={2}
-                style={{ pointerEvents: "auto", touchAction: "none", cursor: "move" }}
-                onPointerDown={() => {
-                  draggingCorner.current = name;
-                }}
-              />
+              <g key={name}>
+                {/* Larger invisible hit area -- the visible handle below is small
+                    enough not to clutter the traced outline, but real fingertip
+                    contact is roughly 40-50px, so the actual tappable area needs
+                    to be bigger than what's drawn (r=22 gives a ~44px diameter,
+                    matching Apple HIG / Material Design touch-target guidance). */}
+                <circle
+                  cx={corners[name].x}
+                  cy={corners[name].y}
+                  r={22}
+                  fill="transparent"
+                  style={{ pointerEvents: "auto", touchAction: "none", cursor: "move" }}
+                  onPointerDown={() => {
+                    draggingCorner.current = name;
+                  }}
+                />
+                <circle
+                  cx={corners[name].x}
+                  cy={corners[name].y}
+                  r={12}
+                  fill="white"
+                  stroke="black"
+                  strokeWidth={2}
+                  style={{ pointerEvents: "none" }}
+                />
+              </g>
             ))}
           </svg>
         )}
