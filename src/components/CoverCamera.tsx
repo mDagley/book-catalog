@@ -169,6 +169,8 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
     // values, so no reset is needed there.
     setIsReady(false);
     setError(null);
+    setTorchSupported(false);
+    setTorchOn(false);
     setStep({ kind: "preview" });
   }
 
