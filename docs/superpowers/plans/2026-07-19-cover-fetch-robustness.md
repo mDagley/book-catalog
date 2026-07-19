@@ -630,8 +630,10 @@ when both have a backlog."
 
 In `src/lib/goodreadsSync.test.ts`, inside `describe("syncGoodreadsTbr", ...)`, add this test right after the existing `"recovers an existing ISBN-bearing row by exact title match when its incoming ISBN no longer matches"` test (search for it to find the exact location — around line 613-636; note that existing test already covers the exact-title-match-despite-ISBN-mismatch mechanism and asserts `coverImagePath` is preserved, but it does NOT touch `coverCheckedAt` at all, which is what these two new tests add coverage for). Use fixture titles distinct from that existing test's `"Test Goodreads Sync Isbn Drift Book"` to avoid confusion between tests:
 
+**Correction made during implementation:** the test below originally asserted `coverCheckedAt` stays `null` after a full `syncGoodreadsTbr()` call. That's unreachable through the public API — `syncGoodreadsTbr` runs `fetchMissingTbrCovers` immediately after `reconcileTbrItems` in the same call, so a just-reset row is picked back up and its `coverCheckedAt` re-stamped in the very same sync (which is actually a *better* outcome than originally assumed: same-cycle recovery, not "wait for the next cron run"). The test below asserts the real, stronger, end-to-end behavior instead: the corrected isbn actually gets looked up (proving the block was lifted) and a cover gets saved as a result. The production-code fix itself was correct on the first attempt and required no changes.
+
 ```typescript
-  it("resets coverCheckedAt when a matched row's isbn changes and it has no cover yet", async () => {
+  it("resets coverCheckedAt when a matched row's isbn changes, allowing an immediate retry with the corrected isbn", async () => {
     const existing = await prisma.goodreadsTbrItem.create({
       data: {
         title: "Test Goodreads Sync Isbn Drift Cover Reset Book",
@@ -646,7 +648,7 @@ In `src/lib/goodreadsSync.test.ts`, inside `describe("syncGoodreadsTbr", ...)`, 
       author: null,
       publisher: null,
       publishYear: null,
-      coverUrl: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000002-M.jpg",
     });
     mockShelfFetch({
       "to-read": [
@@ -656,12 +658,42 @@ In `src/lib/goodreadsSync.test.ts`, inside `describe("syncGoodreadsTbr", ...)`, 
         ]),
       ],
     });
+    // mockShelfFetch installs the RSS-serving fetch mock first -- capture
+    // that as the delegate before layering the cover-request interceptor on
+    // top, matching this file's established pattern (see e.g. "fetches and
+    // stores a cover for a new TBR item that has an ISBN").
+    const shelfFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return shelfFetch(input as never);
+    }) as typeof global.fetch;
 
     await syncGoodreadsTbr("1993628");
 
+    // Proves the reset actually lifted the block: lookupIsbn was called with
+    // the CORRECTED isbn (not blocked by the stale coverCheckedAt from the
+    // old isbn's failed attempt), and the retry succeeded in the same sync.
+    expect(lookupIsbn).toHaveBeenCalledWith("9780000000002");
     const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: existing.id } });
     expect(updated.isbn).toBe("9780000000002");
-    expect(updated.coverCheckedAt).toBeNull();
+    expect(updated.coverImagePath).not.toBeNull();
+
+    if (updated.coverImagePath) {
+      await deleteCoverImage(updated.coverImagePath);
+    }
   });
 
   it("does not reset coverCheckedAt when isbn changes on a row that already has a cover", async () => {
@@ -693,9 +725,9 @@ In `src/lib/goodreadsSync.test.ts`, inside `describe("syncGoodreadsTbr", ...)`, 
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run src/lib/goodreadsSync.test.ts -t "isbn drift"`
+Run: `npx vitest run src/lib/goodreadsSync.test.ts -t "isbn changes"`
 
-Expected: the first test FAILs (`updated.coverCheckedAt` is still set, not reset). The second test should already PASS (nothing resets `coverCheckedAt` today, which happens to match "don't touch it" for the has-cover case) — that's fine, it's there as a regression guard for the upcoming change, not meant to fail first.
+Expected: the first test FAILs (`lookupIsbn` is never called with the corrected isbn — the stale `coverCheckedAt` from the old isbn still blocks it). The second test should already PASS (nothing resets `coverCheckedAt` today, which happens to match "don't touch it" for the has-cover case) — that's fine, it's there as a regression guard for the upcoming change, not meant to fail first.
 
 - [ ] **Step 3: Implement the reset**
 
