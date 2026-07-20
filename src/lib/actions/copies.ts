@@ -45,6 +45,7 @@ export async function updateCopy(
   }
 
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}/edit`);
 }
 

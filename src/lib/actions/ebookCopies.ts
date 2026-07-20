@@ -21,5 +21,6 @@ export async function updateEbookCopyCover(
   }
 
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}/edit`);
 }
