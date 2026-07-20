@@ -11,6 +11,8 @@ import {
   clearRatingManual,
 } from "@/lib/actions/readingProgress";
 import { READ_STATUS_OPTIONS, RATING_OPTIONS } from "@/components/ReadingProgressFields";
+import { TicketCard } from "@/components/ui/TicketCard";
+import { Button } from "@/components/ui/Button";
 
 export default async function EditBookPage({
   params,
@@ -31,10 +33,13 @@ export default async function EditBookPage({
     notFound();
   }
 
+  const selectClass =
+    "rounded-lg border border-perforation bg-background px-2 py-1 text-sm text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+
   return (
     <main className="mx-auto max-w-lg space-y-8 p-4">
       <div>
-        <h1 className="mb-4 text-2xl font-semibold">Edit Book</h1>
+        <h1 className="mb-4 font-display text-2xl font-semibold text-foreground-strong">Edit Book</h1>
         <EditBookForm
           bookId={book.id}
           defaultTitle={book.title}
@@ -43,18 +48,18 @@ export default async function EditBookPage({
         />
       </div>
 
-      <div className="space-y-2 rounded border p-3">
-        <h2 className="text-lg font-medium">Reading Progress</h2>
+      <TicketCard as="div" className="space-y-2 p-3">
+        <h2 className="font-display text-lg font-medium text-foreground-strong">Reading Progress</h2>
         <div className="flex flex-wrap items-center gap-2">
           <form action={updateReadStatus.bind(null, book.id)} className="flex items-center gap-2">
-            <label htmlFor="readStatus" className="text-sm font-medium">
+            <label htmlFor="readStatus" className="text-sm font-medium text-foreground">
               Status
             </label>
             <select
               id="readStatus"
               name="readStatus"
               defaultValue={book.readStatus ?? ""}
-              className="rounded border p-1 text-sm"
+              className={selectClass}
             >
               <option value="">Not set</option>
               {READ_STATUS_OPTIONS.map((opt) => (
@@ -63,16 +68,16 @@ export default async function EditBookPage({
                 </option>
               ))}
             </select>
-            <button type="submit" className="rounded border px-2 py-1 text-sm">
+            <Button type="submit" variant="secondary">
               Save
-            </button>
+            </Button>
           </form>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-foreground/70">
             {book.readStatusManual ? "Manually set" : "Synced from Goodreads"}
           </span>
           {book.readStatusManual && (
             <form action={clearReadStatusManual.bind(null, book.id)}>
-              <button type="submit" className="text-xs underline">
+              <button type="submit" className="text-xs text-link underline">
                 Let Goodreads manage this again
               </button>
             </form>
@@ -81,14 +86,14 @@ export default async function EditBookPage({
 
         <div className="flex flex-wrap items-center gap-2">
           <form action={updateRating.bind(null, book.id)} className="flex items-center gap-2">
-            <label htmlFor="rating" className="text-sm font-medium">
+            <label htmlFor="rating" className="text-sm font-medium text-foreground">
               Rating
             </label>
             <select
               id="rating"
               name="rating"
               defaultValue={book.rating?.toString() ?? ""}
-              className="rounded border p-1 text-sm"
+              className={selectClass}
             >
               <option value="">Unrated</option>
               {RATING_OPTIONS.map((n) => (
@@ -97,30 +102,30 @@ export default async function EditBookPage({
                 </option>
               ))}
             </select>
-            <button type="submit" className="rounded border px-2 py-1 text-sm">
+            <Button type="submit" variant="secondary">
               Save
-            </button>
+            </Button>
           </form>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-foreground/70">
             {book.ratingManual ? "Manually set" : "Synced from Goodreads"}
           </span>
           {book.ratingManual && (
             <form action={clearRatingManual.bind(null, book.id)}>
-              <button type="submit" className="text-xs underline">
+              <button type="submit" className="text-xs text-link underline">
                 Let Goodreads manage this again
               </button>
             </form>
           )}
         </div>
-      </div>
+      </TicketCard>
 
       {book.copies.length > 0 && (
         <div>
-          <h2 className="mb-2 text-lg font-medium">Physical Copies</h2>
+          <h2 className="mb-2 font-display text-lg font-medium text-foreground-strong">Physical Copies</h2>
           <div className="space-y-6">
             {book.copies.map((copy, index) => (
-              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">
+              <TicketCard as="div" key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 p-3">
+                <h3 className="mb-2 font-mono text-sm font-semibold uppercase tracking-wide text-foreground/70">
                   Physical Copy #{index + 1}
                 </h3>
                 <EditCopyForm
@@ -133,7 +138,7 @@ export default async function EditBookPage({
                   currentCoverPath={copy.coverImagePath}
                   bookIsbn={book.isbn}
                 />
-              </div>
+              </TicketCard>
             ))}
           </div>
         </div>
@@ -141,11 +146,11 @@ export default async function EditBookPage({
 
       {book.ebookCopies.length > 0 && (
         <div>
-          <h2 className="mb-2 text-lg font-medium">Ebooks</h2>
+          <h2 className="mb-2 font-display text-lg font-medium text-foreground-strong">Ebooks</h2>
           <div className="space-y-6">
             {book.ebookCopies.map((copy, index) => (
-              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">
+              <TicketCard as="div" key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 p-3">
+                <h3 className="mb-2 font-mono text-sm font-semibold uppercase tracking-wide text-foreground/70">
                   Ebook #{index + 1}
                 </h3>
                 <EditEbookCopyCoverForm
@@ -154,7 +159,7 @@ export default async function EditBookPage({
                   currentCoverPath={copy.coverImagePath}
                   bookIsbn={book.isbn}
                 />
-              </div>
+              </TicketCard>
             ))}
           </div>
         </div>
@@ -162,11 +167,11 @@ export default async function EditBookPage({
 
       {book.audiobookCopies.length > 0 && (
         <div>
-          <h2 className="mb-2 text-lg font-medium">Audiobooks</h2>
+          <h2 className="mb-2 font-display text-lg font-medium text-foreground-strong">Audiobooks</h2>
           <div className="space-y-6">
             {book.audiobookCopies.map((copy, index) => (
-              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">
+              <TicketCard as="div" key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 p-3">
+                <h3 className="mb-2 font-mono text-sm font-semibold uppercase tracking-wide text-foreground/70">
                   Audiobook #{index + 1}
                 </h3>
                 <EditAudiobookCopyCoverForm
@@ -175,7 +180,7 @@ export default async function EditBookPage({
                   currentCoverPath={copy.coverImagePath}
                   bookIsbn={book.isbn}
                 />
-              </div>
+              </TicketCard>
             ))}
           </div>
         </div>
