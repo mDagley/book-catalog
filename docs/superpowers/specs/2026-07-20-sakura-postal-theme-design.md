@@ -72,7 +72,7 @@ This is the one deliberately memorable, repeated element — everything else in 
 
 Applies to every existing route and shared component:
 
-**Pages:** `/`, `/login`, `/books`, `/books/new`, `/books/scan`, `/books/duplicates`, `/books/[id]`, `/books/[id]/edit`, `/books/[id]/copies/new`.
+**Pages:** `/`, `/login`, `/books`, `/books/new`, `/books/scan`, `/books/duplicates`, `/books/[id]`, `/books/[id]/edit`, `/books/[id]/copies/new`, `/tbr`.
 
 **Shared components:** `CatalogResultCard`, `CatalogFilters`, `CoverThumbnail`, `BookFormFields`, `CopyFormFields`, `ReadingProgressFields`, `SearchAutocomplete`, `RefreshSyncButton`, `CoverEditor`, `CoverPicker`, `CoverCamera`, `BarcodeScanner`, `BurstFramePicker`, `QuadCropEditor`, `EditCopyForm`, `EditEbookCopyCoverForm`, `EditAudiobookCopyCoverForm`.
 
