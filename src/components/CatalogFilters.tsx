@@ -2,6 +2,7 @@ import { FORMAT_OPTIONS } from "@/components/CopyFormFields";
 import { STATUS_FILTER_OPTIONS } from "@/components/ReadingProgressFields";
 import type { OwnershipType, ReadStatusFilterValue, StatusFilterMode } from "@/lib/search";
 import type { Format } from "@prisma/client";
+import { Button } from "@/components/ui/Button";
 
 export const OWNERSHIP_TYPE_OPTIONS: { value: OwnershipType; label: string }[] = [
   { value: "physical", label: "Physical" },
@@ -23,7 +24,7 @@ interface CatalogFiltersProps {
 // outside this shared component).
 export function CatalogFilters({ types, status, statusMode, format }: CatalogFiltersProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 text-sm">
+    <div className="flex flex-wrap items-center gap-3 text-sm text-foreground">
       {OWNERSHIP_TYPE_OPTIONS.map((opt) => (
         <label key={opt.value} className="flex items-center gap-1">
           <input
@@ -31,6 +32,7 @@ export function CatalogFilters({ types, status, statusMode, format }: CatalogFil
             name="types"
             value={opt.value}
             defaultChecked={types?.includes(opt.value) ?? false}
+            className="accent-accent"
           />
           {opt.label}
         </label>
@@ -42,25 +44,38 @@ export function CatalogFilters({ types, status, statusMode, format }: CatalogFil
             name="status"
             value={opt.value}
             defaultChecked={status?.includes(opt.value) ?? false}
+            className="accent-accent"
           />
           {opt.label}
         </label>
       ))}
-      <span className="flex items-center gap-1 text-gray-500">
+      <span className="flex items-center gap-1 text-foreground/70">
         Match:
         <label className="flex items-center gap-1">
-          <input type="radio" name="statusMode" value="or" defaultChecked={statusMode === "or"} />
+          <input
+            type="radio"
+            name="statusMode"
+            value="or"
+            defaultChecked={statusMode === "or"}
+            className="accent-accent"
+          />
           Any
         </label>
         <label className="flex items-center gap-1">
-          <input type="radio" name="statusMode" value="and" defaultChecked={statusMode === "and"} />
+          <input
+            type="radio"
+            name="statusMode"
+            value="and"
+            defaultChecked={statusMode === "and"}
+            className="accent-accent"
+          />
           All
         </label>
       </span>
       <select
         name="format"
         defaultValue={format ?? ""}
-        className="rounded border p-1"
+        className="rounded-lg border border-perforation bg-background px-2 py-1 text-sm text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
         aria-label="Filter by physical format"
       >
         <option value="">Any format</option>
@@ -70,9 +85,7 @@ export function CatalogFilters({ types, status, statusMode, format }: CatalogFil
           </option>
         ))}
       </select>
-      <button type="submit" className="rounded bg-black px-3 py-1 text-white">
-        Search
-      </button>
+      <Button type="submit">Search</Button>
     </div>
   );
 }
