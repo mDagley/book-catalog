@@ -134,11 +134,41 @@ describe("getTbrGap", () => {
     expect(gapUndefined.some((item) => item.title === "Test TBR Elantris")).toBe(true);
     expect(gapEmpty.some((item) => item.title === "Test TBR Elantris")).toBe(true);
   });
+
+  it("matches by ISBN when the query is ISBN-shaped, even if title/author don't contain it", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Isbn Match Book", author: "Someone", isbn: "9780765326355" },
+    });
+
+    const gap = await getTbrGap("9780765326355");
+
+    expect(gap.some((item) => item.title === "Test TBR Isbn Match Book")).toBe(true);
+  });
+
+  it("matches by ISBN through hyphens in the query, via normalization", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Isbn Hyphen Book", author: "Someone", isbn: "9780765326355" },
+    });
+
+    const gap = await getTbrGap("978-0-7653-2635-5");
+
+    expect(gap.some((item) => item.title === "Test TBR Isbn Hyphen Book")).toBe(true);
+  });
+
+  it("does not match an ISBN-shaped query against an unrelated item's isbn", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Isbn No Match Book", author: "Someone", isbn: "9780000000001" },
+    });
+
+    const gap = await getTbrGap("9780000000099");
+
+    expect(gap.some((item) => item.title === "Test TBR Isbn No Match Book")).toBe(false);
+  });
 });
 
 describe("groupByInitial", () => {
   function item(title: string, author: string | null): TbrGapItem {
-    return { id: title, title, author, coverImagePath: null };
+    return { id: title, title, author, coverImagePath: null, isbn: null };
   }
 
   it("groups items by the uppercased first character of their sort key", () => {

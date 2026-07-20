@@ -37,7 +37,7 @@ export default async function TbrGapPage({
           scope="tbr"
           name="q"
           defaultValue={query}
-          placeholder="Search by title or author"
+          placeholder="Search by title, author, or ISBN"
         />
       </form>
 

@@ -463,14 +463,23 @@ async function fetchMissingTbrCovers(): Promise<void> {
         coverImagePath = result.coverImagePath;
       }
     }
-    await prisma.goodreadsTbrItem.update({
-      where: { id: item.id },
+    // Optimistic guard: only write if this row still has coverCheckedAt ===
+    // null, i.e. no concurrent run (the cron and a manual "Refresh now"
+    // overlapping) already claimed it first. If we lost the race, the other
+    // run's write already stands as this row's authoritative state -- any
+    // cover file we just saved is now unreferenced and must be cleaned up,
+    // not left orphaned on disk.
+    const { count } = await prisma.goodreadsTbrItem.updateMany({
+      where: { id: item.id, coverCheckedAt: null },
       data: {
         coverCheckedAt: new Date(),
         coverFetchFailureReason: failureReason,
         ...(coverImagePath ? { coverImagePath } : {}),
       },
     });
+    if (count === 0 && coverImagePath) {
+      await deleteCoverImage(coverImagePath);
+    }
   }
 }
 

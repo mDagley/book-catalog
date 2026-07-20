@@ -1,12 +1,14 @@
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { isTitleMatch } from "@/lib/matching";
+import { normalizeIsbn } from "@/lib/books";
 
 export interface TbrGapItem {
   id: string;
   title: string;
   author: string | null;
   coverImagePath: string | null;
+  isbn: string | null;
 }
 
 /** Tag used to invalidate the cached TBR gap computation after a sync completes. */
@@ -36,7 +38,7 @@ function letterBucket(key: string): string {
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const [tbrItems, books] = await Promise.all([
     prisma.goodreadsTbrItem.findMany({
-      select: { id: true, title: true, author: true, coverImagePath: true },
+      select: { id: true, title: true, author: true, coverImagePath: true, isbn: true },
     }),
     prisma.book.findMany({ select: { title: true } }),
   ]);
@@ -50,6 +52,7 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
       title: tbr.title,
       author: tbr.author,
       coverImagePath: tbr.coverImagePath,
+      isbn: tbr.isbn,
     }))
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
 }
@@ -90,10 +93,21 @@ export async function getTbrGap(query?: string): Promise<TbrGapItem[]> {
 
   const trimmed = query?.trim().toLowerCase();
   if (!trimmed) return gap;
+
+  // Mirrors search.ts's isbn-shaped-query detection: reusing the same
+  // already-lowercased `trimmed` is safe here because normalizeIsbn
+  // uppercases internally regardless of input case, and the regex already
+  // treats X/x equivalently.
+  const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(trimmed);
+  const normalizedIsbnQuery = looksLikeIsbnQuery ? normalizeIsbn(trimmed) : "";
+
   return gap.filter(
     (item) =>
       item.title.toLowerCase().includes(trimmed) ||
-      (item.author?.toLowerCase().includes(trimmed) ?? false),
+      (item.author?.toLowerCase().includes(trimmed) ?? false) ||
+      (normalizedIsbnQuery !== "" &&
+        item.isbn !== null &&
+        normalizeIsbn(item.isbn).includes(normalizedIsbnQuery)),
   );
 }
 

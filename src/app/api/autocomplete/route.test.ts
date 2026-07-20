@@ -72,6 +72,34 @@ describe("GET /api/autocomplete", () => {
     expect(data.map((s: { title: string }) => s.title)).toContain("Test Autocomplete Elantris");
   });
 
+  it("matches on ISBN for the home scope, even when title/author don't contain the query", async () => {
+    await prisma.book.create({
+      data: { title: "Test Autocomplete Isbn Book", author: "Someone", isbn: "9780765326355" },
+    });
+
+    const response = await GET(makeRequest({ scope: "home", q: "9780765326355" }));
+    const data = await response.json();
+
+    expect(data.map((s: { title: string }) => s.title)).toContain("Test Autocomplete Isbn Book");
+  });
+
+  it("matches on ISBN for the books scope", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Autocomplete Isbn Books Scope",
+        author: "Someone",
+        isbn: "9780000000188",
+      },
+    });
+
+    const response = await GET(makeRequest({ scope: "books", q: "9780000000188" }));
+    const data = await response.json();
+
+    expect(data.map((s: { title: string }) => s.title)).toContain(
+      "Test Autocomplete Isbn Books Scope",
+    );
+  });
+
   it("returns matching title/author pairs for the books scope", async () => {
     await prisma.book.create({
       data: { title: "Test Autocomplete Warbreaker", author: "Brandon Sanderson" },

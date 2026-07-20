@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, deleteCoverImage } from "@/lib/coverStorage";
@@ -771,6 +771,67 @@ describe("syncGoodreadsTbr", () => {
     if (item.coverImagePath) {
       await deleteCoverImage(item.coverImagePath);
     }
+  });
+
+  it("cleans up its own saved file when a concurrent run claims the row first", async () => {
+    // Simulates the cron and a manual "Refresh now" overlapping: another
+    // process's write lands between this run's cover fetch and its own
+    // guarded update, so the optimistic guard must back off and this run's
+    // own newly-saved file must not be left orphaned on disk.
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000199-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([{ title: "Test Goodreads Sync Race Book", isbn13: "9780000000199" }]),
+      ],
+    });
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        // Simulate a concurrent run winning the race and claiming this
+        // row's coverCheckedAt first -- right before fetchMissingTbrCovers
+        // reaches its own guarded update for the item reconcileTbrItems
+        // already created earlier in this same sync call.
+        const existing = await prisma.goodreadsTbrItem.findFirstOrThrow({
+          where: { title: "Test Goodreads Sync Race Book" },
+        });
+        await prisma.goodreadsTbrItem.update({
+          where: { id: existing.id },
+          data: { coverCheckedAt: new Date("2020-01-01T00:00:00.000Z") },
+        });
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+    const filesBefore = new Set(await readdir(uploadsDir));
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Race Book" },
+    });
+    // The competing write's value stands -- this run's own guarded update
+    // must have seen coverCheckedAt no longer null and backed off.
+    expect(updated.coverCheckedAt?.toISOString()).toBe("2020-01-01T00:00:00.000Z");
+    expect(updated.coverImagePath).toBeNull();
+    const filesAfter = await readdir(uploadsDir);
+    expect(filesAfter.filter((f) => !filesBefore.has(f))).toEqual([]);
   });
 
   it("sets coverCheckedAt without a coverImagePath when Open Library has no cover", async () => {
