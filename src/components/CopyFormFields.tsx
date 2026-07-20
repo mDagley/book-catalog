@@ -14,6 +14,14 @@ interface CopyFormFieldsProps {
   defaultPublisher?: string;
   defaultPublishYear?: string;
   defaultSpecialNotes?: string;
+  // Distinguishes this instance's field ids from any other CopyFormFields
+  // rendered on the same page (e.g. one section per physical copy on the
+  // consolidated book edit page) -- without it, every instance would emit
+  // the same id="format" etc., which is invalid HTML and breaks label
+  // association for every instance after the first. Empty by default so
+  // the single-instance callers (AddCopyForm) keep their existing ids
+  // unchanged.
+  idPrefix?: string;
 }
 
 export function CopyFormFields({
@@ -21,15 +29,18 @@ export function CopyFormFields({
   defaultPublisher = "",
   defaultPublishYear = "",
   defaultSpecialNotes = "",
+  idPrefix = "",
 }: CopyFormFieldsProps) {
+  const fieldId = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
+
   return (
     <>
       <div>
-        <label htmlFor="format" className="block text-sm font-medium">
+        <label htmlFor={fieldId("format")} className="block text-sm font-medium">
           Format
         </label>
         <select
-          id="format"
+          id={fieldId("format")}
           name="format"
           required
           defaultValue={defaultFormat}
@@ -44,22 +55,22 @@ export function CopyFormFields({
         </select>
       </div>
       <div>
-        <label htmlFor="publisher" className="block text-sm font-medium">
+        <label htmlFor={fieldId("publisher")} className="block text-sm font-medium">
           Publisher
         </label>
         <input
-          id="publisher"
+          id={fieldId("publisher")}
           name="publisher"
           defaultValue={defaultPublisher}
           className="mt-1 w-full rounded border p-2"
         />
       </div>
       <div>
-        <label htmlFor="publishYear" className="block text-sm font-medium">
+        <label htmlFor={fieldId("publishYear")} className="block text-sm font-medium">
           Publish Year
         </label>
         <input
-          id="publishYear"
+          id={fieldId("publishYear")}
           name="publishYear"
           type="number"
           defaultValue={defaultPublishYear}
@@ -67,11 +78,11 @@ export function CopyFormFields({
         />
       </div>
       <div>
-        <label htmlFor="specialNotes" className="block text-sm font-medium">
+        <label htmlFor={fieldId("specialNotes")} className="block text-sm font-medium">
           Special Notes
         </label>
         <textarea
-          id="specialNotes"
+          id={fieldId("specialNotes")}
           name="specialNotes"
           defaultValue={defaultSpecialNotes}
           className="mt-1 w-full rounded border p-2"
