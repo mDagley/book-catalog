@@ -126,5 +126,6 @@ export async function updateBook(
 
   revalidatePath("/books");
   revalidatePath(`/books/${bookId}`);
-  redirect(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
+  redirect(`/books/${bookId}/edit`);
 }
