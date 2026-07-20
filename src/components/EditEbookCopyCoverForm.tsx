@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { updateEbookCopyCover } from "@/lib/actions/ebookCopies";
 import type { CopyFormState } from "@/lib/copies";
 import { CoverEditor } from "@/components/CoverEditor";
+import { Button } from "@/components/ui/Button";
 
 const initialState: CopyFormState = {};
 
@@ -32,13 +33,9 @@ export function EditEbookCopyCoverForm({
         onBusyChange={setIsPreparingCover}
       />
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      <button
-        type="submit"
-        disabled={isPending || isPreparingCover}
-        className="w-full rounded bg-black p-2 text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={isPending || isPreparingCover} className="w-full">
         {isPending ? "Saving..." : isPreparingCover ? "Preparing cover..." : "Save"}
-      </button>
+      </Button>
     </form>
   );
 }
