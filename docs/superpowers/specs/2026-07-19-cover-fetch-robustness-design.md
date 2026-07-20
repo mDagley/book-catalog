@@ -35,7 +35,7 @@ When both backlogs are large, this gives each roughly half the per-run budget in
 
 ## Part 2a: Reset the cover-check gate on ISBN drift (TBR only, no schema change)
 
-In `reconcileTbrItems`'s matched-row update branch (`src/lib/goodreadsSync.ts`), when the incoming shelf item's ISBN differs from the matched row's current ISBN **and** that row has no cover yet **and** it was already checked-and-failed, also clear `coverCheckedAt` in the same update call — the row becomes an ordinary "never checked" candidate again, picked up by `fetchMissingTbrCovers` on a later run using the corrected ISBN. If the row already has a cover, or was never checked, nothing changes (no-op either way).
+In `reconcileTbrItems`'s matched-row update branch (`src/lib/goodreadsSync.ts`), when the incoming shelf item's ISBN differs from the matched row's current ISBN **and** that row has no cover yet **and** it was already checked-and-failed, also clear `coverCheckedAt` in the same update call — the row becomes an ordinary "never checked" candidate again. Since `syncGoodreadsTbr` runs `fetchMissingTbrCovers` immediately after `reconcileTbrItems` within the same call, this reset row is picked up and retried with the corrected ISBN in the *same* sync cycle, not just on a later run. If the row already has a cover, or was never checked, nothing changes (no-op either way).
 
 ## Part 2b: Distinguish unsupported-format failures from genuine not-found
 

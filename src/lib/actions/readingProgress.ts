@@ -27,6 +27,7 @@ export async function updateReadStatus(bookId: string, formData: FormData): Prom
   // come from a tampered request, not a normal user interaction.
   if ("error" in result) return;
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   revalidatePath("/");
 }
 
@@ -34,15 +35,18 @@ export async function updateRating(bookId: string, formData: FormData): Promise<
   const result = await updateRatingData(bookId, stringField(formData, "rating"));
   if ("error" in result) return;
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   revalidatePath("/");
 }
 
 export async function clearReadStatusManual(bookId: string): Promise<void> {
   await clearReadStatusManualData(bookId);
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
 }
 
 export async function clearRatingManual(bookId: string): Promise<void> {
   await clearRatingManualData(bookId);
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
 }
