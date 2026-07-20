@@ -7,6 +7,7 @@ import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { CoverCamera } from "@/components/CoverCamera";
 import { CoverPicker } from "@/components/CoverPicker";
 import { CopyFormFields } from "@/components/CopyFormFields";
+import { Button } from "@/components/ui/Button";
 
 const initialState: ScanFormState = {};
 
@@ -44,6 +45,8 @@ interface ScanBookFormProps {
 // defaultValue.
 function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: ScanBookFormProps) {
   const [state, formAction, isPending] = useActionState(createBookFromScan, initialState);
+  const fieldClass =
+    "mt-1 w-full rounded-lg border border-perforation bg-background px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
   return (
     <form action={formAction} className="space-y-4">
@@ -56,27 +59,27 @@ function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: S
         server stores null, matching a manually-entered book with no ISBN.
       */}
       <input type="hidden" name="isbn" value={looksLikeValidIsbn(isbn) ? isbn : ""} />
-      {lookupNotice && <p className="text-sm text-gray-600">{lookupNotice}</p>}
+      {lookupNotice && <p className="text-sm text-foreground/70">{lookupNotice}</p>}
       <div>
-        <label htmlFor="title" className="block text-sm font-medium">
+        <label htmlFor="title" className="block text-sm font-medium text-foreground">
           Title
         </label>
         <input
           id="title"
           name="title"
           defaultValue={state.values?.title ?? lookup?.title}
-          className="mt-1 w-full rounded border p-2"
+          className={fieldClass}
         />
       </div>
       <div>
-        <label htmlFor="author" className="block text-sm font-medium">
+        <label htmlFor="author" className="block text-sm font-medium text-foreground">
           Author
         </label>
         <input
           id="author"
           name="author"
           defaultValue={state.values?.author ?? lookup?.author}
-          className="mt-1 w-full rounded border p-2"
+          className={fieldClass}
         />
       </div>
       <CoverPicker
@@ -103,22 +106,19 @@ function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: S
       />
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="flex-1 rounded bg-black p-2 text-white disabled:opacity-50"
-        >
+        <Button type="submit" disabled={isPending} className="flex-1">
           {isPending ? "Saving..." : "Save"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
           name="scanAnother"
           value="true"
+          variant="secondary"
           disabled={isPending}
-          className="flex-1 rounded border border-black p-2 disabled:opacity-50"
+          className="flex-1"
         >
           Save &amp; Scan Another
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -189,7 +189,7 @@ export function ScanAddForm() {
     return (
       <div>
         <BarcodeScanner onDecode={handleDecode} />
-        <Link href="/books/new" className="mt-4 inline-block text-sm underline">
+        <Link href="/books/new" className="mt-4 inline-block text-sm text-link underline">
           Enter manually instead
         </Link>
       </div>
@@ -197,7 +197,7 @@ export function ScanAddForm() {
   }
 
   if (isLookingUp) {
-    return <p>Looking up ISBN {isbn}...</p>;
+    return <p className="text-foreground">Looking up ISBN {isbn}...</p>;
   }
 
   return (
@@ -229,7 +229,7 @@ export function ScanAddForm() {
           role="dialog"
           aria-modal="true"
           aria-label="Take a cover photo"
-          className="fixed inset-0 z-10 overflow-y-auto bg-white p-4"
+          className="fixed inset-0 z-10 overflow-y-auto bg-background p-4"
         >
           <CoverCamera
             onCapture={(dataUrl) => {
