@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -39,26 +40,22 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border p-6"
+        className="w-full max-w-sm space-y-4 rounded-xl border border-dashed border-perforation bg-surface p-6"
       >
-        <h1 className="text-xl font-semibold">Book Catalog</h1>
+        <h1 className="font-display text-xl font-semibold text-foreground-strong">Book Catalog</h1>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
           aria-label="Password"
-          className="w-full rounded border p-2"
+          className="w-full rounded-lg border border-perforation bg-background px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           autoFocus
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full rounded bg-black p-2 text-white"
-        >
+        <Button type="submit" disabled={isSubmitting} className="w-full">
           Log in
-        </button>
+        </Button>
       </form>
     </main>
   );
