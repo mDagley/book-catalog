@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+
 export function RefreshSyncButton() {
   const router = useRouter();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -58,14 +60,9 @@ export function RefreshSyncButton() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={handleRefresh}
-        disabled={isRefreshing}
-        className="rounded border border-black px-3 py-2 text-sm disabled:opacity-50"
-      >
+      <Button type="button" variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
         {isRefreshing ? "Refreshing..." : "Refresh now"}
-      </button>
+      </Button>
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
     </div>
   );
