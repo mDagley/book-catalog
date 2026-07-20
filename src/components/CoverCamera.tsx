@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BurstFramePicker } from "@/components/BurstFramePicker";
 import { QuadCropEditor } from "@/components/QuadCropEditor";
+import { Button } from "@/components/ui/Button";
 import { capDimensions } from "@/lib/perspectiveCrop";
 
 interface CoverCameraProps {
@@ -186,7 +187,7 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
 
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Take a photo of the cover</p>
+      <p className="mb-2 text-sm font-medium text-foreground">Take a photo of the cover</p>
       {error && (
         <p className="text-sm text-red-600">
           Camera error: {error}.{onSkip && " You can still skip this step."}
@@ -207,7 +208,7 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
             onClick={toggleTorch}
             aria-pressed={torchOn}
             className={`absolute right-2 top-2 rounded px-2 py-1 text-xs ${
-              torchOn ? "bg-yellow-400 text-black" : "bg-black/60 text-white"
+              torchOn ? "bg-yellow-400 text-black" : "bg-foreground-strong/70 text-background"
             }`}
           >
             {torchOn ? "Flash on" : "Flash off"}
@@ -215,18 +216,18 @@ export function CoverCamera({ onCapture, onSkip }: CoverCameraProps) {
         )}
       </div>
       <div className="mt-2 flex gap-3">
-        <button
+        <Button
           type="button"
           onClick={handleTakePhoto}
           disabled={!!error || !isReady || isCapturingBurst}
-          className="flex-1 rounded bg-black p-2 text-white disabled:opacity-50"
+          className="flex-1"
         >
           {isCapturingBurst ? "Capturing..." : "Take Photo"}
-        </button>
+        </Button>
         {onSkip && (
-          <button type="button" onClick={onSkip} className="flex-1 rounded border border-black p-2">
+          <Button type="button" onClick={onSkip} variant="secondary" className="flex-1">
             Skip
-          </button>
+          </Button>
         )}
       </div>
     </div>
