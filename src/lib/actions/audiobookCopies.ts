@@ -21,5 +21,6 @@ export async function updateAudiobookCopyCover(
   }
 
   revalidatePath(`/books/${bookId}`);
-  redirect(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
+  redirect(`/books/${bookId}/edit`);
 }

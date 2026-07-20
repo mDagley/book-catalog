@@ -22,6 +22,7 @@ export async function addCopy(
   }
 
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}`);
 }
 
@@ -45,7 +46,8 @@ export async function updateCopy(
   }
 
   revalidatePath(`/books/${bookId}`);
-  redirect(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
+  redirect(`/books/${bookId}/edit`);
 }
 
 export async function deleteCopy(copyId: string, _formData: FormData): Promise<void> {
@@ -74,4 +76,5 @@ export async function deleteCopy(copyId: string, _formData: FormData): Promise<v
 
   revalidatePath("/books");
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
 }

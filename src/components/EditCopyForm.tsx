@@ -36,6 +36,7 @@ export function EditCopyForm({
   return (
     <form action={formAction} className="space-y-4">
       <CopyFormFields
+        idPrefix={copyId}
         defaultFormat={defaultFormat}
         defaultPublisher={defaultPublisher}
         defaultPublishYear={defaultPublishYear}
