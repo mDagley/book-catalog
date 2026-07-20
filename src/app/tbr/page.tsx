@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
+import { TicketCard } from "@/components/ui/TicketCard";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +27,8 @@ export default async function TbrGapPage({
   return (
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">TBR — Not Yet Owned</h1>
-        <Link href="/" className="text-sm underline">
+        <h1 className="font-display text-2xl font-semibold text-foreground-strong">TBR — Not Yet Owned</h1>
+        <Link href="/" className="text-sm text-link underline">
           Back to search
         </Link>
       </div>
@@ -44,7 +45,7 @@ export default async function TbrGapPage({
       {groups.length > 0 && (
         <nav className="mb-4 flex flex-wrap gap-2 text-sm" aria-label="Jump to letter">
           {groups.map((group) => (
-            <a key={group.letter} href={`#${anchorId(group.letter)}`} className="underline">
+            <a key={group.letter} href={`#${anchorId(group.letter)}`} className="text-link underline">
               {group.letter}
             </a>
           ))}
@@ -52,7 +53,7 @@ export default async function TbrGapPage({
       )}
 
       {gap.length === 0 ? (
-        <p className="text-gray-600">
+        <p className="text-foreground/70">
           {query
             ? "No matches found."
             : "Everything on your to-read shelf is already owned in some form."}
@@ -62,17 +63,17 @@ export default async function TbrGapPage({
           <section key={group.letter} className="mb-4">
             <h2
               id={anchorId(group.letter)}
-              className="mb-2 text-lg font-semibold text-gray-700"
+              className="mb-2 font-display text-lg font-semibold text-foreground-strong"
             >
               {group.letter}
             </h2>
             <ul className="space-y-2">
               {group.items.map((item) => (
-                <li key={item.id} className="rounded border p-3">
+                <TicketCard key={item.id} className="p-3">
                   <CoverThumbnail coverImagePath={item.coverImagePath} />
-                  <p className="font-medium">{item.title}</p>
-                  {item.author && <p className="text-sm text-gray-600">{item.author}</p>}
-                </li>
+                  <p className="font-medium text-foreground-strong">{item.title}</p>
+                  {item.author && <p className="text-sm text-foreground/70">{item.author}</p>}
+                </TicketCard>
               ))}
             </ul>
           </section>
