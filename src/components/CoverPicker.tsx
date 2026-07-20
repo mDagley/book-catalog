@@ -43,9 +43,9 @@ export function CoverPicker({
 
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Cover Image</p>
+      <p className="mb-2 text-sm font-medium text-foreground">Cover Image</p>
       {!capturedImageDataUrl && !openLibraryCoverUrl && (
-        <p className="text-sm text-gray-600">No cover selected yet.</p>
+        <p className="text-sm text-foreground/70">No cover selected yet.</p>
       )}
       <div className="flex gap-3">
         {capturedImageDataUrl && (
@@ -53,11 +53,11 @@ export function CoverPicker({
             type="button"
             onClick={() => setSelected("captured")}
             aria-pressed={selected === "captured"}
-            className={`rounded border-2 p-1 ${selected === "captured" ? "border-black" : "border-transparent"}`}
+            className={`rounded-lg border-2 p-1 ${selected === "captured" ? "border-accent" : "border-transparent"}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={capturedImageDataUrl} alt="Your photo" className="h-32 w-24 object-cover" />
-            <p className="text-center text-xs">Your photo</p>
+            <p className="text-center text-xs text-foreground/70">Your photo</p>
           </button>
         )}
         {openLibraryCoverUrl && (
@@ -65,24 +65,20 @@ export function CoverPicker({
             type="button"
             onClick={() => setSelected("openLibrary")}
             aria-pressed={selected === "openLibrary"}
-            className={`rounded border-2 p-1 ${selected === "openLibrary" ? "border-black" : "border-transparent"}`}
+            className={`rounded-lg border-2 p-1 ${selected === "openLibrary" ? "border-accent" : "border-transparent"}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={openLibraryCoverUrl} alt="Open Library cover" className="h-32 w-24 object-cover" />
-            <p className="text-center text-xs">Open Library</p>
+            <p className="text-center text-xs text-foreground/70">Open Library</p>
           </button>
         )}
       </div>
       {onRetake && (
-        <button type="button" onClick={onRetake} className="mt-2 text-sm underline">
+        <button type="button" onClick={onRetake} className="mt-2 text-sm text-accent underline">
           {capturedImageDataUrl ? "Retake photo" : "Add a photo"}
         </button>
       )}
-      <input
-        type="hidden"
-        name="selectedCoverDataUrl"
-        value={selectedDataUrl ?? ""}
-      />
+      <input type="hidden" name="selectedCoverDataUrl" value={selectedDataUrl ?? ""} />
       <input
         type="hidden"
         name="selectedCoverSource"
