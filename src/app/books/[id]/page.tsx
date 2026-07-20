@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { deleteCopy } from "@/lib/actions/copies";
 import { FORMAT_LABELS } from "@/components/CopyFormFields";
+import { TicketCard } from "@/components/ui/TicketCard";
+import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
 export default async function BookDetailPage({
   params,
@@ -27,20 +29,25 @@ export default async function BookDetailPage({
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold">{book.title}</h1>
-          {book.author && <p className="text-gray-600">{book.author}</p>}
-          {book.isbn && <p className="text-sm text-gray-500">ISBN: {book.isbn}</p>}
+          <h1 className="font-display text-2xl font-semibold text-foreground-strong">{book.title}</h1>
+          {book.author && <p className="text-foreground/70">{book.author}</p>}
+          {book.isbn && <p className="font-mono text-sm text-foreground/70">ISBN: {book.isbn}</p>}
         </div>
-        <Link href={`/books/${book.id}/edit`} className="rounded border px-3 py-2 text-sm">
+        <Link
+          href={`/books/${book.id}/edit`}
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${BUTTON_VARIANT_CLASSES.secondary}`}
+        >
           Edit
         </Link>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-medium">Copies ({book.copies.length})</h2>
+        <h2 className="font-display text-lg font-medium text-foreground-strong">
+          Copies ({book.copies.length})
+        </h2>
         <Link
           href={`/books/${book.id}/copies/new`}
-          className="rounded bg-black px-3 py-2 text-sm text-white"
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${BUTTON_VARIANT_CLASSES.primary}`}
         >
           + Add a copy
         </Link>
@@ -48,11 +55,11 @@ export default async function BookDetailPage({
 
       <ul className="space-y-3">
         {book.copies.map((copy) => (
-          <li key={copy.id} className="rounded border p-3">
-            <p className="font-medium">{FORMAT_LABELS[copy.format]}</p>
-            {copy.publisher && <p className="text-sm text-gray-600">{copy.publisher}</p>}
-            {copy.publishYear && <p className="text-sm text-gray-600">{copy.publishYear}</p>}
-            {copy.specialNotes && <p className="text-sm text-gray-600">{copy.specialNotes}</p>}
+          <TicketCard key={copy.id} className="p-3">
+            <p className="font-medium text-foreground-strong">{FORMAT_LABELS[copy.format]}</p>
+            {copy.publisher && <p className="text-sm text-foreground/70">{copy.publisher}</p>}
+            {copy.publishYear && <p className="font-mono text-sm text-foreground/70">{copy.publishYear}</p>}
+            {copy.specialNotes && <p className="text-sm text-foreground/70">{copy.specialNotes}</p>}
             {copy.coverImagePath && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -62,7 +69,7 @@ export default async function BookDetailPage({
               />
             )}
             <div className="mt-2 flex gap-2">
-              <Link href={`/books/${book.id}/edit#copy-${copy.id}`} className="text-sm underline">
+              <Link href={`/books/${book.id}/edit#copy-${copy.id}`} className="text-sm text-link underline">
                 Edit
               </Link>
               <form action={deleteCopy.bind(null, copy.id)}>
@@ -71,16 +78,18 @@ export default async function BookDetailPage({
                 </button>
               </form>
             </div>
-          </li>
+          </TicketCard>
         ))}
       </ul>
 
       {book.ebookCopies.length > 0 && (
         <>
-          <h2 className="mb-2 mt-6 text-lg font-medium">Ebooks ({book.ebookCopies.length})</h2>
+          <h2 className="mb-2 mt-6 font-display text-lg font-medium text-foreground-strong">
+            Ebooks ({book.ebookCopies.length})
+          </h2>
           <ul className="space-y-3">
             {book.ebookCopies.map((copy) => (
-              <li key={copy.id} className="rounded border p-3">
+              <TicketCard key={copy.id} className="p-3">
                 {copy.coverImagePath ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -89,15 +98,15 @@ export default async function BookDetailPage({
                     className="h-32 w-24 rounded object-cover"
                   />
                 ) : (
-                  <p className="text-sm text-gray-600">No cover set.</p>
+                  <p className="text-sm text-foreground/70">No cover set.</p>
                 )}
                 <Link
                   href={`/books/${book.id}/edit#copy-${copy.id}`}
-                  className="mt-2 inline-block text-sm underline"
+                  className="mt-2 inline-block text-sm text-link underline"
                 >
                   Edit cover
                 </Link>
-              </li>
+              </TicketCard>
             ))}
           </ul>
         </>
@@ -105,12 +114,12 @@ export default async function BookDetailPage({
 
       {book.audiobookCopies.length > 0 && (
         <>
-          <h2 className="mb-2 mt-6 text-lg font-medium">
+          <h2 className="mb-2 mt-6 font-display text-lg font-medium text-foreground-strong">
             Audiobooks ({book.audiobookCopies.length})
           </h2>
           <ul className="space-y-3">
             {book.audiobookCopies.map((copy) => (
-              <li key={copy.id} className="rounded border p-3">
+              <TicketCard key={copy.id} className="p-3">
                 {copy.coverImagePath ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -119,15 +128,15 @@ export default async function BookDetailPage({
                     className="h-32 w-24 rounded object-cover"
                   />
                 ) : (
-                  <p className="text-sm text-gray-600">No cover set.</p>
+                  <p className="text-sm text-foreground/70">No cover set.</p>
                 )}
                 <Link
                   href={`/books/${book.id}/edit#copy-${copy.id}`}
-                  className="mt-2 inline-block text-sm underline"
+                  className="mt-2 inline-block text-sm text-link underline"
                 >
                   Edit cover
                 </Link>
-              </li>
+              </TicketCard>
             ))}
           </ul>
         </>
