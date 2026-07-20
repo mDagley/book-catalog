@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/books";
 import { findBestTitleMatch } from "@/lib/matching";
-import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
+import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -307,20 +307,24 @@ async function fetchAbsCoverAndSave(
   baseUrl: string,
   token: string,
   absItemId: string,
-): Promise<string | null> {
+): Promise<{ coverImagePath: string } | { reason?: "unsupported_format" }> {
   try {
     const response = await fetch(`${baseUrl}/api/items/${absItemId}/cover`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!response.ok) return null;
+    if (!response.ok) return {};
 
     const arrayBuffer = await response.arrayBuffer();
     const rawContentType = response.headers.get("content-type") ?? "image/jpeg";
     const contentType = rawContentType.split(";")[0].trim();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
-    return await saveCoverImage(`data:${contentType};base64,${base64}`);
-  } catch {
-    return null;
+    const coverImagePath = await saveCoverImage(`data:${contentType};base64,${base64}`);
+    return { coverImagePath };
+  } catch (err) {
+    if (err instanceof UnsupportedCoverFormatError) {
+      return { reason: "unsupported_format" };
+    }
+    return {};
   }
 }
 
@@ -353,18 +357,32 @@ async function backfillAbsCovers(baseUrl: string, token: string): Promise<void> 
     }),
   ]);
 
-  const pending = [
-    ...missingEbookCovers.map((c) => ({ table: "ebook" as const, id: c.id, absItemId: c.absItemId })),
-    ...missingAudiobookCovers.map((c) => ({
-      table: "audiobook" as const,
-      id: c.id,
-      absItemId: c.absItemId,
-    })),
-  ].slice(0, ABS_COVER_FETCH_CAP);
+  // Interleaved (not concatenated-then-sliced) so a large backlog in one
+  // media type can't starve the other of any attempts this run -- each
+  // type gets roughly half the per-run budget when both have a backlog.
+  const pending: { table: "ebook" | "audiobook"; id: string; absItemId: string }[] = [];
+  for (
+    let i = 0;
+    pending.length < ABS_COVER_FETCH_CAP &&
+    (i < missingEbookCovers.length || i < missingAudiobookCovers.length);
+    i++
+  ) {
+    if (i < missingEbookCovers.length && pending.length < ABS_COVER_FETCH_CAP) {
+      pending.push({ table: "ebook", ...missingEbookCovers[i] });
+    }
+    if (i < missingAudiobookCovers.length && pending.length < ABS_COVER_FETCH_CAP) {
+      pending.push({ table: "audiobook", ...missingAudiobookCovers[i] });
+    }
+  }
 
   for (const copy of pending) {
-    const coverImagePath = await fetchAbsCoverAndSave(baseUrl, token, copy.absItemId);
-    const data = { coverCheckedAt: new Date(), ...(coverImagePath ? { coverImagePath } : {}) };
+    const result = await fetchAbsCoverAndSave(baseUrl, token, copy.absItemId);
+    const data = {
+      coverCheckedAt: new Date(),
+      ...("coverImagePath" in result
+        ? { coverImagePath: result.coverImagePath, coverFetchFailureReason: null }
+        : { coverFetchFailureReason: result.reason ?? null }),
+    };
     if (copy.table === "ebook") {
       await prisma.ebookCopy.update({ where: { id: copy.id }, data });
     } else {

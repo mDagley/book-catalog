@@ -635,6 +635,95 @@ describe("syncGoodreadsTbr", () => {
     expect(items[0].coverImagePath).toBe("isbn-drift-cover.jpg");
   });
 
+  it("resets coverCheckedAt when a matched row's isbn changes, allowing an immediate retry with the corrected isbn", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Isbn Drift Cover Reset Book",
+        isbn: "9780000000001",
+        coverCheckedAt: new Date(), // already checked-and-failed under the OLD isbn
+        coverFetchFailureReason: null,
+      },
+    });
+
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000002-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        // Same title, corrected isbn -- exact-title match, not fuzzy.
+        buildRssPage([
+          { title: "Test Goodreads Sync Isbn Drift Cover Reset Book", isbn13: "9780000000002" },
+        ]),
+      ],
+    });
+    // mockShelfFetch installs the RSS-serving fetch mock first -- capture
+    // that as the delegate before layering the cover-request interceptor on
+    // top, matching this file's established pattern (see e.g. "fetches and
+    // stores a cover for a new TBR item that has an ISBN").
+    const shelfFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return shelfFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    // Proves the reset actually lifted the block: lookupIsbn was called with
+    // the CORRECTED isbn (not blocked by the stale coverCheckedAt from the
+    // old isbn's failed attempt), and the retry succeeded in the same sync.
+    expect(lookupIsbn).toHaveBeenCalledWith("9780000000002");
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(updated.isbn).toBe("9780000000002");
+    expect(updated.coverImagePath).not.toBeNull();
+
+    if (updated.coverImagePath) {
+      await deleteCoverImage(updated.coverImagePath);
+    }
+  });
+
+  it("does not reset coverCheckedAt when isbn changes on a row that already has a cover", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Isbn Drift Existing Cover Book",
+        isbn: "9780000000003",
+        coverImagePath: "already-has-a-cover.jpg",
+        coverCheckedAt: new Date(),
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Isbn Drift Existing Cover Book", isbn13: "9780000000004" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(updated.isbn).toBe("9780000000004");
+    expect(updated.coverCheckedAt).not.toBeNull(); // untouched -- already has a cover
+    expect(updated.coverImagePath).toBe("already-has-a-cover.jpg");
+  });
+
   it("fetches and stores a cover for a new TBR item that has an ISBN", async () => {
     vi.mocked(lookupIsbn).mockResolvedValue({
       title: null,
@@ -750,6 +839,117 @@ describe("syncGoodreadsTbr", () => {
     await syncGoodreadsTbr("1993628");
 
     expect(lookupIsbn).toHaveBeenCalledTimes(25);
+  });
+
+  it("sets coverFetchFailureReason when the TBR item's cover is in an unsupported format", async () => {
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000099-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Unsupported Cover Format", isbn13: "9780000000099" },
+        ]),
+      ],
+    });
+    // mockShelfFetch installs the RSS-serving fetch mock FIRST -- capture
+    // that as the delegate before layering the cover-request interceptor on
+    // top, so shelf requests still resolve correctly. This mirrors the
+    // existing "fetches and stores a cover for a new TBR item that has an
+    // ISBN" test's wrapping pattern -- the item must arrive via the shelf
+    // feed itself (not a direct prisma.create), since reconcileTbrItems
+    // deletes any pre-existing row that isn't matched on the incoming shelf
+    // before fetchMissingTbrCovers ever runs.
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/gif" }),
+          arrayBuffer: async () => Buffer.from("not-really-a-gif"),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Unsupported Cover Format" },
+    });
+    expect(updated.coverImagePath).toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBe("unsupported_format");
+  });
+
+  it("clears a stale coverFetchFailureReason when a retry succeeds", async () => {
+    // Simulates what Task 5's ISBN-drift reset will later produce: a row
+    // that already recorded an unsupported-format failure from a prior
+    // attempt, but has since had coverCheckedAt cleared back to null so
+    // it's eligible to be retried by fetchMissingTbrCovers's query.
+    // Seeded directly (not via the shelf feed) since it must exist BEFORE
+    // reconcileTbrItems runs; its title/isbn match what the shelf below
+    // reports so reconcile matches (by ISBN) rather than deletes it, and
+    // reconcile itself never touches coverCheckedAt/coverFetchFailureReason
+    // either way.
+    await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Retry Clears Reason",
+        isbn: "9780000000098",
+        coverImagePath: null,
+        coverCheckedAt: null,
+        coverFetchFailureReason: "unsupported_format",
+      },
+    });
+
+    vi.mocked(lookupIsbn).mockResolvedValue({
+      title: null,
+      author: null,
+      publisher: null,
+      publishYear: null,
+      coverUrl: "https://covers.openlibrary.org/b/isbn/9780000000098-M.jpg",
+    });
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Retry Clears Reason", isbn13: "9780000000098" },
+        ]),
+      ],
+    });
+    const rssFetch = global.fetch;
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("covers.openlibrary.org")) {
+        return {
+          ok: true,
+          type: "basic",
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      return rssFetch(input as never);
+    }) as typeof global.fetch;
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Retry Clears Reason" },
+    });
+    expect(updated.coverImagePath).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBeNull();
+    if (updated.coverImagePath) {
+      await deleteCoverImage(updated.coverImagePath);
+    }
   });
 
   it("stops attempting further fuzzy fallback once the cap is hit, defers the rest, and skips deletion for the run", async () => {
