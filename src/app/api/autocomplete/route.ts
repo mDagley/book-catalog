@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getTbrGap } from "@/lib/tbrGap";
+import { normalizeIsbn } from "@/lib/books";
 
 const SCOPES = ["home", "books", "tbr"] as const;
 type Scope = (typeof SCOPES)[number];
@@ -31,11 +32,19 @@ async function fetchSuggestions(scope: Scope, q: string): Promise<Suggestion[]> 
     return gap.slice(0, SUGGESTION_LIMIT).map(({ title, author }) => ({ title, author }));
   }
 
+  // Mirrors search.ts's isbn-shaped-query detection so this scope matches
+  // the same way searchCatalog and /books' own query already do.
+  const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(q);
+  const normalizedIsbnQuery = looksLikeIsbnQuery ? normalizeIsbn(q) : "";
+
   return prisma.book.findMany({
     where: {
       OR: [
         { title: { contains: q, mode: "insensitive" } },
         { author: { contains: q, mode: "insensitive" } },
+        ...(normalizedIsbnQuery
+          ? [{ isbn: { contains: normalizedIsbnQuery, mode: "insensitive" as const } }]
+          : []),
       ],
     },
     select: { title: true, author: true },
