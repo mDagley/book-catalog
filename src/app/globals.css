@@ -18,6 +18,15 @@
   --status-positive: #7C8B6F; /* Bamboo */
   --status-active: #D98A96; /* Sakura */
   --perforation: #C9BCA8; /* Perforation */
+  /* Same contrast problem as --accent-foreground above, hitting a
+     different role: the spec's "text-accent underline" treatment for
+     inline text links puts Sakura text directly on the Kraft Cream page
+     background, which also measures ~2:1 -- both are pale mid-tones. A
+     deepened rose (still recognizably the same hue family) clears ~5:1.
+     --accent itself is untouched (still used for solid fills, borders,
+     focus rings, and the active-status color), since none of those
+     pairings were flagged as failing. */
+  --link: #9C4258; /* Sakura Ink -- a deepened Sakura for link text only */
 }
 
 @theme inline {
@@ -30,6 +39,7 @@
   --color-status-positive: var(--status-positive);
   --color-status-active: var(--status-active);
   --color-perforation: var(--perforation);
+  --color-link: var(--link);
   --font-sans: var(--font-karla);
   --font-display: var(--font-fraunces);
   --font-mono: var(--font-ibm-plex-mono);
@@ -52,6 +62,9 @@
     --status-positive: #9CAE8A; /* Moss */
     --status-active: #E8A2AC; /* Night Sakura */
     --perforation: #4A4658; /* Dusk Line */
+    /* Night Sakura on Night Ink already clears ~8:1, so link text reuses
+       --accent directly rather than needing its own darker value. */
+    --link: #E8A2AC; /* Night Sakura */
   }
 }
 

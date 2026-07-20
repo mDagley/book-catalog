@@ -72,7 +72,7 @@ export function CatalogResultCard({ result }: { result: SearchResult }) {
         </>
       )}
       {result.bookId && (
-        <Link href={`/books/${result.bookId}`} className="mt-2 inline-block text-sm text-accent underline">
+        <Link href={`/books/${result.bookId}`} className="mt-2 inline-block text-sm text-link underline">
           View details
         </Link>
       )}

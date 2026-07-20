@@ -74,7 +74,7 @@ export function CoverPicker({
         )}
       </div>
       {onRetake && (
-        <button type="button" onClick={onRetake} className="mt-2 text-sm text-accent underline">
+        <button type="button" onClick={onRetake} className="mt-2 text-sm text-link underline">
           {capturedImageDataUrl ? "Retake photo" : "Add a photo"}
         </button>
       )}
