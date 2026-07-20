@@ -12,6 +12,8 @@
 
 **A note on a deliberate deviation from the spec's literal wording:** the design spec says primary buttons get "a solid Sakura/Night Sakura fill with Kraft Cream/Night Ink text." Translating that literally into hex values shows the **light-mode** pairing (Sakura `#D98A96` fill + Kraft Cream `#F2E8D5` text) measures roughly 2:1 contrast — both colors are pale mid-tones, and it would fail WCAG AA (4.5:1) badly enough to make button labels hard to read. Task 1 below uses Panda Black (`#1E1B18`) as the light-mode button text color instead — kept as the same "on-accent" role name so nothing else in the plan needs to know about the substitution — which clears roughly 6:1. The **dark-mode** pairing (Night Sakura fill + Night Ink text) already clears ~8:1 as literally specified, so it is unchanged. This is flagged here for visibility; the rest of the token table follows the spec exactly.
 
+**A note on a second contrast fix found during implementation (`--link`):** the same 2:1 problem recurs for plain `text-accent underline` inline text links, which every later task in this plan uses pervasively — Sakura text directly on the Kraft Cream page background is just as illegible as Sakura-filled buttons were. This was caught mid-implementation, after Task 10 had already been committed, so a `--link`/`text-link` token (a deepened Sakura, `#9C4258` in light mode, ~5:1; reusing `--accent`'s Night Sakura value in dark mode, where it already clears ~8:1) was added and retrofitted into the already-committed components, then used in place of `text-accent` for every underlined text link in every task from that point on. Task 1's CSS snippet below has been updated to include this token so it matches what actually shipped; `--accent` itself is unchanged, since it's still correct for fills, borders, focus rings, and the active-status color.
+
 ---
 
 ## File Structure
@@ -60,6 +62,16 @@ Replace the entire contents of `src/app/globals.css` with:
   --status-positive: #7C8B6F; /* Bamboo */
   --status-active: #D98A96; /* Sakura */
   --perforation: #C9BCA8; /* Perforation */
+  /* Same contrast problem as --accent-foreground above, hitting a
+     different role: plain "text-accent underline" inline text links put
+     Sakura text directly on the Kraft Cream page background, which also
+     measures ~2:1. A deepened rose (still recognizably the same hue
+     family) clears ~5:1. --accent itself is untouched (still used for
+     solid fills, borders, focus rings, and the active-status color),
+     since none of those pairings were flagged as failing. This token and
+     its Tailwind mapping were added mid-implementation, after this
+     snippet was first written -- see the "fix: add --link token" commit. */
+  --link: #9C4258; /* Sakura Ink -- a deepened Sakura for link text only */
 }
 
 @theme inline {
@@ -72,6 +84,7 @@ Replace the entire contents of `src/app/globals.css` with:
   --color-status-positive: var(--status-positive);
   --color-status-active: var(--status-active);
   --color-perforation: var(--perforation);
+  --color-link: var(--link);
   --font-sans: var(--font-karla);
   --font-display: var(--font-fraunces);
   --font-mono: var(--font-ibm-plex-mono);
@@ -94,6 +107,9 @@ Replace the entire contents of `src/app/globals.css` with:
     --status-positive: #9CAE8A; /* Moss */
     --status-active: #E8A2AC; /* Night Sakura */
     --perforation: #4A4658; /* Dusk Line */
+    /* Night Sakura on Night Ink already clears ~8:1, so link text reuses
+       --accent directly rather than needing its own darker value. */
+    --link: #E8A2AC; /* Night Sakura */
   }
 }
 
