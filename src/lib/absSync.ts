@@ -383,10 +383,21 @@ async function backfillAbsCovers(baseUrl: string, token: string): Promise<void> 
         ? { coverImagePath: result.coverImagePath, coverFetchFailureReason: null }
         : { coverFetchFailureReason: result.reason ?? null }),
     };
-    if (copy.table === "ebook") {
-      await prisma.ebookCopy.update({ where: { id: copy.id }, data });
-    } else {
-      await prisma.audiobookCopy.update({ where: { id: copy.id }, data });
+    // Optimistic guard: only write if this row still has coverCheckedAt ===
+    // null -- see the identical rationale in fetchMissingTbrCovers
+    // (goodreadsSync.ts).
+    const updateResult =
+      copy.table === "ebook"
+        ? await prisma.ebookCopy.updateMany({
+            where: { id: copy.id, coverCheckedAt: null },
+            data,
+          })
+        : await prisma.audiobookCopy.updateMany({
+            where: { id: copy.id, coverCheckedAt: null },
+            data,
+          });
+    if (updateResult.count === 0 && "coverImagePath" in result) {
+      await deleteCoverImage(result.coverImagePath);
     }
   }
 }

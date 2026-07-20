@@ -1,7 +1,7 @@
 // src/lib/absSync.test.ts
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { fetchAbsLibraries, fetchAbsLibraryItems, syncAbsCache } from "@/lib/absSync";
@@ -744,6 +744,54 @@ describe("syncAbsCache", () => {
     if (updated.coverImagePath) {
       savedCoverPaths.push(updated.coverImagePath);
     }
+  });
+
+  it("cleans up its own saved file when a concurrent run claims the row first", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Race Winner Elsewhere",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "race-ebook-1" } },
+      },
+    });
+    const copy = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "race-ebook-1" },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/race-ebook-1/cover")) {
+        // Simulate a concurrent run (e.g. the cron and a manual "Refresh
+        // now" overlapping) winning the race and claiming this row first,
+        // right before this run's own guarded update executes.
+        await prisma.ebookCopy.update({
+          where: { id: copy.id },
+          data: { coverCheckedAt: new Date("2020-01-01T00:00:00.000Z") },
+        });
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+    const filesBefore = new Set(await readdir(uploadsDir));
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({ where: { id: copy.id } });
+    expect(updated.coverCheckedAt?.toISOString()).toBe("2020-01-01T00:00:00.000Z");
+    expect(updated.coverImagePath).toBeNull();
+    const filesAfter = await readdir(uploadsDir);
+    expect(filesAfter.filter((f) => !filesBefore.has(f))).toEqual([]);
   });
 
   it("sets coverCheckedAt without a coverImagePath when the ABS cover endpoint returns a non-OK response", async () => {
