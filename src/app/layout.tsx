@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Karla, IBM_Plex_Mono } from "next/font/google";
+import { Masthead } from "@/components/Masthead";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -34,6 +35,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${karla.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background font-sans text-foreground">
+        <Masthead />
         {children}
       </body>
     </html>
