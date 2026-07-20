@@ -2,7 +2,7 @@ export function CoverThumbnail({ coverImagePath }: { coverImagePath: string | nu
   if (!coverImagePath) {
     return (
       <div
-        className="mb-2 flex h-32 w-24 items-center justify-center rounded bg-gray-100 text-3xl text-gray-400"
+        className="mb-2 flex h-32 w-24 items-center justify-center rounded border border-dashed border-perforation bg-surface text-3xl text-foreground/40"
         aria-hidden="true"
       >
         📖

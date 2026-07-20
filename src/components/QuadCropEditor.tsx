@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import {
   capDimensions,
   computeOutputDimensions,
@@ -178,7 +179,7 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
 
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Drag the corners to match the cover&apos;s edges</p>
+      <p className="mb-2 text-sm font-medium text-foreground">Drag the corners to match the cover&apos;s edges</p>
       <div ref={containerRef} className="relative inline-block max-w-full touch-none">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -247,17 +248,12 @@ export function QuadCropEditor({ imageDataUrl, onConfirm, onRetake }: QuadCropEd
         )}
       </div>
       <div className="mt-2 flex gap-3">
-        <button
-          type="button"
-          onClick={handleConfirm}
-          disabled={isProcessing || !corners}
-          className="flex-1 rounded bg-black p-2 text-white disabled:opacity-50"
-        >
+        <Button type="button" onClick={handleConfirm} disabled={isProcessing || !corners} className="flex-1">
           {isProcessing ? "Processing..." : "Use this photo"}
-        </button>
-        <button type="button" onClick={onRetake} className="flex-1 rounded border border-black p-2">
+        </Button>
+        <Button type="button" onClick={onRetake} variant="secondary" className="flex-1">
           Retake
-        </button>
+        </Button>
       </div>
     </div>
   );

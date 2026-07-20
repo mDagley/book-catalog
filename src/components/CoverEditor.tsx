@@ -92,15 +92,15 @@ export function CoverEditor({
 
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Cover Image</p>
+      <p className="mb-2 text-sm font-medium text-foreground">Cover Image</p>
       {previewSrc ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={previewSrc} alt="Cover" className="mb-2 h-32 w-24 rounded object-cover" />
       ) : (
-        <p className="mb-2 text-sm text-gray-600">No cover set.</p>
+        <p className="mb-2 text-sm text-foreground/70">No cover set.</p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <label className="cursor-pointer text-sm underline">
+        <label className="cursor-pointer text-sm text-link underline">
           Upload a file
           <input
             type="file"
@@ -114,17 +114,13 @@ export function CoverEditor({
             type="button"
             onClick={handleLookup}
             disabled={isLookingUp}
-            className="text-sm underline disabled:opacity-50"
+            className="text-sm text-link underline disabled:opacity-50"
           >
             {isLookingUp ? "Looking up..." : "Use Open Library cover"}
           </button>
         )}
         {allowCamera && (
-          <button
-            type="button"
-            onClick={() => setShowCamera(true)}
-            className="text-sm underline"
-          >
+          <button type="button" onClick={() => setShowCamera(true)} className="text-sm text-link underline">
             Take a photo
           </button>
         )}
@@ -135,7 +131,7 @@ export function CoverEditor({
           role="dialog"
           aria-modal="true"
           aria-label="Take a cover photo"
-          className="fixed inset-0 z-10 overflow-y-auto bg-white p-4"
+          className="fixed inset-0 z-10 overflow-y-auto bg-background p-4"
         >
           <CoverCamera
             onCapture={(dataUrl) => {

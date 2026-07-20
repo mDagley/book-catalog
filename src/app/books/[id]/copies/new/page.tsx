@@ -16,8 +16,8 @@ export default async function AddCopyPage({
 
   return (
     <main className="mx-auto max-w-lg p-4">
-      <h1 className="mb-1 text-2xl font-semibold">Add a Copy</h1>
-      <p className="mb-4 text-gray-600">{book.title}</p>
+      <h1 className="mb-1 font-display text-2xl font-semibold text-foreground-strong">Add a Copy</h1>
+      <p className="mb-4 text-foreground/70">{book.title}</p>
       <AddCopyForm bookId={book.id} />
     </main>
   );

@@ -9,6 +9,7 @@ import {
 import { CatalogFilters } from "@/components/CatalogFilters";
 import { CatalogResultCard } from "@/components/CatalogResultCard";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
+import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
 export default async function BooksPage({
   searchParams,
@@ -47,14 +48,17 @@ export default async function BooksPage({
   return (
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">All Books</h1>
-        <Link href="/books/scan" className="rounded bg-black px-3 py-2 text-sm text-white">
+        <h1 className="font-display text-2xl font-semibold text-foreground-strong">All Books</h1>
+        <Link
+          href="/books/scan"
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${BUTTON_VARIANT_CLASSES.primary}`}
+        >
           + Add a book
         </Link>
       </div>
 
       <div className="mb-4 text-sm">
-        <Link href="/books/duplicates" className="underline">
+        <Link href="/books/duplicates" className="text-link underline">
           Check for duplicate books
         </Link>
       </div>
@@ -70,7 +74,7 @@ export default async function BooksPage({
       </form>
 
       {results.length === 0 ? (
-        <p className="text-gray-600">No books found.</p>
+        <p className="text-foreground/70">No books found.</p>
       ) : (
         <ul className="space-y-3">
           {results.map((result) => (

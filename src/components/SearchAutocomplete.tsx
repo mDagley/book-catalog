@@ -178,22 +178,22 @@ export function SearchAutocomplete({
         onFocus={() => setIsOpen(suggestions.length > 0)}
         placeholder={placeholder}
         autoComplete="off"
-        className="w-full rounded border p-2"
+        className="w-full rounded-lg border border-perforation bg-background px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
       />
       {isOpen && (
-        <ul className="absolute z-10 mt-1 w-full rounded border bg-white shadow-lg">
+        <ul className="absolute z-10 mt-1 w-full rounded-lg border border-perforation bg-surface shadow-lg">
           {suggestions.map((suggestion, index) => (
             <li key={`${suggestion.title}-${suggestion.author ?? ""}-${index}`}>
               <button
                 type="button"
                 onClick={() => selectSuggestion(suggestion)}
-                className={`block w-full px-3 py-2 text-left text-sm ${
-                  index === highlightedIndex ? "bg-gray-100" : ""
+                className={`block w-full px-3 py-2 text-left text-sm text-foreground ${
+                  index === highlightedIndex ? "bg-accent/15" : ""
                 }`}
               >
                 <span className="font-medium">{suggestion.title}</span>
                 {suggestion.author && (
-                  <span className="ml-1 text-gray-500">— {suggestion.author}</span>
+                  <span className="ml-1 text-foreground/70">— {suggestion.author}</span>
                 )}
               </button>
             </li>

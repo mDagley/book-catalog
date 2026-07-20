@@ -1,26 +1,74 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Sakura Postal / Library Ticket — light mode.
+     See docs/superpowers/specs/2026-07-20-sakura-postal-theme-design.md */
+  --background: #F2E8D5; /* Kraft Cream */
+  --surface: #F2E8D5; /* Kraft Cream — cards sit on the same cream as the
+     page, distinguished only by their dashed border, not a fill change */
+  --foreground: #332A22; /* Ink */
+  --foreground-strong: #1E1B18; /* Panda Black */
+  --accent: #D98A96; /* Sakura */
+  /* The spec calls for Kraft Cream text on a solid Sakura fill, but Sakura
+     and Kraft Cream are both pale mid-tones -- that pairing measures ~2:1
+     contrast, well under WCAG AA's 4.5:1. Panda Black on Sakura clears
+     ~6:1, so button text uses that instead; every other light-mode role
+     below keeps its spec value as written. */
+  --accent-foreground: #1E1B18;
+  --status-positive: #7C8B6F; /* Bamboo */
+  --status-active: #D98A96; /* Sakura */
+  --perforation: #C9BCA8; /* Perforation */
+  /* Same contrast problem as --accent-foreground above, hitting a
+     different role: the spec's "text-accent underline" treatment for
+     inline text links puts Sakura text directly on the Kraft Cream page
+     background, which also measures ~2:1 -- both are pale mid-tones. A
+     deepened rose (still recognizably the same hue family) clears ~5:1.
+     --accent itself is untouched (still used for solid fills, borders,
+     focus rings, and the active-status color), since none of those
+     pairings were flagged as failing. */
+  --link: #9C4258; /* Sakura Ink -- a deepened Sakura for link text only */
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-foreground-strong: var(--foreground-strong);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-status-positive: var(--status-positive);
+  --color-status-active: var(--status-active);
+  --color-perforation: var(--perforation);
+  --color-link: var(--link);
+  --font-sans: var(--font-karla);
+  --font-display: var(--font-fraunces);
+  --font-mono: var(--font-ibm-plex-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Sakura Postal / Library Ticket — dark mode. A distinct palette, not
+       an inversion, per the design spec. */
+    --background: #1D1B24; /* Night Ink */
+    --surface: #2A2733; /* Card Dusk */
+    --foreground: #EFE6D8; /* Moonlit Cream */
+    /* Dark backgrounds have no "near-black" that would read as
+       highest-contrast, so this role collapses onto the same Moonlit
+       Cream already used for body text. */
+    --foreground-strong: #EFE6D8;
+    --accent: #E8A2AC; /* Night Sakura */
+    --accent-foreground: #1D1B24; /* Night Ink — already clears WCAG AA
+       against Night Sakura as literally specified */
+    --status-positive: #9CAE8A; /* Moss */
+    --status-active: #E8A2AC; /* Night Sakura */
+    --perforation: #4A4658; /* Dusk Line */
+    /* Night Sakura on Night Ink already clears ~8:1, so link text reuses
+       --accent directly rather than needing its own darker value. */
+    --link: #E8A2AC; /* Night Sakura */
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

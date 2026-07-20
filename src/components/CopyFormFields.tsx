@@ -32,11 +32,13 @@ export function CopyFormFields({
   idPrefix = "",
 }: CopyFormFieldsProps) {
   const fieldId = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
+  const fieldClass =
+    "mt-1 w-full rounded-lg border border-perforation bg-background px-3 py-2 text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
   return (
     <>
       <div>
-        <label htmlFor={fieldId("format")} className="block text-sm font-medium">
+        <label htmlFor={fieldId("format")} className="block text-sm font-medium text-foreground">
           Format
         </label>
         <select
@@ -44,7 +46,7 @@ export function CopyFormFields({
           name="format"
           required
           defaultValue={defaultFormat}
-          className="mt-1 w-full rounded border p-2"
+          className={fieldClass}
         >
           <option value="">Select a format</option>
           {FORMAT_OPTIONS.map((opt) => (
@@ -55,18 +57,13 @@ export function CopyFormFields({
         </select>
       </div>
       <div>
-        <label htmlFor={fieldId("publisher")} className="block text-sm font-medium">
+        <label htmlFor={fieldId("publisher")} className="block text-sm font-medium text-foreground">
           Publisher
         </label>
-        <input
-          id={fieldId("publisher")}
-          name="publisher"
-          defaultValue={defaultPublisher}
-          className="mt-1 w-full rounded border p-2"
-        />
+        <input id={fieldId("publisher")} name="publisher" defaultValue={defaultPublisher} className={fieldClass} />
       </div>
       <div>
-        <label htmlFor={fieldId("publishYear")} className="block text-sm font-medium">
+        <label htmlFor={fieldId("publishYear")} className="block text-sm font-medium text-foreground">
           Publish Year
         </label>
         <input
@@ -74,18 +71,18 @@ export function CopyFormFields({
           name="publishYear"
           type="number"
           defaultValue={defaultPublishYear}
-          className="mt-1 w-full rounded border p-2"
+          className={`${fieldClass} font-mono`}
         />
       </div>
       <div>
-        <label htmlFor={fieldId("specialNotes")} className="block text-sm font-medium">
+        <label htmlFor={fieldId("specialNotes")} className="block text-sm font-medium text-foreground">
           Special Notes
         </label>
         <textarea
           id={fieldId("specialNotes")}
           name="specialNotes"
           defaultValue={defaultSpecialNotes}
-          className="mt-1 w-full rounded border p-2"
+          className={fieldClass}
         />
       </div>
     </>

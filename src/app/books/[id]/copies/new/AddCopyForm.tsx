@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { addCopy } from "@/lib/actions/copies";
 import type { CopyFormState } from "@/lib/copies";
 import { CopyFormFields } from "@/components/CopyFormFields";
+import { Button } from "@/components/ui/Button";
 
 const initialState: CopyFormState = {};
 
@@ -15,13 +16,9 @@ export function AddCopyForm({ bookId }: { bookId: string }) {
     <form action={formAction} className="space-y-4">
       <CopyFormFields />
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      <button
-        type="submit"
-        disabled={isPending}
-        className="w-full rounded bg-black p-2 text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={isPending} className="w-full">
         {isPending ? "Saving..." : "Save"}
-      </button>
+      </Button>
     </form>
   );
 }

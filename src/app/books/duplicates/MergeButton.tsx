@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { Button } from "@/components/ui/Button";
 
 // Split out of page.tsx (a Server Component) so this one button can read
 // pending state from its enclosing <form> via useFormStatus -- each group's
@@ -11,12 +12,8 @@ import { useFormStatus } from "react-dom";
 export function MergeButton() {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="mt-1 rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-50"
-    >
+    <Button type="submit" variant="secondary" disabled={pending} className="mt-1">
       {pending ? "Merging..." : "Keep this one, merge the others into it"}
-    </button>
+    </Button>
   );
 }
