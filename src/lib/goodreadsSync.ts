@@ -440,9 +440,14 @@ const TBR_COVER_FETCH_CAP = 25;
 // sibling concern above for why a permanently-missing cover must never be
 // retried.
 async function fetchMissingTbrCovers(): Promise<void> {
+  // A stable orderBy (matching backfillAbsCovers's identical pattern in
+  // absSync.ts) so "the first TBR_COVER_FETCH_CAP pending rows" is a
+  // deterministic set across runs, not an arbitrary one Postgres happens to
+  // return absent an explicit order.
   const pending = await prisma.goodreadsTbrItem.findMany({
     where: { coverImagePath: null, coverCheckedAt: null, isbn: { not: null } },
     select: { id: true, isbn: true },
+    orderBy: { id: "asc" },
     take: TBR_COVER_FETCH_CAP,
   });
 

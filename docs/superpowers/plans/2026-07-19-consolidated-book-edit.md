@@ -403,6 +403,7 @@ to:
 
 ```ts
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}/edit`);
 ```
 
@@ -438,6 +439,7 @@ to:
 
 ```ts
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}/edit`);
 ```
 
@@ -452,8 +454,11 @@ to:
 
 ```ts
   revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
   redirect(`/books/${bookId}/edit`);
 ```
+
+> **Note (added after this task landed):** the snippets above already show the corrected form. The first pass of this task originally redirected to `/books/${bookId}/edit` while still only calling `revalidatePath(\`/books/${bookId}\`)` — since this project doesn't use Cache Components, `revalidatePath` doesn't cascade to a different route, so the newly-redirected-to page could serve a stale cache. This was caught by code quality review and fixed in commit `3fc4cbb` (`updateCopy`/`updateEbookCopyCover`/`updateAudiobookCopyCover`, matching `updateBook`'s already-correct pattern above), then again in commit `b301ed2` for all four `readingProgress.ts` actions (added by Task 3, after Task 3 landed), and a third time in commit `57192f8` for `addCopy` and `deleteCopy` in this same file (`copies.ts`) — the latter caught by the final whole-branch review, since `deleteCopy`'s missing revalidation could leave a stale `EditCopyForm` for an already-deleted copy on `/books/[id]/edit`, whose resubmission throws an unhandled Prisma P2025. **The lesson for future plans:** whenever a redirect target changes, revalidate the new target too, not just the old one — grep for `revalidatePath`/`redirect` pairs across the whole file being touched, not just the function named in the task.
 
 - [ ] **Step 4: Typecheck, lint, full suite**
 

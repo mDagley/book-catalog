@@ -119,7 +119,7 @@ export default async function EditBookPage({
           <h2 className="mb-2 text-lg font-medium">Physical Copies</h2>
           <div className="space-y-6">
             {book.copies.map((copy, index) => (
-              <div key={copy.id} className="rounded border p-3">
+              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
                 <h3 className="mb-2 text-sm font-semibold text-gray-700">
                   Physical Copy #{index + 1}
                 </h3>
@@ -144,7 +144,7 @@ export default async function EditBookPage({
           <h2 className="mb-2 text-lg font-medium">Ebooks</h2>
           <div className="space-y-6">
             {book.ebookCopies.map((copy, index) => (
-              <div key={copy.id} className="rounded border p-3">
+              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
                 <h3 className="mb-2 text-sm font-semibold text-gray-700">
                   Ebook #{index + 1}
                 </h3>
@@ -165,7 +165,7 @@ export default async function EditBookPage({
           <h2 className="mb-2 text-lg font-medium">Audiobooks</h2>
           <div className="space-y-6">
             {book.audiobookCopies.map((copy, index) => (
-              <div key={copy.id} className="rounded border p-3">
+              <div key={copy.id} id={`copy-${copy.id}`} className="scroll-mt-4 rounded border p-3">
                 <h3 className="mb-2 text-sm font-semibold text-gray-700">
                   Audiobook #{index + 1}
                 </h3>
