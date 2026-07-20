@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReadStatus } from "@prisma/client";
 import type { SearchResult } from "@/lib/search";
 import { FORMAT_LABELS } from "@/components/CopyFormFields";
 import { READ_STATUS_LABELS, ratingStars } from "@/components/ReadingProgressFields";
@@ -6,11 +7,15 @@ import { CoverThumbnail } from "@/components/CoverThumbnail";
 import { PandaStamp } from "@/components/PandaStamp";
 import { TicketCard, TicketDivider } from "@/components/ui/TicketCard";
 
-const STATUS_CLASS: Record<string, string> = {
+// `satisfies` (rather than `: Record<string, string>`) means a future
+// ReadStatus enum value that's added to the Prisma schema but forgotten here
+// fails at compile time instead of silently producing an undefined
+// className at runtime.
+const STATUS_CLASS = {
   READ: "text-status-positive",
   READING: "text-status-active",
   TO_READ: "text-foreground/70",
-};
+} satisfies Record<ReadStatus, string>;
 
 interface MetaPart {
   key: string;

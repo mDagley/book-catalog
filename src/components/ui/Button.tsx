@@ -21,9 +21,14 @@ export const BUTTON_VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary: "border border-dashed border-perforation bg-transparent text-foreground",
 };
 
-export function Button({ variant = "primary", className = "", ...props }: ButtonProps) {
+// Defaults to type="button" rather than the HTML default of "submit" --
+// every current call site passes an explicit type anyway, so this only
+// guards against a future button (e.g. a cancel/secondary action inside a
+// form) accidentally submitting because its author forgot to set one.
+export function Button({ type = "button", variant = "primary", className = "", ...props }: ButtonProps) {
   return (
     <button
+      type={type}
       {...props}
       className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50 ${BUTTON_VARIANT_CLASSES[variant]} ${className}`}
     />
