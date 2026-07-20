@@ -62,7 +62,7 @@ export default async function BookDetailPage({
               />
             )}
             <div className="mt-2 flex gap-2">
-              <Link href={`/books/${book.id}/edit`} className="text-sm underline">
+              <Link href={`/books/${book.id}/edit#copy-${copy.id}`} className="text-sm underline">
                 Edit
               </Link>
               <form action={deleteCopy.bind(null, copy.id)}>
@@ -91,7 +91,10 @@ export default async function BookDetailPage({
                 ) : (
                   <p className="text-sm text-gray-600">No cover set.</p>
                 )}
-                <Link href={`/books/${book.id}/edit`} className="mt-2 inline-block text-sm underline">
+                <Link
+                  href={`/books/${book.id}/edit#copy-${copy.id}`}
+                  className="mt-2 inline-block text-sm underline"
+                >
                   Edit cover
                 </Link>
               </li>
@@ -118,7 +121,10 @@ export default async function BookDetailPage({
                 ) : (
                   <p className="text-sm text-gray-600">No cover set.</p>
                 )}
-                <Link href={`/books/${book.id}/edit`} className="mt-2 inline-block text-sm underline">
+                <Link
+                  href={`/books/${book.id}/edit#copy-${copy.id}`}
+                  className="mt-2 inline-block text-sm underline"
+                >
                   Edit cover
                 </Link>
               </li>
