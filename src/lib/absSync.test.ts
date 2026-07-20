@@ -775,6 +775,91 @@ describe("syncAbsCache", () => {
     expect(updated.coverCheckedAt).not.toBeNull();
   });
 
+  it("sets coverFetchFailureReason when the ABS cover is in an unsupported format", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Unsupported Cover Format",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "backfill-unsupported-format" } },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-unsupported-format/cover")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/gif" }),
+          arrayBuffer: async () => Buffer.from("not-really-a-gif"),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-unsupported-format" },
+    });
+    expect(updated.coverImagePath).toBeNull();
+    expect(updated.coverCheckedAt).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBe("unsupported_format");
+  });
+
+  it("clears a stale coverFetchFailureReason when a retry succeeds", async () => {
+    // Simulates what Task 5's ISBN-drift reset will later produce: a row
+    // that already recorded an unsupported-format failure from a prior
+    // attempt, but has since had coverCheckedAt cleared back to null so
+    // it's eligible to be retried by this same backfill query.
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync Retry Clears Reason",
+        hasEbook: true,
+        ebookCopies: {
+          create: {
+            absItemId: "backfill-retry-clears-reason",
+            coverImagePath: null,
+            coverCheckedAt: null,
+            coverFetchFailureReason: "unsupported_format",
+          },
+        },
+      },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      if (url.includes("/api/items/backfill-retry-clears-reason/cover")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () =>
+            Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+              "base64",
+            ),
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected fetch in test: ${url}`);
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.ebookCopy.findFirstOrThrow({
+      where: { absItemId: "backfill-retry-clears-reason" },
+    });
+    expect(updated.coverImagePath).not.toBeNull();
+    expect(updated.coverFetchFailureReason).toBeNull();
+    if (updated.coverImagePath) {
+      savedCoverPaths.push(updated.coverImagePath);
+    }
+  });
+
   it("never re-attempts a cover fetch once coverCheckedAt is set", async () => {
     await prisma.book.create({
       data: {
@@ -801,6 +886,41 @@ describe("syncAbsCache", () => {
       expect.stringContaining("backfill-already-checked/cover"),
       expect.anything(),
     );
+  });
+
+  it("interleaves ebook and audiobook cover backfill instead of draining ebooks first", async () => {
+    // 30 ebook copies missing covers (more than ABS_COVER_FETCH_CAP's 25) and
+    // 1 audiobook copy missing one. Under the old concatenate-then-slice
+    // behavior, the audiobook candidate would never be reached (the first
+    // 25 slots are entirely ebooks). Interleaving must give it a slot.
+    const book = await prisma.book.create({
+      data: { title: "Test Abs Sync Interleave Backfill Book", hasEbook: true, hasAudiobook: true },
+    });
+    for (let i = 0; i < 30; i++) {
+      await prisma.ebookCopy.create({
+        data: { bookId: book.id, absItemId: `interleave-ebook-${i}` },
+      });
+    }
+    await prisma.audiobookCopy.create({
+      data: { bookId: book.id, absItemId: "interleave-audiobook-1" },
+    });
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/libraries")) {
+        return { ok: true, json: async () => ({ libraries: [] }) } as Response;
+      }
+      // Every cover request "succeeds" with a 404 -- this test only cares
+      // about which absItemIds get REQUESTED, not what comes back.
+      return { ok: false, status: 404 } as Response;
+    }) as typeof global.fetch;
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updatedAudiobook = await prisma.audiobookCopy.findUniqueOrThrow({
+      where: { absItemId: "interleave-audiobook-1" },
+    });
+    expect(updatedAudiobook.coverCheckedAt).not.toBeNull();
   });
 });
 

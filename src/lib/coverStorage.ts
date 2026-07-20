@@ -2,6 +2,19 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+// Thrown specifically for the "image format we don't save" case, distinct
+// from the generic Error thrown for a malformed data URL or an oversized
+// payload -- callers (saveCoverFromUrl, fetchAbsCoverAndSave) catch this
+// specifically so a cover that WAS found, just in an unsaveable format, can
+// be recorded differently from a genuine "no cover exists" outcome. See
+// docs/superpowers/specs/2026-07-19-cover-fetch-robustness-design.md.
+export class UnsupportedCoverFormatError extends Error {
+  constructor(mimeType: string) {
+    super(`Unsupported image type: ${mimeType}`);
+    this.name = "UnsupportedCoverFormatError";
+  }
+}
+
 const UPLOADS_DIR = process.env.UPLOADS_DIR ?? "./uploads";
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -33,7 +46,7 @@ export async function saveCoverImage(dataUrl: string): Promise<string> {
   const [, mimeType, base64Data] = match;
   const ext = MIME_TO_EXT[mimeType];
   if (!ext) {
-    throw new Error(`Unsupported image type: ${mimeType}`);
+    throw new UnsupportedCoverFormatError(mimeType);
   }
 
   const buffer = Buffer.from(base64Data, "base64");

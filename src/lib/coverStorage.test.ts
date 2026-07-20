@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
+import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 
 const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const savedPaths: string[] = [];
@@ -27,21 +27,34 @@ describe("saveCoverImage", () => {
     expect(written.length).toBeGreaterThan(0);
   });
 
-  it("rejects a data URL with an unsupported mime type", async () => {
+  it("rejects a data URL with an unsupported mime type, throwing UnsupportedCoverFormatError specifically", async () => {
     const dataUrl = "data:text/plain;base64,aGVsbG8=";
     await expect(saveCoverImage(dataUrl)).rejects.toThrow(/unsupported image type/i);
+    await expect(saveCoverImage(dataUrl)).rejects.toBeInstanceOf(UnsupportedCoverFormatError);
   });
 
-  it("rejects a malformed data URL", async () => {
-    await expect(saveCoverImage("not-a-data-url")).rejects.toThrow(/invalid data url/i);
+  it("throws a plain Error, not UnsupportedCoverFormatError, for a malformed data URL", async () => {
+    let caught: unknown;
+    try {
+      await saveCoverImage("not-a-data-url");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(UnsupportedCoverFormatError);
   });
 
-  it("rejects a payload larger than the max cover image size", async () => {
-    // One byte over the 10MB limit, once base64-decoded.
+  it("throws a plain Error, not UnsupportedCoverFormatError, for an oversized payload", async () => {
     const oversizedBuffer = Buffer.alloc(10 * 1024 * 1024 + 1, 1);
     const dataUrl = `data:image/png;base64,${oversizedBuffer.toString("base64")}`;
-
-    await expect(saveCoverImage(dataUrl)).rejects.toThrow(/too large/i);
+    let caught: unknown;
+    try {
+      await saveCoverImage(dataUrl);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(UnsupportedCoverFormatError);
   });
 });
 
