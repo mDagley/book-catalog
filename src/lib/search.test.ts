@@ -130,6 +130,25 @@ describe("searchCatalog", () => {
     expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id, third.id]);
   });
 
+  it("returns at most `limit` results when browsing all", async () => {
+    await prisma.book.create({ data: { title: "Test Search Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search Limit Two" } });
+    await prisma.book.create({ data: { title: "Test Search Limit Three" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title", limit: 2 });
+
+    expect(results).toHaveLength(2);
+  });
+
+  it("returns every result when limit is omitted", async () => {
+    await prisma.book.create({ data: { title: "Test Search No Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search No Limit Two" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title" });
+
+    expect(results.filter((r) => r.title.startsWith("Test Search No Limit")).length).toBe(2);
+  });
+
   it("defaults to id-ascending order when sortBy is omitted (preserves existing behavior)", async () => {
     const first = await prisma.book.create({ data: { title: "Test Search Sort Order Beta" } });
     const second = await prisma.book.create({ data: { title: "Test Search Sort Order Alpha" } });

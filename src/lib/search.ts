@@ -32,6 +32,7 @@ export interface SearchOptions {
   statusMode?: StatusFilterMode;
   browseAll?: boolean;
   sortBy?: "id" | "title";
+  limit?: number;
 }
 
 export type ReadStatusFilterValue = "to_read" | "reading" | "read" | "unrated";
@@ -179,6 +180,10 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     // the same query could return a different order across runs as the
     // catalog grows.
     orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
+    // `limit` is opt-in -- omitted entirely (rather than defaulted) so the
+    // home-page search caller, which never passes it, keeps its existing
+    // unlimited behavior.
+    ...(options.limit !== undefined ? { take: options.limit } : {}),
   });
 
   return books.map((book) => ({
