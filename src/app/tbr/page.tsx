@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
+import { RecomputeOwnershipButton } from "@/components/RecomputeOwnershipButton";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { TicketCard } from "@/components/ui/TicketCard";
 
@@ -28,9 +29,12 @@ export default async function TbrGapPage({
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">TBR — Not Yet Owned</h1>
-        <Link href="/" className="text-sm text-link underline">
-          Back to search
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <RecomputeOwnershipButton />
+          <Link href="/" className="text-sm text-link underline">
+            Back to search
+          </Link>
+        </div>
       </div>
 
       <form action="/tbr" method="get" className="mb-4">

@@ -4,29 +4,22 @@
 // deploying that migration -- see
 // docs/superpowers/plans/2026-07-25-tbr-ownership-tracking.md.
 //
-// Not invoked automatically by any application code, sync, or test. This is
-// the ONE place the old O(TBR items x owned books) fuzzy-match cost still
-// runs -- once, deliberately, offline -- instead of on every page load.
+// Equivalent to the "Recompute ownership" button on /tbr; this CLI form
+// exists for environments where a shell is easier to reach than the UI.
+// Both call the same recomputeAllTbrOwnership(), so there is exactly one
+// implementation of the cross-product to trust rather than two that can
+// silently drift apart.
+//
+// Not invoked automatically by any application code, sync, or test.
+import { recomputeAllTbrOwnership } from "@/lib/tbrGap";
 import { prisma } from "@/lib/prisma";
-import { isTitleMatch } from "@/lib/matching";
 
 async function main() {
-  const [tbrItems, books] = await Promise.all([
-    prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true } }),
-    prisma.book.findMany({ select: { title: true } }),
-  ]);
-  const ownedTitles = books.map((b) => b.title);
-
-  let updated = 0;
-  for (const item of tbrItems) {
-    const owned = ownedTitles.some((title) => isTitleMatch(item.title, title));
-    if (owned) {
-      await prisma.goodreadsTbrItem.update({ where: { id: item.id }, data: { owned: true } });
-      updated++;
-    }
-  }
-
-  console.log(`Backfilled ownership: ${updated}/${tbrItems.length} TBR items marked owned.`);
+  const { total, markedOwned, markedUnowned } = await recomputeAllTbrOwnership();
+  console.log(
+    `Recomputed ownership across ${total} TBR items: ` +
+      `${markedOwned} newly marked owned, ${markedUnowned} marked no longer owned.`,
+  );
 }
 
 main()

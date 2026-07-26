@@ -92,6 +92,62 @@ export async function recheckOwnedTbrItems(): Promise<void> {
   });
 }
 
+export interface TbrOwnershipRecomputeResult {
+  total: number;
+  markedOwned: number;
+  markedUnowned: number;
+}
+
+// Recomputes `owned` from scratch for EVERY TBR item, in both directions.
+//
+// This is the full cross-product the per-request path used to run (measured
+// ~49s at 900 books x 808 TBR items) -- deliberately confined to this one
+// explicitly-triggered function instead of every page load. It backs both the
+// one-time post-migration backfill and the manual "Recompute ownership"
+// button on /tbr.
+//
+// Unlike markTbrItemsOwnedByTitle/recheckOwnedTbrItems -- which are narrow,
+// incremental, and each only move rows one direction -- this is the
+// authoritative repair pass: it can correct a row that drifted EITHER way,
+// so it stays correct when run repeatedly rather than only working once
+// against an all-false starting state.
+export async function recomputeAllTbrOwnership(): Promise<TbrOwnershipRecomputeResult> {
+  const [tbrItems, books] = await Promise.all([
+    prisma.goodreadsTbrItem.findMany({ select: { id: true, title: true, owned: true } }),
+    prisma.book.findMany({ select: { title: true } }),
+  ]);
+  const ownedTitles = books.map((b) => b.title);
+
+  // Only rows whose value actually changes are written -- a repeat run over
+  // an already-correct table issues no UPDATE at all.
+  const toOwned: string[] = [];
+  const toUnowned: string[] = [];
+  for (const item of tbrItems) {
+    const owned = ownedTitles.some((title) => isTitleMatch(item.title, title));
+    if (owned && !item.owned) toOwned.push(item.id);
+    else if (!owned && item.owned) toUnowned.push(item.id);
+  }
+
+  if (toOwned.length > 0) {
+    await prisma.goodreadsTbrItem.updateMany({
+      where: { id: { in: toOwned } },
+      data: { owned: true },
+    });
+  }
+  if (toUnowned.length > 0) {
+    await prisma.goodreadsTbrItem.updateMany({
+      where: { id: { in: toUnowned } },
+      data: { owned: false },
+    });
+  }
+
+  return {
+    total: tbrItems.length,
+    markedOwned: toOwned.length,
+    markedUnowned: toUnowned.length,
+  };
+}
+
 // `query` is applied in-memory, after the DB query, against the full
 // (already sorted) gap list -- filtering ~800 items in-process is cheap, and
 // avoids a per-query DB round trip for what would otherwise be an unbounded

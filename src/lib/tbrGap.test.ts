@@ -5,6 +5,7 @@ import {
   groupByInitial,
   markTbrItemsOwnedByTitle,
   recheckOwnedTbrItems,
+  recomputeAllTbrOwnership,
   type TbrGapItem,
 } from "@/lib/tbrGap";
 
@@ -308,5 +309,71 @@ describe("recheckOwnedTbrItems", () => {
 
     const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
     expect(updated.owned).toBe(false);
+  });
+});
+
+describe("recomputeAllTbrOwnership", () => {
+  it("flips an unowned item to owned when a Book matches it", async () => {
+    await prisma.book.create({ data: { title: "Test TBR Recompute Newly Acquired" } });
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Newly Acquired", author: "Someone", owned: false },
+    });
+
+    await recomputeAllTbrOwnership();
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.owned).toBe(true);
+  });
+
+  // The capability the one-way backfill script never had: correcting a
+  // wrongly-owned row back to unowned.
+  it("flips a wrongly-owned item back to unowned when no Book matches it", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Stale Owned Flag", author: "Someone", owned: true },
+    });
+
+    await recomputeAllTbrOwnership();
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.owned).toBe(false);
+  });
+
+  it("leaves already-correct rows in both states alone", async () => {
+    await prisma.book.create({ data: { title: "Test TBR Recompute Correct Owned" } });
+    const owned = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Correct Owned", author: "Someone", owned: true },
+    });
+    // Deliberately NOT "...Correct Unowned" -- that scores 97 against the
+    // owned fixture above (one word differing out of five clears the 85
+    // threshold easily), so it would legitimately be marked owned and this
+    // test would fail for a reason that has nothing to do with the code.
+    const unowned = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Solitary Vellum Marginalia", author: "Someone", owned: false },
+    });
+
+    await recomputeAllTbrOwnership();
+
+    expect(
+      (await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: owned.id } })).owned,
+    ).toBe(true);
+    expect(
+      (await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: unowned.id } })).owned,
+    ).toBe(false);
+  });
+
+  it("reports how many rows it changed, and in which direction", async () => {
+    await prisma.book.create({ data: { title: "Test TBR Recompute Counted Acquisition" } });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Counted Acquisition", author: "Someone", owned: false },
+    });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Recompute Counted Divestment", author: "Someone", owned: true },
+    });
+
+    const result = await recomputeAllTbrOwnership();
+
+    expect(result.markedOwned).toBe(1);
+    expect(result.markedUnowned).toBe(1);
+    expect(result.total).toBeGreaterThanOrEqual(2);
   });
 });
