@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
-import { findBestTitleMatch, normalizeTitle } from "@/lib/matching";
+import { findBestTitleMatch, normalizeTitle, isTitleMatch } from "@/lib/matching";
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { lookupIsbn } from "@/lib/isbnLookup";
 import { saveCoverFromUrl } from "@/lib/books";
@@ -308,6 +308,12 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
     select: { id: true, title: true, author: true, isbn: true, coverImagePath: true },
   });
 
+  // Fetched once per sync (not per shelf item) so computing `owned` below
+  // stays O(shelf items x owned books) worst case rather than adding a query
+  // per item. Only new and retitled items actually run the comparison.
+  const ownedBooks = await prisma.book.findMany({ select: { title: true } });
+  const ownedTitles = ownedBooks.map((b) => b.title);
+
   const existingByIsbn = new Map<string, ExistingTbrItem>();
   // Precomputed once, not recomputed by normalizeTitle() inside the match
   // loop below for every (shelf item x candidate) pair -- normalizeTitle
@@ -329,7 +335,8 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
   }
 
   const matchedIds = new Set<string>();
-  const toCreate: { title: string; author: string | null; isbn: string | null }[] = [];
+  const toCreate: { title: string; author: string | null; isbn: string | null; owned: boolean }[] =
+    [];
   let fuzzyFallbackCount = 0;
   let hitFuzzyFallbackCap = false;
   let deferredCount = 0;
@@ -388,11 +395,29 @@ async function reconcileTbrItems(shelfItems: GoodreadsBook[]): Promise<void> {
             ...(isbnChanged && matched.coverImagePath === null
               ? { coverCheckedAt: null, coverFetchFailureReason: null }
               : {}),
+            // A title that DIDN'T change can't have changed which Book (if
+            // any) it matches, so `owned` can't have gone stale from this
+            // update alone -- recomputing here unconditionally would fight
+            // the create/edit/delete hooks (markTbrItemsOwnedByTitle /
+            // recheckOwnedTbrItems) that are the source of truth for
+            // `owned` the rest of the time, e.g. flipping a row back to
+            // owned:false the moment its author changes even though the
+            // owned-book set never changed. Only a real title change can
+            // possibly alter which Book this row matches, so only that case
+            // recomputes.
+            ...(matched.title !== shelfItem.title
+              ? { owned: ownedTitles.some((t) => isTitleMatch(shelfItem.title, t)) }
+              : {}),
           },
         });
       }
     } else {
-      toCreate.push({ title: shelfItem.title, author: shelfItem.author, isbn: shelfItem.isbn });
+      toCreate.push({
+        title: shelfItem.title,
+        author: shelfItem.author,
+        isbn: shelfItem.isbn,
+        owned: ownedTitles.some((t) => isTitleMatch(shelfItem.title, t)),
+      });
     }
   }
 

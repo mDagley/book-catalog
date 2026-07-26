@@ -1262,6 +1262,92 @@ describe("syncGoodreadsTbr", () => {
     expect(wellOfAscensionRow?.coverImagePath).toBe("well-of-ascension-cover.jpg");
   });
 
+  it("sets owned:true on a newly-created shelf item that matches an existing owned Book", async () => {
+    await prisma.book.create({
+      data: { title: "Test Goodreads Sync Owned Match" },
+    });
+
+    mockShelfFetch({
+      "to-read": [buildRssPage([{ title: "Test Goodreads Sync Owned Match" }])],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const item = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync Owned Match" },
+    });
+    expect(item.owned).toBe(true);
+  });
+
+  it("sets owned:false on a newly-created shelf item with no matching owned Book", async () => {
+    mockShelfFetch({
+      "to-read": [buildRssPage([{ title: "Test Goodreads Sync No Owned Match" }])],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const item = await prisma.goodreadsTbrItem.findFirstOrThrow({
+      where: { title: "Test Goodreads Sync No Owned Match" },
+    });
+    expect(item.owned).toBe(false);
+  });
+
+  it("recomputes owned when an existing item's title changes to match an owned Book", async () => {
+    await prisma.book.create({
+      data: { title: "Test Goodreads Sync Retitled Match" },
+    });
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Old Title",
+        isbn: "9780000000201",
+        owned: false,
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          { title: "Test Goodreads Sync Retitled Match", isbn13: "9780000000201" },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(updated.title).toBe("Test Goodreads Sync Retitled Match");
+    expect(updated.owned).toBe(true);
+  });
+
+  it("does not change owned when an existing item's title is unchanged", async () => {
+    const existing = await prisma.goodreadsTbrItem.create({
+      data: {
+        title: "Test Goodreads Sync Unchanged Title",
+        author: "Old Author",
+        isbn: "9780000000202",
+        owned: true,
+      },
+    });
+
+    mockShelfFetch({
+      "to-read": [
+        buildRssPage([
+          {
+            title: "Test Goodreads Sync Unchanged Title",
+            author: "New Author",
+            isbn13: "9780000000202",
+          },
+        ]),
+      ],
+    });
+
+    await syncGoodreadsTbr("1993628");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: existing.id } });
+    expect(updated.author).toBe("New Author");
+    expect(updated.owned).toBe(true);
+  });
+
   it("stays fast when many isbn-less shelf items each need a fallback title match against a large existing table (regression: production CPU incident)", async () => {
     // Real book titles commonly have colons/subtitles/series suffixes,
     // which titleForms() expands into multiple normalized variants each --
