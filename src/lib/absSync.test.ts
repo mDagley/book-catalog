@@ -26,6 +26,7 @@ async function cleanupTestAbsSyncBooks(): Promise<void> {
     where: { book: { title: { startsWith: "Test Abs Sync" } } },
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
+  await prisma.goodreadsTbrItem.deleteMany({ where: { title: { startsWith: "Test Abs Sync" } } });
 }
 
 afterEach(async () => {
@@ -308,6 +309,29 @@ describe("syncAbsCache", () => {
     expect(copies).toBe(0);
   });
 
+  it("marks a matching TBR item owned when a new Book is created from an ABS item", async () => {
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Abs Sync TBR Match New Book", author: "Someone" },
+    });
+
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-tbr-match-new-book-1",
+            media: { metadata: { title: "Test Abs Sync TBR Match New Book" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(updated.owned).toBe(true);
+  });
+
   it("links two different audiobook editions of the same title onto one Book", async () => {
     mockLibrariesAndItems(
       {
@@ -415,6 +439,48 @@ describe("syncAbsCache", () => {
       where: { title: "Test Abs Sync Fully Removed" },
     });
     expect(remaining).toHaveLength(0);
+  });
+
+  it("unmarks a TBR item's owned flag when its Book is deleted for having zero copies left", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Abs Sync TBR Unmark On Delete",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-tbr-unmark-stale" } },
+      },
+    });
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Abs Sync TBR Unmark On Delete", author: "Someone", owned: true },
+    });
+
+    // "test-tbr-unmark-stale" is deliberately omitted from this pass's ebook
+    // items so its copy goes stale and the Book gets deleted (zero copies of
+    // any kind left). An unrelated "survivor" ebook item is included so the
+    // EBOOK media type counts as synced this pass -- removeStaleAbsLinks
+    // only prunes a media type when at least one item of that type was
+    // actually fetched, so an empty ebook response here would prune nothing
+    // and this test would prove nothing.
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-tbr-unmark-other",
+            media: { metadata: { title: "Test Abs Sync TBR Unmark Survivor" } },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const remaining = await prisma.book.findMany({
+      where: { title: "Test Abs Sync TBR Unmark On Delete" },
+    });
+    expect(remaining).toHaveLength(0);
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(updated.owned).toBe(false);
   });
 
   it("keeps a Book that still has a physical copy even after losing every linked ABS item", async () => {
