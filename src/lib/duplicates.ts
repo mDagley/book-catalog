@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { titleMatchScore, titleForms, normalizeTitle, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import { recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 export interface DuplicateCandidate {
   id: string;
@@ -316,6 +317,14 @@ export async function mergeBooksData(
     }),
     prisma.book.deleteMany({ where: { id: { in: mergeIds } } }),
   ]);
+
+  // The merged-away titles are now gone from the Book table -- one of them
+  // may have been the only thing keeping a TBR item marked owned. Runs
+  // AFTER the transaction commits (and outside it, since the array form of
+  // $transaction can't call application code) so this reads the
+  // post-delete state, not a stale snapshot that still sees the doomed
+  // titles as owned.
+  await recheckOwnedTbrItems();
 
   return { ok: true };
 }
