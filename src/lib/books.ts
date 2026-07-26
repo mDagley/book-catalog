@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { findBestTitleMatch } from "@/lib/matching";
+import { normalizeIsbn } from "@/lib/isbn";
+import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 export interface BookFormState {
   error?: string;
@@ -23,14 +25,6 @@ interface ParsedCopyFields {
   specialNotes: string | null;
 }
 
-// Normalizes an ISBN for storage/comparison: strips everything except digits
-// and the ISBN-10 check digit "X", and uppercases it. This lets a manually
-// typed, hyphenated ISBN (e.g. "978-0-7653-2635-5") dedup-match a bare digit
-// string decoded from a barcode scan (e.g. "9780765326355"). This does not
-// affect how an ISBN is displayed anywhere.
-export function normalizeIsbn(raw: string): string {
-  return raw.replace(/[^0-9Xx]/g, "").toUpperCase();
-}
 
 export function parseCopyFields(
   input: CopyFieldsInput,
@@ -139,6 +133,11 @@ export async function createBookWithCopyData(
     },
   });
 
+  // Only this fall-through path creates a genuinely new Book -- the ISBN and
+  // fuzzy-title matches above attach a copy to an already-existing book and
+  // never introduce a new owned title, so they don't get this hook.
+  await markTbrItemsOwnedByTitle(title);
+
   return { bookId: book.id };
 }
 
@@ -243,6 +242,11 @@ export async function updateBookData(
     return { error: "Title is required" };
   }
 
+  const existing = await prisma.book.findUniqueOrThrow({
+    where: { id: bookId },
+    select: { title: true },
+  });
+
   await prisma.book.update({
     where: { id: bookId },
     data: {
@@ -251,6 +255,16 @@ export async function updateBookData(
       isbn: normalizeIsbn(input.isbn) || null,
     },
   });
+
+  // Both hooks run only on a real title change, and only AFTER the update
+  // commits -- recheckOwnedTbrItems reads the live Book table, so running it
+  // first would still see the old title and no-op. Recheck first (drop rows
+  // the old title was keeping owned), then mark (pick up rows the new title
+  // now covers).
+  if (existing.title !== title) {
+    await recheckOwnedTbrItems();
+    await markTbrItemsOwnedByTitle(title);
+  }
 
   return { ok: true };
 }

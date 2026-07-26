@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createBookWithCopyData, updateBookData, saveCoverFromUrl } from "@/lib/books";
 
 const createdBookIds: string[] = [];
+const createdTbrItemIds: string[] = [];
 
 afterEach(async () => {
   for (const id of createdBookIds) {
@@ -17,6 +18,9 @@ afterEach(async () => {
     await prisma.book.deleteMany({ where: { id } });
   }
   createdBookIds.length = 0;
+
+  await prisma.goodreadsTbrItem.deleteMany({ where: { id: { in: createdTbrItemIds } } });
+  createdTbrItemIds.length = 0;
 });
 
 describe("createBookWithCopyData", () => {
@@ -402,6 +406,30 @@ describe("createBookWithCopyData", () => {
 
     expect(second.bookId).not.toBe(first.bookId);
   });
+
+  it("marks a matching TBR item owned when a genuinely new book is created", async () => {
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Books Zephyr Quill Anthology", author: "Someone" },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const result = await createBookWithCopyData({
+      title: "Test Books Zephyr Quill Anthology",
+      author: "Some Author",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(updated.owned).toBe(true);
+  });
 });
 
 describe("updateBookData", () => {
@@ -440,6 +468,111 @@ describe("updateBookData", () => {
     const bookId = await createTestBook();
     const result = await updateBookData(bookId, { title: "", author: "", isbn: "" });
     expect(result).toEqual({ error: "Title is required" });
+  });
+
+  it("marks a matching TBR item owned when the book's title is edited to match it", async () => {
+    // "Test Books Alpha Original Title" vs "Test Books Beta Wholly Different
+    // Target" scores ~54 via titleMatchScore (well under the 85 fuzzy-match
+    // threshold), confirmed with a scratch check against @/lib/matching
+    // before writing this test -- so the TBR item genuinely starts unowned
+    // despite sharing the "Test Books" fixture prefix.
+    const created = await createBookWithCopyData({
+      title: "Test Books Alpha Original Title",
+      author: "",
+      isbn: "",
+      format: "OTHER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in created) throw new Error("test setup failed");
+    createdBookIds.push(created.bookId);
+
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Books Beta Wholly Different Target", author: "Someone" },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const before = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(before.owned).toBe(false);
+
+    const result = await updateBookData(created.bookId, {
+      title: "Test Books Beta Wholly Different Target",
+      author: "",
+      isbn: "",
+    });
+    expect(result).toEqual({ ok: true });
+
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(true);
+  });
+
+  it("unmarks a TBR item when the book's title is edited away from it", async () => {
+    // "Test Books Gamma Owned Title Unique" vs "Test Books Delta Completely
+    // Different Later Title" scores ~52 via titleMatchScore, confirmed the
+    // same way -- so recheckOwnedTbrItems (which scans every Book row) has
+    // no other reason to keep this item owned once the title changes.
+    const created = await createBookWithCopyData({
+      title: "Test Books Gamma Owned Title Unique",
+      author: "",
+      isbn: "",
+      format: "OTHER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in created) throw new Error("test setup failed");
+    createdBookIds.push(created.bookId);
+
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Books Gamma Owned Title Unique", author: "Someone", owned: true },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const result = await updateBookData(created.bookId, {
+      title: "Test Books Delta Completely Different Later Title",
+      author: "",
+      isbn: "",
+    });
+    expect(result).toEqual({ ok: true });
+
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(false);
+  });
+
+  it("does not touch TBR ownership when the book's title is unchanged", async () => {
+    const created = await createBookWithCopyData({
+      title: "Test Books Epsilon Stable Title Four",
+      author: "Old Author",
+      isbn: "",
+      format: "OTHER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in created) throw new Error("test setup failed");
+    createdBookIds.push(created.bookId);
+
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Books Epsilon Stable Title Four", author: "Someone", owned: true },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const result = await updateBookData(created.bookId, {
+      title: "Test Books Epsilon Stable Title Four",
+      author: "New Author",
+      isbn: "",
+    });
+    expect(result).toEqual({ ok: true });
+
+    // Proves the update actually ran -- a blind no-op would also leave the
+    // TBR item owned, so this confirms the title-unchanged guard is what's
+    // responsible, not an update that silently didn't happen.
+    const book = await prisma.book.findUniqueOrThrow({ where: { id: created.bookId } });
+    expect(book.author).toBe("New Author");
+
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(true);
   });
 });
 

@@ -1,9 +1,10 @@
 // src/lib/absSync.ts
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { normalizeIsbn } from "@/lib/books";
+import { normalizeIsbn } from "@/lib/isbn";
 import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
+import { markTbrItemsOwnedByTitles, recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -272,6 +273,8 @@ async function removeStaleAbsLinks(
   const audiobookCounts = new Map(audiobookGroups.map((g) => [g.bookId, g._count.bookId]));
   const physicalCounts = new Map(physicalGroups.map((g) => [g.bookId, g._count.bookId]));
 
+  let anyBookDeleted = false;
+
   for (const bookId of affectedIds) {
     const ebookCount = ebookCounts.get(bookId) ?? 0;
     const audiobookCount = audiobookCounts.get(bookId) ?? 0;
@@ -279,6 +282,7 @@ async function removeStaleAbsLinks(
 
     if (ebookCount === 0 && audiobookCount === 0 && physicalCount === 0) {
       await prisma.book.delete({ where: { id: bookId } });
+      anyBookDeleted = true;
       continue;
     }
 
@@ -290,6 +294,14 @@ async function removeStaleAbsLinks(
         lastAbsSyncedAt: new Date(),
       },
     });
+  }
+
+  // Once, after the loop -- recheckOwnedTbrItems rescans all owned TBR rows
+  // against all Books, so calling it per deleted book would be quadratic for
+  // no benefit. Skipped entirely when nothing was deleted (a sync that only
+  // recomputed hasEbook/hasAudiobook can't have changed which titles exist).
+  if (anyBookDeleted) {
+    await recheckOwnedTbrItems();
   }
 }
 
@@ -455,6 +467,11 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
     mediaType === "EBOOK" ? linkedEbookIds : linkedAudiobookIds;
 
   const seenItemIds = new Set<string>();
+  // Titles of books this pass actually created. Accumulated so the TBR
+  // ownership update runs as ONE scan after the loop rather than one scan per
+  // created book -- a first sync creates hundreds, and per-book scans would
+  // put real fuzzy-match CPU load inside a single request.
+  const createdTitles: string[] = [];
   let synced = 0;
 
   for (const { item, mediaType } of pendingItems) {
@@ -473,6 +490,9 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
       } else {
         const created = await createBookForItem(item, mediaType);
         books.push(created);
+        // Collected, not marked here -- see the single markTbrItemsOwnedByTitles
+        // call after this loop.
+        createdTitles.push(created.title);
       }
     } catch (err) {
       if (!isConcurrentAbsItemLink(err)) throw err;
@@ -481,6 +501,10 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
 
     synced++;
   }
+
+  // One pass for every title created above. No-ops when nothing was created,
+  // which is the steady-state case.
+  await markTbrItemsOwnedByTitles(createdTitles);
 
   const syncedMediaTypes = new Set<AbsMediaType>(pendingItems.map((p) => p.mediaType));
 

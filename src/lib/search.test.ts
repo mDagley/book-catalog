@@ -130,6 +130,25 @@ describe("searchCatalog", () => {
     expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id, third.id]);
   });
 
+  it("returns at most `limit` results when browsing all", async () => {
+    await prisma.book.create({ data: { title: "Test Search Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search Limit Two" } });
+    await prisma.book.create({ data: { title: "Test Search Limit Three" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title", limit: 2 });
+
+    expect(results).toHaveLength(2);
+  });
+
+  it("returns every result when limit is omitted", async () => {
+    await prisma.book.create({ data: { title: "Test Search No Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search No Limit Two" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title" });
+
+    expect(results.filter((r) => r.title.startsWith("Test Search No Limit")).length).toBe(2);
+  });
+
   it("defaults to id-ascending order when sortBy is omitted (preserves existing behavior)", async () => {
     const first = await prisma.book.create({ data: { title: "Test Search Sort Order Beta" } });
     const second = await prisma.book.create({ data: { title: "Test Search Sort Order Alpha" } });
@@ -568,5 +587,27 @@ describe("parseStatusModeParam", () => {
 
   it("defaults to 'or' for an unrecognized value", () => {
     expect(parseStatusModeParam("bogus")).toBe("or");
+  });
+});
+
+describe("searchCatalog limit validation", () => {
+  // Prisma reads a negative `take` as "the last N rows", so passing one
+  // through unvalidated would silently return rows from the opposite end of
+  // the ordering. Rejecting loudly beats both that and silently dropping the
+  // limit (which would run an unbounded full-catalog query).
+  it.each([
+    ["negative", -5],
+    ["zero", 0],
+    ["a float", 10.5],
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+  ])("throws for %s", async (_label, limit) => {
+    await expect(searchCatalog({ browseAll: true, limit })).rejects.toThrow(
+      /limit must be a positive integer/,
+    );
+  });
+
+  it("accepts a positive integer", async () => {
+    await expect(searchCatalog({ browseAll: true, limit: 1 })).resolves.toBeInstanceOf(Array);
   });
 });

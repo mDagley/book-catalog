@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { findBestTitleMatch } from "@/lib/matching";
 import { fetchAllGoodreadsBooks, type GoodreadsBook } from "@/lib/goodreadsSync";
+import { markTbrItemsOwnedByTitles } from "@/lib/tbrGap";
 
 export const DEFAULT_OWNED_PHYSICAL_SHELF = "owned-physical";
 
@@ -69,6 +70,7 @@ async function attachPlaceholderCopy(match: OwnedPhysicalCandidate): Promise<voi
 async function applyShelfItem(
   item: GoodreadsBook,
   candidates: OwnedPhysicalCandidate[],
+  createdTitles: string[],
 ): Promise<void> {
   const match = matchAgainstPool(item, candidates);
 
@@ -123,6 +125,13 @@ async function applyShelfItem(
     },
     select: CANDIDATE_SELECT,
   });
+  // A genuinely new title. Recorded rather than marked here so the caller can
+  // do ONE TBR ownership pass for the whole shelf -- a large initial sync
+  // creates many books, and a scan per book would put real fuzzy-match CPU
+  // load inside a single request. The two attach-to-existing paths above
+  // (ISBN match, fuzzy-title match) deliberately record nothing: they
+  // introduce no new title, they just add a copy to a Book already there.
+  createdTitles.push(item.title);
   candidates.push(toCandidate(created));
 }
 
@@ -143,9 +152,14 @@ export async function syncOwnedPhysicalBooks(
   });
   const candidates: OwnedPhysicalCandidate[] = books.map(toCandidate);
 
+  const createdTitles: string[] = [];
   for (const item of items) {
-    await applyShelfItem(item, candidates);
+    await applyShelfItem(item, candidates, createdTitles);
   }
+
+  // One pass for every title this shelf actually created. No-ops when the
+  // shelf added nothing new, which is the steady-state case.
+  await markTbrItemsOwnedByTitles(createdTitles);
 
   return { synced: items.length };
 }

@@ -8,17 +8,12 @@ import { CoverCamera } from "@/components/CoverCamera";
 import { CoverPicker } from "@/components/CoverPicker";
 import { CopyFormFields } from "@/components/CopyFormFields";
 import { Button } from "@/components/ui/Button";
+// Safe to import in a client component: src/lib/isbn.ts is deliberately
+// Prisma-free (unlike src/lib/books.ts, which this used to duplicate).
+import { isValidIsbn } from "@/lib/isbn";
 
 const initialState: ScanFormState = {};
 
-// Kept as a small local check (not imported from src/lib/books.ts's
-// normalizeIsbn) since that module pulls in the Prisma client at the top
-// level, which can't run in the browser -- same reasoning
-// /api/isbn-lookup/route.ts's own local normalizeIsbn copy documents.
-function looksLikeValidIsbn(raw: string): boolean {
-  const normalized = raw.replace(/[^0-9Xx]/g, "").toUpperCase();
-  return /^(\d{13}|\d{9}[\dX])$/.test(normalized);
-}
 
 interface LookupData {
   title: string;
@@ -58,7 +53,7 @@ function ScanBookForm({ isbn, capturedImage, lookup, lookupNotice, onRetake }: S
         persisted as this book's isbn on save. An empty value here means the
         server stores null, matching a manually-entered book with no ISBN.
       */}
-      <input type="hidden" name="isbn" value={looksLikeValidIsbn(isbn) ? isbn : ""} />
+      <input type="hidden" name="isbn" value={isValidIsbn(isbn) ? isbn : ""} />
       {lookupNotice && <p className="text-sm text-foreground/70">{lookupNotice}</p>}
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-foreground">

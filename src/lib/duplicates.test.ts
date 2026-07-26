@@ -12,6 +12,7 @@ afterEach(async () => {
     where: { book: { title: { startsWith: "Test Duplicates" } } },
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Duplicates" } } });
+  await prisma.goodreadsTbrItem.deleteMany({ where: { title: { startsWith: "Test Duplicates" } } });
 });
 
 describe("findDuplicateBookGroups", () => {
@@ -524,6 +525,32 @@ describe("mergeBooksData", () => {
     const result = await mergeBooksData(keep.id, ["nonexistent-id"]);
 
     expect(result).toEqual({ error: "One or more books to merge were not found" });
+  });
+
+  it("marks the merged-away book's matching TBR item as no longer owned", async () => {
+    // Verified with a temporary titleMatchScore scratch check (deleted after
+    // use): these two titles score ~67, well under the 85 threshold, so the
+    // keeper's own title can't also be what's keeping the TBR item owned --
+    // only the loser's title can, and this test's assertion actually proves
+    // the recheck ran off of that.
+    const keep = await prisma.book.create({
+      data: { title: "Test Duplicates Keeper Distinct Title Alpha" },
+    });
+    const merge = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Loser Wholly Different Title Beta",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Duplicates Loser Wholly Different Title Beta", owned: true },
+    });
+
+    const result = await mergeBooksData(keep.id, [merge.id]);
+
+    expect(result).toEqual({ ok: true });
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(false);
   });
 
   it("does not falsely report a missing book when the same id is passed twice", async () => {

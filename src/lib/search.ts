@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { normalizeIsbn } from "@/lib/books";
+import { normalizeIsbn } from "@/lib/isbn";
 import { resolveListingCover } from "@/lib/listingCover";
 import type { Format, Prisma, ReadStatus } from "@prisma/client";
 
@@ -32,6 +32,7 @@ export interface SearchOptions {
   statusMode?: StatusFilterMode;
   browseAll?: boolean;
   sortBy?: "id" | "title";
+  limit?: number;
 }
 
 export type ReadStatusFilterValue = "to_read" | "reading" | "read" | "unrated";
@@ -116,6 +117,18 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const browseAll = options.browseAll ?? false;
   const sortBy = options.sortBy ?? "id";
 
+  // Throws rather than silently ignoring a bad value: dropping an invalid
+  // `limit` would turn a caller bug into an unbounded full-catalog query --
+  // exactly the performance problem pagination exists to prevent -- and the
+  // failure would be invisible until the catalog grew large enough to hurt.
+  // Matches this codebase's existing preference for loud failure over silent
+  // degradation. Floats are rejected outright rather than truncated, so a
+  // caller doing arithmetic on a page size finds out immediately.
+  const limit = options.limit;
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
+  }
+
   if (!browseAll && !trimmed && !types && !format && !statusValues) return [];
 
   const includePhysical = !types || types.includes("physical");
@@ -179,6 +192,13 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     // the same query could return a different order across runs as the
     // catalog grows.
     orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
+    // `limit` is opt-in -- omitted entirely (rather than defaulted) so the
+    // home-page search caller, which never passes it, keeps its existing
+    // unlimited behavior. Validated above rather than passed through raw:
+    // Prisma reads a NEGATIVE take as "the last N rows", so an unvalidated
+    // -5 would silently return rows from the opposite end of the ordering
+    // instead of erroring (confirmed empirically).
+    ...(limit !== undefined ? { take: limit } : {}),
   });
 
   return books.map((book) => ({
