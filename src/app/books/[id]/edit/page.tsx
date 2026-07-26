@@ -45,6 +45,8 @@ export default async function EditBookPage({
           defaultTitle={book.title}
           defaultAuthor={book.author ?? ""}
           defaultIsbn={book.isbn ?? ""}
+          defaultSeriesName={book.seriesName ?? ""}
+          defaultSeriesPosition={book.seriesPosition?.toString() ?? ""}
         />
       </div>
 

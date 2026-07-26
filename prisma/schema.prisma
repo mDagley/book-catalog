@@ -30,6 +30,10 @@ model Book {
   readStatusManual Boolean     @default(false)
   rating           Int?
   ratingManual     Boolean     @default(false)
+
+  seriesName     String?
+  seriesPosition Float?
+  seriesManual   Boolean @default(false)
 }
 
 model PhysicalCopy {

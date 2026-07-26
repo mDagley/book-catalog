@@ -128,6 +128,23 @@ describe("syncOwnedPhysicalBooks", () => {
     expect(created.copies[0].format).toBe("OTHER");
   });
 
+  it("parses series out of the title when creating a new book from a shelf item", async () => {
+    mockShelfFetch(
+      buildRssPage([
+        { title: "Test Owned Physical Series Parse (Test Owned Physical Trilogy, #2)" },
+      ]),
+    );
+
+    await syncOwnedPhysicalBooks("1993628", "owned-physical");
+
+    const created = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Owned Physical Series Parse (Test Owned Physical Trilogy, #2)" },
+    });
+    expect(created.seriesName).toBe("Test Owned Physical Trilogy");
+    expect(created.seriesPosition).toBe(2);
+    expect(created.seriesManual).toBe(false);
+  });
+
   it("matches multiple shelf items against the same newly-created book within one sync run", async () => {
     mockShelfFetch(
       buildRssPage([

@@ -5,6 +5,7 @@ import { normalizeIsbn } from "@/lib/isbn";
 import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { markTbrItemsOwnedByTitles, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { parseSeriesFromTitle } from "@/lib/series";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -154,12 +155,21 @@ async function linkItemToExistingBook(
 }
 
 async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Promise<SyncBook> {
+  const series = parseSeriesFromTitle(item.title);
+  // seriesManual stays at its false default: this is a derived value, not a
+  // hand-edit.
+  const seriesFields = {
+    seriesName: series?.seriesName ?? null,
+    seriesPosition: series?.seriesPosition ?? null,
+  };
+
   if (mediaType === "EBOOK") {
     return prisma.book.create({
       data: {
         title: item.title,
         author: item.author,
         isbn: item.isbn,
+        ...seriesFields,
         hasEbook: true,
         lastAbsSyncedAt: new Date(),
         ebookCopies: { create: { absItemId: item.absItemId } },
@@ -172,6 +182,7 @@ async function createBookForItem(item: AbsBookItem, mediaType: AbsMediaType): Pr
       title: item.title,
       author: item.author,
       isbn: item.isbn,
+      ...seriesFields,
       hasAudiobook: true,
       lastAbsSyncedAt: new Date(),
       audiobookCopies: { create: { absItemId: item.absItemId } },

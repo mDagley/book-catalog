@@ -3,6 +3,7 @@ import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from
 import { findBestTitleMatch } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { parseSeriesFromTitle } from "@/lib/series";
 
 export interface BookFormState {
   error?: string;
@@ -124,11 +125,16 @@ export async function createBookWithCopyData(
     return { bookId: titleMatch.id };
   }
 
+  const series = parseSeriesFromTitle(title);
+
   const book = await prisma.book.create({
     data: {
       title,
       author: input.author.trim() || null,
       isbn,
+      // seriesManual stays false: this is a derived value, not a hand-edit.
+      seriesName: series?.seriesName ?? null,
+      seriesPosition: series?.seriesPosition ?? null,
       copies: { create: copyData },
     },
   });
@@ -265,6 +271,52 @@ export async function updateBookData(
     await recheckOwnedTbrItems();
     await markTbrItemsOwnedByTitle(title);
   }
+
+  return { ok: true };
+}
+
+// Saving series by hand always sets seriesManual, including when clearing
+// both fields -- "I deliberately removed this" is itself a hand-edit, and
+// matches the readStatusManual/ratingManual convention where un-setting a
+// value never silently hands control back to the sync.
+//
+// There is intentionally no "let parsing manage this again" control: unlike
+// read status and rating, which really do keep changing on Goodreads, a
+// title's series suffix is fixed at creation, so there would be nothing for
+// un-setting the flag to resume.
+export async function updateSeriesData(
+  bookId: string,
+  input: { seriesName: string; seriesPosition: string },
+): Promise<{ ok: true } | { error: string }> {
+  const seriesName = input.seriesName.trim();
+  const rawPosition = input.seriesPosition.trim();
+
+  let seriesPosition: number | null = null;
+  if (rawPosition) {
+    seriesPosition = Number(rawPosition);
+    if (!Number.isFinite(seriesPosition)) {
+      return { error: "Series position must be a number" };
+    }
+  }
+
+  // A position with no series name is unusable data: the detail page's
+  // series section keys off seriesName, so the number could never be shown,
+  // and it would silently re-apply if a name were added later. Rejected
+  // rather than quietly dropped -- discarding what someone typed without
+  // telling them is worse than refusing it. Clearing BOTH fields is still
+  // allowed; that's a deliberate un-recording, not an inconsistent state.
+  if (!seriesName && seriesPosition !== null) {
+    return { error: "A series position needs a series name" };
+  }
+
+  await prisma.book.update({
+    where: { id: bookId },
+    data: {
+      seriesName: seriesName || null,
+      seriesPosition,
+      seriesManual: true,
+    },
+  });
 
   return { ok: true };
 }

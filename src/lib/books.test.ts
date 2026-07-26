@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
-import { createBookWithCopyData, updateBookData, saveCoverFromUrl } from "@/lib/books";
+import {
+  createBookWithCopyData,
+  updateBookData,
+  updateSeriesData,
+  saveCoverFromUrl,
+} from "@/lib/books";
 
 const createdBookIds: string[] = [];
 const createdTbrItemIds: string[] = [];
@@ -430,6 +435,47 @@ describe("createBookWithCopyData", () => {
     const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(updated.owned).toBe(true);
   });
+
+  it("parses series out of the title when creating a book", async () => {
+    const result = await createBookWithCopyData({
+      title: "Test Books Series Parse (Test Books Trilogy, #2)",
+      author: "Someone",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({ where: { id: result.bookId } });
+    expect(book.seriesName).toBe("Test Books Trilogy");
+    expect(book.seriesPosition).toBe(2);
+    expect(book.seriesManual).toBe(false);
+  });
+
+  it("leaves series null when the title has no series suffix", async () => {
+    const result = await createBookWithCopyData({
+      title: "Test Books No Series Suffix Here",
+      author: "Someone",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({ where: { id: result.bookId } });
+    expect(book.seriesName).toBeNull();
+    expect(book.seriesPosition).toBeNull();
+  });
 });
 
 describe("updateBookData", () => {
@@ -573,6 +619,76 @@ describe("updateBookData", () => {
 
     const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(after.owned).toBe(true);
+  });
+});
+
+describe("updateSeriesData", () => {
+  it("sets both fields and marks them manual", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Edit" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, {
+      seriesName: "Hand Typed Series",
+      seriesPosition: "3",
+    });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBe("Hand Typed Series");
+    expect(updated.seriesPosition).toBe(3);
+    expect(updated.seriesManual).toBe(true);
+  });
+
+  it("accepts a decimal position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Decimal" } });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "Novella Series", seriesPosition: "2.5" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesPosition).toBe(2.5);
+  });
+
+  it("clears both fields when given empty input, but stays manual", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Books Series Clear",
+        seriesName: "Old Series",
+        seriesPosition: 1,
+        seriesManual: true,
+      },
+    });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "", seriesPosition: "" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
+    // Once hand-edited, always hand-edited -- matches readStatusManual/ratingManual.
+    expect(updated.seriesManual).toBe(true);
+  });
+
+  it("allows a series name with no position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series No Position" } });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "Unnumbered Series", seriesPosition: "" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBe("Unnumbered Series");
+    expect(updated.seriesPosition).toBeNull();
+  });
+
+  it("rejects a non-numeric position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Bad Position" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "S", seriesPosition: "abc" });
+
+    expect(result).toEqual({ error: "Series position must be a number" });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
   });
 });
 
@@ -836,5 +952,54 @@ describe("saveCoverFromUrl", () => {
     if ("error" in result) return;
     savedPaths.push(result.coverImagePath);
     expect(result.coverImagePath).toMatch(/^[a-f0-9-]+\.png$/);
+  });
+});
+
+describe("updateSeriesData orphan position", () => {
+  // A position with no series name is unusable: the detail page's series
+  // section keys off seriesName, so the number could never be displayed, and
+  // it would silently re-apply if a name were added later. Rejected rather
+  // than dropped silently -- discarding user input without saying so is
+  // worse than refusing it.
+  it("rejects a position with no series name", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Orphan Position" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "", seriesPosition: "3" });
+
+    expect(result).toEqual({ error: "A series position needs a series name" });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
+    // Rejected outright, so nothing was recorded as a hand-edit either.
+    expect(updated.seriesManual).toBe(false);
+  });
+
+  it("rejects a whitespace-only series name paired with a position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Blank Name" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "   ", seriesPosition: "1" });
+
+    expect(result).toEqual({ error: "A series position needs a series name" });
+  });
+
+  it("still allows clearing both fields together", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Books Series Clear Both",
+        seriesName: "Old Series",
+        seriesPosition: 2,
+        seriesManual: true,
+      },
+    });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "", seriesPosition: "" });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
   });
 });

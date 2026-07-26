@@ -6,6 +6,7 @@ import {
   createBookWithCopyData,
   saveCoverFromUrl,
   updateBookData,
+  updateSeriesData,
   type BookFormState,
 } from "@/lib/books";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
@@ -118,6 +119,31 @@ export async function updateBook(
     title: (formData.get("title") as string) ?? "",
     author: (formData.get("author") as string) ?? "",
     isbn: (formData.get("isbn") as string) ?? "",
+  });
+
+  if ("error" in result) {
+    return result;
+  }
+
+  revalidatePath("/books");
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
+  redirect(`/books/${bookId}/edit`);
+}
+
+export async function updateSeries(
+  bookId: string,
+  _prevState: BookFormState,
+  formData: FormData,
+): Promise<BookFormState> {
+  const result = await updateSeriesData(bookId, {
+    // `?.toString()`, not `as string` -- formData.get returns string | File |
+    // null, and the cast is erased at runtime, so a crafted multipart request
+    // sending a File here would reach updateSeriesData and throw on .trim(),
+    // turning bad input into a 500. Matches the safer idiom already used by
+    // createBookFromScan in this same file.
+    seriesName: formData.get("seriesName")?.toString() ?? "",
+    seriesPosition: formData.get("seriesPosition")?.toString() ?? "",
   });
 
   if ("error" in result) {
