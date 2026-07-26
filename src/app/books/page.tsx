@@ -13,6 +13,15 @@ import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
 const DEFAULT_PAGE_SIZE = 50;
 
+// Hard ceiling on ?limit=. "Load more" accumulates server-side -- each click
+// re-renders every row from the start, not just the new batch -- so without a
+// cap, enough clicks (or a hand-typed ?limit=100000) rebuild the exact
+// unpaginated full-catalog render this page was paginated to avoid. 500 rows
+// is roughly 1.2MB of HTML, an acceptable worst case; past that, searching or
+// filtering is the right tool, and the UI says so rather than silently
+// offering a button that can't advance.
+const MAX_PAGE_SIZE = 500;
+
 export default async function BooksPage({
   searchParams,
 }: {
@@ -38,8 +47,16 @@ export default async function BooksPage({
   const format = parseFormatParam(formatParam);
   const status = parseStatusParam(statusParam);
   const statusMode = parseStatusModeParam(statusModeParam);
-  const parsedLimit = limitParam ? parseInt(limitParam, 10) : NaN;
-  const limit = Number.isNaN(parsedLimit) || parsedLimit <= 0 ? DEFAULT_PAGE_SIZE : parsedLimit;
+  // Number() rather than parseInt() so partially-numeric junk ("50abc") is
+  // rejected outright instead of silently becoming 50. Anything not a
+  // positive integer falls back to the default; anything above the ceiling is
+  // clamped rather than rejected, so an over-large ?limit= still renders a
+  // sane page instead of erroring.
+  const parsedLimit = limitParam ? Number(limitParam) : NaN;
+  const limit =
+    Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
 
   // Fetch one extra row to detect whether more results exist beyond this
   // page, without a second count query.
@@ -55,6 +72,11 @@ export default async function BooksPage({
   });
   const hasMore = fetched.length > limit;
   const results = hasMore ? fetched.slice(0, limit) : fetched;
+  // At the ceiling the next step would clamp straight back to it, so the link
+  // would render but do nothing. Show the narrow-down hint instead of a
+  // button that silently no-ops.
+  const atMaxPageSize = limit >= MAX_PAGE_SIZE;
+  const canLoadMore = hasMore && !atMaxPageSize;
 
   const loadMoreParams = new URLSearchParams();
   if (query) loadMoreParams.set("q", query);
@@ -62,7 +84,7 @@ export default async function BooksPage({
   if (format) loadMoreParams.set("format", format);
   if (status) loadMoreParams.set("status", status.join(","));
   if (statusMode !== "or") loadMoreParams.set("statusMode", statusMode);
-  loadMoreParams.set("limit", String(limit + DEFAULT_PAGE_SIZE));
+  loadMoreParams.set("limit", String(Math.min(limit + DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)));
 
   return (
     <main className="mx-auto max-w-2xl p-4">
@@ -102,7 +124,7 @@ export default async function BooksPage({
             ))}
           </ul>
 
-          {hasMore && (
+          {canLoadMore && (
             <div className="mt-4 text-center">
               <Link
                 href={`/books?${loadMoreParams.toString()}`}
@@ -111,6 +133,13 @@ export default async function BooksPage({
                 Load more
               </Link>
             </div>
+          )}
+
+          {hasMore && atMaxPageSize && (
+            <p className="mt-4 text-center text-sm text-foreground/70">
+              Showing the first {MAX_PAGE_SIZE} books. Search or use the filters above to narrow
+              things down.
+            </p>
           )}
         </>
       )}
