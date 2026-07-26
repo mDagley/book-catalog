@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { findBestTitleMatch } from "@/lib/matching";
 import { fetchAllGoodreadsBooks, type GoodreadsBook } from "@/lib/goodreadsSync";
+import { markTbrItemsOwnedByTitle } from "@/lib/tbrGap";
 
 export const DEFAULT_OWNED_PHYSICAL_SHELF = "owned-physical";
 
@@ -123,6 +124,11 @@ async function applyShelfItem(
     },
     select: CANDIDATE_SELECT,
   });
+  // A genuinely new title -- flip any fuzzy-matching TBR item to owned. The
+  // two attach-to-existing paths above (ISBN match, fuzzy-title match)
+  // deliberately don't get this hook: they introduce no new title, they
+  // just add a copy to a Book that was already there.
+  await markTbrItemsOwnedByTitle(item.title);
   candidates.push(toCandidate(created));
 }
 

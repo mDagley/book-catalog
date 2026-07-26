@@ -14,6 +14,7 @@ afterEach(async () => {
     where: { book: { title: { startsWith: "Test Owned Physical" } } },
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Owned Physical" } } });
+  await prisma.goodreadsTbrItem.deleteMany({ where: { title: { startsWith: "Test Owned Physical" } } });
 });
 
 // Builds a minimal shelf RSS page from a list of items -- mirrors the same
@@ -219,6 +220,19 @@ describe("syncOwnedPhysicalBooks", () => {
     expect(matches).toHaveLength(1);
     expect(matches[0].id).toBe(concurrentlyCreated.id);
     expect(matches[0].copies).toHaveLength(1);
+  });
+
+  it("marks a matching TBR item as owned when a new book is created via the sync", async () => {
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Owned Physical New Owned Title Book" },
+    });
+
+    mockShelfFetch(buildRssPage([{ title: "Test Owned Physical New Owned Title Book" }]));
+
+    await syncOwnedPhysicalBooks("1993628", "owned-physical");
+
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(true);
   });
 
   it("defaults to the owned-physical shelf when no shelf name is given", async () => {
