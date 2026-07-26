@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { normalizeIsbn as normalizeIsbnShared } from "@/lib/books";
+import { normalizeIsbn as normalizeIsbnShared } from "@/lib/isbn";
 import { findBestTitleMatch, normalizeTitle, isTitleMatch } from "@/lib/matching";
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { lookupIsbn } from "@/lib/isbnLookup";

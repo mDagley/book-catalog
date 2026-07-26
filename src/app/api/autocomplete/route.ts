@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getTbrGap } from "@/lib/tbrGap";
-import { normalizeIsbn } from "@/lib/books";
+import { normalizeIsbn } from "@/lib/isbn";
 
 const SCOPES = ["home", "books", "tbr"] as const;
 type Scope = (typeof SCOPES)[number];

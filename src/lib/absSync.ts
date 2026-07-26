@@ -1,7 +1,7 @@
 // src/lib/absSync.ts
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { normalizeIsbn } from "@/lib/books";
+import { normalizeIsbn } from "@/lib/isbn";
 import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";

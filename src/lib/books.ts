@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { findBestTitleMatch } from "@/lib/matching";
+import { normalizeIsbn } from "@/lib/isbn";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 export interface BookFormState {
@@ -24,14 +25,6 @@ interface ParsedCopyFields {
   specialNotes: string | null;
 }
 
-// Normalizes an ISBN for storage/comparison: strips everything except digits
-// and the ISBN-10 check digit "X", and uppercases it. This lets a manually
-// typed, hyphenated ISBN (e.g. "978-0-7653-2635-5") dedup-match a bare digit
-// string decoded from a barcode scan (e.g. "9780765326355"). This does not
-// affect how an ISBN is displayed anywhere.
-export function normalizeIsbn(raw: string): string {
-  return raw.replace(/[^0-9Xx]/g, "").toUpperCase();
-}
 
 export function parseCopyFields(
   input: CopyFieldsInput,

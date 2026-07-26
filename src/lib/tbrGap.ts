@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isTitleMatch } from "@/lib/matching";
-import { normalizeIsbn } from "@/lib/books";
+import { normalizeIsbn } from "@/lib/isbn";
 
 export interface TbrGapItem {
   id: string;

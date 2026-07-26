@@ -589,3 +589,25 @@ describe("parseStatusModeParam", () => {
     expect(parseStatusModeParam("bogus")).toBe("or");
   });
 });
+
+describe("searchCatalog limit validation", () => {
+  // Prisma reads a negative `take` as "the last N rows", so passing one
+  // through unvalidated would silently return rows from the opposite end of
+  // the ordering. Rejecting loudly beats both that and silently dropping the
+  // limit (which would run an unbounded full-catalog query).
+  it.each([
+    ["negative", -5],
+    ["zero", 0],
+    ["a float", 10.5],
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+  ])("throws for %s", async (_label, limit) => {
+    await expect(searchCatalog({ browseAll: true, limit })).rejects.toThrow(
+      /limit must be a positive integer/,
+    );
+  });
+
+  it("accepts a positive integer", async () => {
+    await expect(searchCatalog({ browseAll: true, limit: 1 })).resolves.toBeInstanceOf(Array);
+  });
+});
