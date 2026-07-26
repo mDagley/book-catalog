@@ -98,7 +98,10 @@ export default async function BooksPage({
         </Link>
       </div>
 
-      <div className="mb-4 text-sm">
+      <div className="mb-4 flex flex-wrap gap-4 text-sm">
+        <Link href="/" className="text-link underline">
+          Back to search
+        </Link>
         <Link href="/books/duplicates" className="text-link underline">
           Check for duplicate books
         </Link>
