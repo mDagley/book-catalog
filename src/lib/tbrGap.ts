@@ -76,6 +76,31 @@ export async function markTbrItemsOwnedByTitle(title: string): Promise<void> {
   });
 }
 
+// Call whenever an owned title stops existing (a Book is deleted, or an
+// existing Book's title changes away from its old value). Re-verifies only
+// currently-owned TBR items against the full current owned-title list --
+// bounded by how many TBR items have ever matched an owned book, not the
+// full TBR list -- and flips any that no longer match back to unowned.
+export async function recheckOwnedTbrItems(): Promise<void> {
+  const [owned, books] = await Promise.all([
+    prisma.goodreadsTbrItem.findMany({
+      where: { owned: true },
+      select: { id: true, title: true },
+    }),
+    prisma.book.findMany({ select: { title: true } }),
+  ]);
+  if (owned.length === 0) return;
+  const ownedTitles = books.map((b) => b.title);
+  const noLongerOwnedIds = owned
+    .filter((item) => !ownedTitles.some((title) => isTitleMatch(item.title, title)))
+    .map((item) => item.id);
+  if (noLongerOwnedIds.length === 0) return;
+  await prisma.goodreadsTbrItem.updateMany({
+    where: { id: { in: noLongerOwnedIds } },
+    data: { owned: false },
+  });
+}
+
 // Cache the expensive fuzzy-matching computation rather than re-running it on
 // every page load. Revalidated on-demand via revalidateTag(TBR_GAP_CACHE_TAG)
 // when a manual sync completes via the /api/sync/* route handlers. The
