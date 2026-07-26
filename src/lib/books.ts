@@ -3,6 +3,7 @@ import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from
 import { findBestTitleMatch } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { parseSeriesFromTitle } from "@/lib/series";
 
 export interface BookFormState {
   error?: string;
@@ -124,11 +125,16 @@ export async function createBookWithCopyData(
     return { bookId: titleMatch.id };
   }
 
+  const series = parseSeriesFromTitle(title);
+
   const book = await prisma.book.create({
     data: {
       title,
       author: input.author.trim() || null,
       isbn,
+      // seriesManual stays false: this is a derived value, not a hand-edit.
+      seriesName: series?.seriesName ?? null,
+      seriesPosition: series?.seriesPosition ?? null,
       copies: { create: copyData },
     },
   });

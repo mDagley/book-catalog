@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { findBestTitleMatch } from "@/lib/matching";
 import { fetchAllGoodreadsBooks, type GoodreadsBook } from "@/lib/goodreadsSync";
 import { markTbrItemsOwnedByTitles } from "@/lib/tbrGap";
+import { parseSeriesFromTitle } from "@/lib/series";
 
 export const DEFAULT_OWNED_PHYSICAL_SHELF = "owned-physical";
 
@@ -116,11 +117,16 @@ async function applyShelfItem(
     return;
   }
 
+  const series = parseSeriesFromTitle(item.title);
   const created = await prisma.book.create({
     data: {
       title: item.title,
       author: item.author,
       isbn: item.isbn,
+      // seriesManual stays at its false default: this is a derived value,
+      // not a hand-edit.
+      seriesName: series?.seriesName ?? null,
+      seriesPosition: series?.seriesPosition ?? null,
       copies: { create: { format: "OTHER" } },
     },
     select: CANDIDATE_SELECT,

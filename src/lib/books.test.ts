@@ -430,6 +430,47 @@ describe("createBookWithCopyData", () => {
     const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(updated.owned).toBe(true);
   });
+
+  it("parses series out of the title when creating a book", async () => {
+    const result = await createBookWithCopyData({
+      title: "Test Books Series Parse (Test Books Trilogy, #2)",
+      author: "Someone",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({ where: { id: result.bookId } });
+    expect(book.seriesName).toBe("Test Books Trilogy");
+    expect(book.seriesPosition).toBe(2);
+    expect(book.seriesManual).toBe(false);
+  });
+
+  it("leaves series null when the title has no series suffix", async () => {
+    const result = await createBookWithCopyData({
+      title: "Test Books No Series Suffix Here",
+      author: "Someone",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    createdBookIds.push(result.bookId);
+
+    const book = await prisma.book.findUniqueOrThrow({ where: { id: result.bookId } });
+    expect(book.seriesName).toBeNull();
+    expect(book.seriesPosition).toBeNull();
+  });
 });
 
 describe("updateBookData", () => {

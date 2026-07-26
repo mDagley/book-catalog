@@ -309,6 +309,34 @@ describe("syncAbsCache", () => {
     expect(copies).toBe(0);
   });
 
+  it("parses series out of the title when creating a new Book from an ABS item", async () => {
+    mockLibrariesAndItems(
+      {
+        "ebook-lib": [
+          {
+            id: "test-series-parse-1",
+            media: {
+              metadata: {
+                title: "Test Abs Sync Series Parse (Test Abs Sync Trilogy, #2)",
+                authorName: "Some Author",
+              },
+            },
+          },
+        ],
+      },
+      [{ id: "ebook-lib", name: "Panda EBooks" }],
+    );
+
+    await syncAbsCache("https://abs.example.com", "token");
+
+    const book = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Abs Sync Series Parse (Test Abs Sync Trilogy, #2)" },
+    });
+    expect(book.seriesName).toBe("Test Abs Sync Trilogy");
+    expect(book.seriesPosition).toBe(2);
+    expect(book.seriesManual).toBe(false);
+  });
+
   it("marks a matching TBR item owned when a new Book is created from an ABS item", async () => {
     const tbr = await prisma.goodreadsTbrItem.create({
       data: { title: "Test Abs Sync TBR Match New Book", author: "Someone" },
