@@ -63,3 +63,60 @@ describe("getLibraryStats totals", () => {
     expect(stats.totals.multiFormatBooks).toBe(0);
   });
 });
+
+describe("getLibraryStats reading", () => {
+  it("reports a null readStatus as its own bucket, not as to-read", async () => {
+    await prisma.book.create({ data: { title: "Test Stats No Status Book" } });
+    await prisma.book.create({ data: { title: "Test Stats To Read Book", readStatus: "TO_READ" } });
+
+    const stats = await getLibraryStats();
+    const byLabel = Object.fromEntries(stats.readStatus.map((b) => [b.label, b.count]));
+
+    expect(byLabel["No status"]).toBe(1);
+    expect(byLabel["To read"]).toBe(1);
+  });
+
+  it("always returns all four read-status buckets, including empty ones", async () => {
+    await prisma.book.create({ data: { title: "Test Stats Only Read Book", readStatus: "READ" } });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.readStatus.map((b) => b.label)).toEqual([
+      "Read",
+      "Reading",
+      "To read",
+      "No status",
+    ]);
+    expect(stats.readStatus.find((b) => b.label === "Reading")!.count).toBe(0);
+  });
+
+  it("always returns all six rating buckets and counts unrated separately", async () => {
+    await prisma.book.create({ data: { title: "Test Stats Rated Five", rating: 5 } });
+    await prisma.book.create({ data: { title: "Test Stats Unrated Book" } });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.ratings.map((b) => b.label)).toEqual([
+      "5 stars",
+      "4 stars",
+      "3 stars",
+      "2 stars",
+      "1 star",
+      "Unrated",
+    ]);
+    expect(stats.ratings.find((b) => b.label === "5 stars")!.count).toBe(1);
+    expect(stats.ratings.find((b) => b.label === "Unrated")!.count).toBe(1);
+    expect(stats.ratings.find((b) => b.label === "3 stars")!.count).toBe(0);
+  });
+
+  it("read-status buckets sum to the total book count", async () => {
+    await prisma.book.create({ data: { title: "Test Stats Sum A", readStatus: "READ" } });
+    await prisma.book.create({ data: { title: "Test Stats Sum B", readStatus: "READING" } });
+    await prisma.book.create({ data: { title: "Test Stats Sum C" } });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.readStatus.reduce((n, b) => n + b.count, 0)).toBe(stats.totals.books);
+    expect(stats.ratings.reduce((n, b) => n + b.count, 0)).toBe(stats.totals.books);
+  });
+});

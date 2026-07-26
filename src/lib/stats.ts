@@ -1,4 +1,29 @@
 import { prisma } from "@/lib/prisma";
+import type { ReadStatus } from "@prisma/client";
+
+// groupBy only returns buckets that actually have rows, so every
+// distribution is projected onto a fixed, ordered bucket list. Without this
+// a category with zero books silently vanishes from the page instead of
+// showing an empty bar -- and "no books are currently being read" is
+// information worth rendering.
+const READ_STATUS_BUCKETS: { label: string; value: ReadStatus | null }[] = [
+  { label: "Read", value: "READ" },
+  { label: "Reading", value: "READING" },
+  { label: "To read", value: "TO_READ" },
+  // A book never touched by a Goodreads shelf sync has no status at all.
+  // That is genuinely different from "to read" and is shown as its own
+  // bucket rather than folded in.
+  { label: "No status", value: null },
+];
+
+const RATING_BUCKETS: { label: string; value: number | null }[] = [
+  { label: "5 stars", value: 5 },
+  { label: "4 stars", value: 4 },
+  { label: "3 stars", value: 3 },
+  { label: "2 stars", value: 2 },
+  { label: "1 star", value: 1 },
+  { label: "Unrated", value: null },
+];
 
 export interface CountBucket {
   label: string;
@@ -41,6 +66,8 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     ebookBooks,
     audiobookBooks,
     multiFormatRows,
+    readStatusGroups,
+    ratingGroups,
   ] = await Promise.all([
     prisma.book.count(),
     prisma.physicalCopy.count(),
@@ -62,7 +89,19 @@ export async function getLibraryStats(): Promise<LibraryStats> {
         (CASE WHEN EXISTS (SELECT 1 FROM "PhysicalCopy" p WHERE p."bookId" = b.id) THEN 1 ELSE 0 END)
       ) >= 2
     `,
+    prisma.book.groupBy({ by: ["readStatus"], _count: { _all: true } }),
+    prisma.book.groupBy({ by: ["rating"], _count: { _all: true } }),
   ]);
+
+  const readStatus = READ_STATUS_BUCKETS.map(({ label, value }) => ({
+    label,
+    count: readStatusGroups.find((g) => g.readStatus === value)?._count._all ?? 0,
+  }));
+
+  const ratings = RATING_BUCKETS.map(({ label, value }) => ({
+    label,
+    count: ratingGroups.find((g) => g.rating === value)?._count._all ?? 0,
+  }));
 
   return {
     totals: {
@@ -73,8 +112,8 @@ export async function getLibraryStats(): Promise<LibraryStats> {
       audiobookBooks,
       multiFormatBooks: multiFormatRows[0]?.count ?? 0,
     },
-    readStatus: [],
-    ratings: [],
+    readStatus,
+    ratings,
     formats: [],
     topPublishers: [],
     decades: [],
