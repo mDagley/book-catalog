@@ -33,6 +33,36 @@ Layout alternatives, simulated by injecting CSS into the live page and re-measur
 
 **Chosen: the 102px row.** 2.7× the density while keeping covers. Dropping covers entirely buys only 1.4× more on top of that and discards the recognition value of art the user built a dedicated burst-capture/crop tool to collect.
 
+## Relationship to pagination (why the page size does not change much)
+
+`/books` is paginated because of load time, not layout: before PR #35 it rendered the whole catalogue as **4.3MB of HTML in 2.3–2.9s**. `DEFAULT_PAGE_SIZE = 50` and `MAX_PAGE_SIZE = 500` exist to bound that, and this spec must not quietly undo it.
+
+The obvious question is whether a lighter compact row lets the page size rise. Measured against a 600-book fixture:
+
+| `?limit=` | Bytes | Time |
+|---|---|---|
+| 10 | 60.6 KB | 0.08s |
+| 50 (today's default) | 207 KB | 0.13s |
+| 100 | 390 KB | 0.23s |
+| 200 | 764 KB | 0.37s |
+| 400 | 1.51 MB | 0.51s |
+| 500 (today's cap) | 1.88 MB | 1.03s |
+
+That is a clean linear ~**3.7 KB per row** on top of ~23 KB of page chrome.
+
+**A compact row is only marginally lighter, so density does not buy a bigger page.** Breaking down the payload for 100 rows: **70% is React Server Component flight data and only 29% is rendered markup** — so the content is serialised roughly twice, and every element removed is counted twice. The parts this spec removes (the `TicketDivider`, the "View details" link, publisher/year text) come to roughly 26 KB of 390 KB, i.e. **on the order of 10%**. Real, but nothing like the 2.7× visual gain.
+
+**Conclusion: keep `DEFAULT_PAGE_SIZE = 50` and `MAX_PAGE_SIZE = 500`.** The win comes from the same page going much further, not from loading more:
+
+| | 50 rows/page |
+|---|---|
+| Today (280px row) | 14,000px ≈ **15 screens** per Load-more click |
+| Compact (102px row) | 5,100px ≈ **5 screens** per click |
+
+The cap also still earns its place: at 500 rows the page is 1.88 MB and crosses a second — and because "Load more" accumulates server-side, that is the real ceiling being bounded.
+
+If fewer clicks are wanted later, raising the default to 100 is measured as safe (390 KB / 0.23s) and is a one-constant change — but it is deliberately **not** part of this work, because the density change alone already cuts clicks by 2.7× and changing both at once would make it impossible to tell which one helped.
+
 ## Density toggle
 
 `CatalogResultCard` is currently **shared** between `/` and `/books` and its own comment notes both "render `searchCatalog()` results identically". The two tasks are opposites: `/` answers "do I already own this?" (few results, confirming an edition — the large cover is doing real work), `/books` is scanning a large library (density wins).
@@ -118,6 +148,7 @@ Search box, sort control and result count stay always-visible; only the filter c
 ## Non-goals
 
 - **No virtualised list.** "Load more" plus a 102px row plus real filtering and jump-to-letter is sufficient at this scale; virtualisation adds real complexity and breaks in-page find (Ctrl-F), which is itself a findability tool.
+- **No change to `DEFAULT_PAGE_SIZE` or `MAX_PAGE_SIZE`** — see the pagination section above. Those constants exist for a measured load-time reason and the density work does not materially change the payload maths.
 - **No change to `/tbr`'s existing jump nav** — it is unpaginated and its anchors work.
 - **No infinite scroll.** "Load more" stays explicit; infinite scroll makes reaching the footer and reasoning about position harder.
 - **No accessibility work from the 2026-07-26 UX assessment** (live regions, search-input labels, focus-ring contrast) — deliberately deferred by the user for a single-user app.
