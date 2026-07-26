@@ -39,11 +39,25 @@ Run: `npx prisma migrate dev --name add_tbr_owned_flag`
 
 Expected: a new folder under `prisma/migrations/` containing a `migration.sql` with exactly one `ALTER TABLE "GoodreadsTbrItem" ADD COLUMN "owned" BOOLEAN NOT NULL DEFAULT false;` statement (Prisma generates this automatically from the schema diff — no hand-editing needed, unlike the `unify_copy_types` migration, since there's no data transformation expressible in this migration's own SQL).
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3: Apply the migration to the isolated TEST database too**
+
+`prisma migrate dev` only touches the database in `.env` (`bookcatalog`, the shared dev DB). The test suite runs against a separate database (`bookcatalog_test`, from `.env.test`) — see the comment block at the top of `vitest.config.ts`. Without this step every test from Task 2 onward fails with an "column owned does not exist" error.
+
+Run (Git Bash):
+
+```bash
+DATABASE_URL="postgresql://bookcatalog:bookcatalog_dev@localhost:5432/bookcatalog_test" npx prisma migrate deploy
+```
+
+Expected: `All migrations have been successfully applied.` (or reports the new migration as applied).
+
+Do NOT edit `.env` or `.env.test` to accomplish this — override `DATABASE_URL` inline for this single command only.
+
+- [ ] **Step 4: Verify**
 
 Run: `npx prisma generate` (if not run automatically by the migrate command), then confirm the Prisma Client's `GoodreadsTbrItem` type now has an `owned: boolean` field by checking `node_modules/.prisma/client/index.d.ts` or just proceeding to Task 2 (TypeScript will fail to compile there if this step didn't work).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations/
