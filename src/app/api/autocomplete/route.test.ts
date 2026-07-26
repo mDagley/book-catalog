@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
+import { markTbrItemsOwnedByTitle } from "@/lib/tbrGap";
 import { GET } from "./route";
 
 function makeRequest(params: Record<string, string>): Request {
@@ -138,6 +139,11 @@ describe("GET /api/autocomplete", () => {
     await prisma.goodreadsTbrItem.create({
       data: { title: "Test Autocomplete Owned Title", author: "Some Author" },
     });
+    // getTbrGap now reads the persisted `owned` flag rather than fuzzy-matching
+    // against Book on every call, so the flag has to be set explicitly here --
+    // in production this happens via the create/edit/delete book hooks (and
+    // Goodreads sync), not exercised by this route test.
+    await markTbrItemsOwnedByTitle("Test Autocomplete Owned Title");
 
     const response = await GET(makeRequest({ scope: "tbr", q: "Test Autocomplete Owned" }));
     const data = await response.json();
@@ -147,8 +153,8 @@ describe("GET /api/autocomplete", () => {
 
   it("does not leak Book rows into the tbr scope or GoodreadsTbrItem rows into the home/books scopes", async () => {
     // Titles are deliberately dissimilar (not just "...Book" vs "...Tbr")
-    // beyond their shared query prefix -- getTbrGap fuzzy-matches titles
-    // against owned Books (see the dedicated ownership-exclusion test below),
+    // beyond their shared query prefix -- getTbrGap excludes TBR items whose
+    // `owned` flag is set (see the dedicated ownership-exclusion test above),
     // so two near-identical titles here would make this test conflate that
     // filtering with the cross-table leak this test actually targets.
     await prisma.book.create({ data: { title: "Test Autocomplete Cross Scope Physical Book" } });
