@@ -4,6 +4,7 @@ import {
   getTbrGap,
   groupByInitial,
   markTbrItemsOwnedByTitle,
+  markTbrItemsOwnedByTitles,
   recheckOwnedTbrItems,
   recomputeAllTbrOwnership,
   type TbrGapItem,
@@ -375,5 +376,68 @@ describe("recomputeAllTbrOwnership", () => {
     expect(result.markedOwned).toBe(1);
     expect(result.markedUnowned).toBe(1);
     expect(result.total).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("markTbrItemsOwnedByTitles", () => {
+  it("marks items matching any title in the batch", async () => {
+    const a = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Batch Zelphinar Quixotry", author: "A", owned: false },
+    });
+    const b = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Batch Brambleworth Mycelium", author: "B", owned: false },
+    });
+    const untouched = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Batch Solitary Vellum Threnody", author: "C", owned: false },
+    });
+
+    await markTbrItemsOwnedByTitles([
+      "Test TBR Batch Zelphinar Quixotry",
+      "Test TBR Batch Brambleworth Mycelium",
+    ]);
+
+    expect((await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: a.id } })).owned).toBe(true);
+    expect((await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: b.id } })).owned).toBe(true);
+    expect(
+      (await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: untouched.id } })).owned,
+    ).toBe(false);
+  });
+
+  it("does nothing, and issues no query, for an empty batch", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Batch Empty Case", author: "A", owned: false },
+    });
+
+    await markTbrItemsOwnedByTitles([]);
+
+    expect((await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } })).owned).toBe(
+      false,
+    );
+  });
+
+  // The point of the batch form: a sync creating many books must not scan the
+  // unowned TBR table once per created book.
+  it("scans the unowned TBR items exactly once regardless of batch size", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Batch Scan Count Probe", author: "A", owned: false },
+    });
+
+    let findManyCalls = 0;
+    const originalFindMany = prisma.goodreadsTbrItem.findMany;
+    // @ts-expect-error -- narrow test-only spy on a real client method
+    prisma.goodreadsTbrItem.findMany = (...args: unknown[]) => {
+      findManyCalls++;
+      // @ts-expect-error -- forwarding through to the real implementation
+      return originalFindMany.apply(prisma.goodreadsTbrItem, args);
+    };
+    try {
+      await markTbrItemsOwnedByTitles(
+        Array.from({ length: 50 }, (_, i) => `Test TBR Batch Nonmatching Title ${i}`),
+      );
+    } finally {
+      prisma.goodreadsTbrItem.findMany = originalFindMany;
+    }
+
+    expect(findManyCalls).toBe(1);
   });
 });

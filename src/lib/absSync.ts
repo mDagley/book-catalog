@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/isbn";
 import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
-import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { markTbrItemsOwnedByTitles, recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -467,6 +467,11 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
     mediaType === "EBOOK" ? linkedEbookIds : linkedAudiobookIds;
 
   const seenItemIds = new Set<string>();
+  // Titles of books this pass actually created. Accumulated so the TBR
+  // ownership update runs as ONE scan after the loop rather than one scan per
+  // created book -- a first sync creates hundreds, and per-book scans would
+  // put real fuzzy-match CPU load inside a single request.
+  const createdTitles: string[] = [];
   let synced = 0;
 
   for (const { item, mediaType } of pendingItems) {
@@ -485,7 +490,9 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
       } else {
         const created = await createBookForItem(item, mediaType);
         books.push(created);
-        await markTbrItemsOwnedByTitle(created.title);
+        // Collected, not marked here -- see the single markTbrItemsOwnedByTitles
+        // call after this loop.
+        createdTitles.push(created.title);
       }
     } catch (err) {
       if (!isConcurrentAbsItemLink(err)) throw err;
@@ -494,6 +501,10 @@ export async function syncAbsCache(baseUrl: string, token: string): Promise<{ sy
 
     synced++;
   }
+
+  // One pass for every title created above. No-ops when nothing was created,
+  // which is the steady-state case.
+  await markTbrItemsOwnedByTitles(createdTitles);
 
   const syncedMediaTypes = new Set<AbsMediaType>(pendingItems.map((p) => p.mediaType));
 
