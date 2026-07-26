@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { sortSeriesMembers } from "@/lib/series";
 import { deleteCopy } from "@/lib/actions/copies";
 import { FORMAT_LABELS } from "@/components/CopyFormFields";
 import { TicketCard } from "@/components/ui/TicketCard";
@@ -25,6 +26,19 @@ export default async function BookDetailPage({
     notFound();
   }
 
+  // Case-insensitive so "The Daevabad Trilogy" and "the daevabad trilogy"
+  // group together. Exact equality only -- no fuzzy matching, deliberately,
+  // so two genuinely different series with similar names never merge (see
+  // the spec's non-goals). Only queried when this book has a series at all.
+  const seriesMembers = book.seriesName
+    ? sortSeriesMembers(
+        await prisma.book.findMany({
+          where: { seriesName: { equals: book.seriesName, mode: "insensitive" } },
+          select: { id: true, title: true, seriesPosition: true },
+        }),
+      )
+    : [];
+
   return (
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
@@ -40,6 +54,32 @@ export default async function BookDetailPage({
           Edit
         </Link>
       </div>
+
+      {/* Shown only when at least one OTHER book shares the series -- a
+          "series" listing just this book tells the reader nothing. */}
+      {seriesMembers.length > 1 && (
+        <section className="mb-4">
+          <h2 className="mb-2 font-display text-lg font-medium text-foreground-strong">
+            Part of: {book.seriesName}
+          </h2>
+          <ol className="space-y-1 text-sm">
+            {seriesMembers.map((member) => (
+              <li key={member.id}>
+                <span className="text-foreground/70">{member.seriesPosition ?? "—"}. </span>
+                {member.id === book.id ? (
+                  <span className="text-foreground">
+                    {member.title} <span className="text-foreground/70">(this book)</span>
+                  </span>
+                ) : (
+                  <Link href={`/books/${member.id}`} className="text-link underline">
+                    {member.title}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-lg font-medium text-foreground-strong">
