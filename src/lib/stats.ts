@@ -116,7 +116,12 @@ export async function getLibraryStats(): Promise<LibraryStats> {
       by: ["publisher"],
       where: { publisher: { not: null } },
       _count: { _all: true },
-      orderBy: { _count: { publisher: "desc" } },
+      // Secondary alphabetical sort breaks count ties. Without it Postgres
+      // gives no ordering guarantee among equal counts, so the list visibly
+      // reshuffles between page loads (caught in browser verification: two
+      // publishers tied on 13 swapped places between renders). Same fix as
+      // searchCatalog's secondary `id` sort, for the same reason.
+      orderBy: [{ _count: { publisher: "desc" } }, { publisher: "asc" }],
       take: TOP_N,
     }),
     // Decade bucketing has no Prisma equivalent, so raw SQL. COUNT(*)::int,
@@ -134,7 +139,9 @@ export async function getLibraryStats(): Promise<LibraryStats> {
       by: ["author"],
       where: { author: { not: null } },
       _count: { _all: true },
-      orderBy: { _count: { author: "desc" } },
+      // Secondary alphabetical sort breaks count ties -- see the publisher
+      // query above.
+      orderBy: [{ _count: { author: "desc" } }, { author: "asc" }],
       take: TOP_N,
     }),
     prisma.goodreadsTbrItem.count(),

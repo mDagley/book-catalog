@@ -234,3 +234,83 @@ describe("getLibraryStats authors and TBR", () => {
     expect(stats.tbr.owned + stats.tbr.gap).toBe(stats.tbr.total);
   });
 });
+
+describe("getLibraryStats reconciliation", () => {
+  it("keeps book-level and copy-level totals internally consistent", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Reconcile One",
+        author: "Test Stats Reconcile Author",
+        readStatus: "READ",
+        rating: 4,
+        copies: { create: [{ format: "HARDCOVER" }, { format: "PAPERBACK" }] },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Reconcile Two",
+        hasAudiobook: true,
+        audiobookCopies: { create: { absItemId: "test-stats-reconcile-audio" } },
+      },
+    });
+
+    const stats = await getLibraryStats();
+
+    // Every book lands in exactly one read-status bucket and one rating bucket.
+    expect(stats.readStatus.reduce((n, b) => n + b.count, 0)).toBe(stats.totals.books);
+    expect(stats.ratings.reduce((n, b) => n + b.count, 0)).toBe(stats.totals.books);
+
+    // Every physical copy lands in exactly one format bucket.
+    const physicalCopies = await prisma.physicalCopy.count();
+    expect(stats.formats.reduce((n, b) => n + b.count, 0)).toBe(physicalCopies);
+
+    // Decade buckets plus the no-year count cover every physical copy.
+    expect(stats.decades.reduce((n, b) => n + b.count, 0) + stats.publishYearUnknown).toBe(
+      physicalCopies,
+    );
+
+    // TBR splits cleanly.
+    expect(stats.tbr.owned + stats.tbr.gap).toBe(stats.tbr.total);
+
+    // Book-level and copy-level numbers genuinely differ here, which is the
+    // whole point of tracking them separately.
+    expect(stats.totals.copies).toBeGreaterThan(stats.totals.books);
+  });
+});
+
+describe("getLibraryStats ordering stability", () => {
+  // Regression: without a secondary sort key, Postgres gives no ordering
+  // guarantee among equal counts, so the ranked lists visibly reshuffled
+  // between page loads. Caught in browser verification, not by the earlier
+  // tests, because a single render always looks fine.
+  it("orders tied authors and publishers deterministically across repeated calls", async () => {
+    for (const name of ["Test Stats Tie Charlie", "Test Stats Tie Alpha", "Test Stats Tie Bravo"]) {
+      await prisma.book.create({
+        data: {
+          title: `Test Stats Tie Book ${name}`,
+          author: name,
+          copies: { create: { format: "PAPERBACK", publisher: name } },
+        },
+      });
+    }
+
+    const runs = await Promise.all([
+      getLibraryStats(),
+      getLibraryStats(),
+      getLibraryStats(),
+    ]);
+
+    const authorOrders = runs.map((r) => r.topAuthors.map((a) => a.label).join("|"));
+    const publisherOrders = runs.map((r) => r.topPublishers.map((p) => p.label).join("|"));
+
+    expect(new Set(authorOrders).size).toBe(1);
+    expect(new Set(publisherOrders).size).toBe(1);
+
+    // All three tie on a count of 1, so they must come back alphabetically.
+    expect(runs[0].topAuthors.map((a) => a.label)).toEqual([
+      "Test Stats Tie Alpha",
+      "Test Stats Tie Bravo",
+      "Test Stats Tie Charlie",
+    ]);
+  });
+});
