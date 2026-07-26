@@ -199,3 +199,38 @@ describe("getLibraryStats physical shelf", () => {
     expect(stats.topPublishers[1]).toEqual({ label: "Test Stats Gollancz", count: 1 });
   });
 });
+
+describe("getLibraryStats authors and TBR", () => {
+  it("ranks authors by book count and excludes books with no author", async () => {
+    await prisma.book.create({ data: { title: "Test Stats Author A1", author: "Test Stats Sanderson" } });
+    await prisma.book.create({ data: { title: "Test Stats Author A2", author: "Test Stats Sanderson" } });
+    await prisma.book.create({ data: { title: "Test Stats Author B1", author: "Test Stats Le Guin" } });
+    await prisma.book.create({ data: { title: "Test Stats Author None", author: null } });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.topAuthors[0]).toEqual({ label: "Test Stats Sanderson", count: 2 });
+    expect(stats.topAuthors[1]).toEqual({ label: "Test Stats Le Guin", count: 1 });
+    expect(stats.topAuthors.some((a) => a.label === null || a.label === "")).toBe(false);
+    expect(stats.topAuthors.reduce((n, a) => n + a.count, 0)).toBe(3);
+  });
+
+  it("splits TBR items into owned and remaining gap", async () => {
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Stats Tbr Owned", owned: true },
+    });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Stats Tbr Wanted A", owned: false },
+    });
+    await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Stats Tbr Wanted B", owned: false },
+    });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.tbr.total).toBe(3);
+    expect(stats.tbr.owned).toBe(1);
+    expect(stats.tbr.gap).toBe(2);
+    expect(stats.tbr.owned + stats.tbr.gap).toBe(stats.tbr.total);
+  });
+});

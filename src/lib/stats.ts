@@ -85,6 +85,9 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     publisherGroups,
     decadeRows,
     publishYearUnknown,
+    authorGroups,
+    tbrTotal,
+    tbrOwned,
   ] = await Promise.all([
     prisma.book.count(),
     prisma.physicalCopy.count(),
@@ -127,6 +130,17 @@ export async function getLibraryStats(): Promise<LibraryStats> {
       ORDER BY decade
     `,
     prisma.physicalCopy.count({ where: { publishYear: null } }),
+    prisma.book.groupBy({
+      by: ["author"],
+      where: { author: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { author: "desc" } },
+      take: TOP_N,
+    }),
+    prisma.goodreadsTbrItem.count(),
+    // Reads the `owned` column added by the TBR performance work, so this is
+    // two cheap COUNTs rather than any title matching.
+    prisma.goodreadsTbrItem.count({ where: { owned: true } }),
   ]);
 
   const readStatus = READ_STATUS_BUCKETS.map(({ label, value }) => ({
@@ -160,6 +174,14 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     count: row.count,
   }));
 
+  // A missing author is absent data, not an author named "Unknown" -- those
+  // books are excluded from the ranking rather than bucketed together, which
+  // would otherwise often top the list and say nothing.
+  const topAuthors = authorGroups.map((g) => ({
+    label: g.author as string,
+    count: g._count._all,
+  }));
+
   return {
     totals: {
       books,
@@ -175,7 +197,7 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     topPublishers,
     decades,
     publishYearUnknown,
-    topAuthors: [],
-    tbr: { total: 0, owned: 0, gap: 0 },
+    topAuthors,
+    tbr: { total: tbrTotal, owned: tbrOwned, gap: tbrTotal - tbrOwned },
   };
 }
