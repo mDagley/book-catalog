@@ -63,7 +63,8 @@ export interface LibraryStats {
 }
 
 // Every figure here is a COUNT or GROUP BY executed inside Postgres --
-// measured at 38ms for the whole batch against 2000 books, which is why this
+// measured at a median of 3ms for the whole 17-query batch against a
+// 2000-book fixture, which is why this
 // page has no cache and no persisted stats table. See
 // docs/superpowers/specs/2026-07-26-library-stats-design.md for why that
 // deliberately differs from the TBR gap's persisted-column approach: the

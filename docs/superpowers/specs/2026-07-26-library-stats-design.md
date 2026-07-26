@@ -8,16 +8,17 @@ Purpose, per the user: **both a curiosity snapshot and a mildly practical tool, 
 
 ## Architecture: plain per-request queries, no cache, no persisted column
 
-Every figure on this page is a `COUNT` or a `GROUP BY` executed inside Postgres. Measured against a 2000-book fixture with one physical copy each:
+Every figure on this page is a `COUNT` or a `GROUP BY` executed inside Postgres. `getLibraryStats()` issues **17 queries** in one `Promise.all` (7 `count`s, 5 `groupBy`s, 2 raw SQL aggregates, and 3 further counts for copies and TBR).
 
-| Query | Time |
+Measured against a 2000-book fixture (2000 physical copies, 800 TBR items), five warmed runs of the real function:
+
+| | Time |
 |---|---|
-| **All 11 stats queries, in one `Promise.all`** | **38ms** |
-| `groupBy` read status | 2ms |
-| `groupBy` top 10 authors | 1ms |
-| Publish-decade histogram (raw SQL) | 2ms |
+| **All 17 queries, in one `Promise.all`** | **median 3ms** (range 2–5ms) |
 
-**This deliberately departs from [[caching-preference]]**, which says to prefer persisting a derived answer over recomputing per request. That principle earned its place from the TBR gap, where the work was O(books × TBR items) of *fuzzy string matching in application code* — 49 seconds. Stats are O(n) aggregates with a tiny constant, executed by the database. At 38ms for the entire page, a persisted stats table would cost more in invalidation bookkeeping (every book, copy, rating, and status change would have to touch it) than it could ever save. Adding that machinery here would be the over-engineering, not the discipline.
+An earlier draft of this spec cited "11 queries / 38ms". That figure came from a probe written before the query set was final — it timed a smaller set, cold. Both numbers were wrong and are corrected here. If the query set changes again, re-measure rather than adjusting the prose.
+
+**This deliberately departs from [[caching-preference]]**, which says to prefer persisting a derived answer over recomputing per request. That principle earned its place from the TBR gap, where the work was O(books × TBR items) of *fuzzy string matching in application code* — 49 seconds. Stats are O(n) aggregates with a tiny constant, executed by the database. At a few milliseconds for the entire page, a persisted stats table would cost more in invalidation bookkeeping (every book, copy, rating, and status change would have to touch it) than it could ever save. Adding that machinery here would be the over-engineering, not the discipline.
 
 The distinction worth carrying forward: *the preference is against expensive recomputation, not against computation.*
 
