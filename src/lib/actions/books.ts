@@ -137,8 +137,13 @@ export async function updateSeries(
   formData: FormData,
 ): Promise<BookFormState> {
   const result = await updateSeriesData(bookId, {
-    seriesName: (formData.get("seriesName") as string) ?? "",
-    seriesPosition: (formData.get("seriesPosition") as string) ?? "",
+    // `?.toString()`, not `as string` -- formData.get returns string | File |
+    // null, and the cast is erased at runtime, so a crafted multipart request
+    // sending a File here would reach updateSeriesData and throw on .trim(),
+    // turning bad input into a 500. Matches the safer idiom already used by
+    // createBookFromScan in this same file.
+    seriesName: formData.get("seriesName")?.toString() ?? "",
+    seriesPosition: formData.get("seriesPosition")?.toString() ?? "",
   });
 
   if ("error" in result) {

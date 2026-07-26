@@ -65,7 +65,11 @@ export default async function BookDetailPage({
           <ol className="space-y-1 text-sm">
             {seriesMembers.map((member) => (
               <li key={member.id}>
-                <span className="text-foreground/70">{member.seriesPosition ?? "—"}. </span>
+                {/* No trailing period for an un-numbered entry -- "—." reads
+                    as a malformed list marker rather than a missing number. */}
+                <span className="text-foreground/70">
+                  {member.seriesPosition === null ? "—" : `${member.seriesPosition}.`}{" "}
+                </span>
                 {member.id === book.id ? (
                   <span className="text-foreground">
                     {member.title} <span className="text-foreground/70">(this book)</span>
