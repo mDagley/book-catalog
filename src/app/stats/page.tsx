@@ -64,16 +64,22 @@ export default async function StatsPage() {
         <p className="mb-2 text-sm text-foreground/70">By copy</p>
         <StatBarList buckets={stats.formats} unit="copies" />
 
-        {stats.decades.length > 0 && (
+        {/* Shown when there is EITHER a decade to chart or copies missing a
+            year. Gating the whole section on `decades.length` alone hid the
+            missing-year note in the one case it matters most: a shelf where
+            no copy has a publish year at all would silently show nothing,
+            rather than saying so. */}
+        {(stats.decades.length > 0 || stats.publishYearUnknown > 0) && (
           <>
             <h3 className="mt-4 mb-2 font-display text-base font-semibold text-foreground-strong">
               Published
             </h3>
-            <StatBarList buckets={stats.decades} unit="copies" />
+            {stats.decades.length > 0 && <StatBarList buckets={stats.decades} unit="copies" />}
             {stats.publishYearUnknown > 0 && (
               <p className="mt-2 text-sm text-foreground/70">
-                {stats.publishYearUnknown.toLocaleString()} cop
-                {stats.publishYearUnknown === 1 ? "y has" : "ies have"} no publish year recorded.
+                {`${stats.publishYearUnknown.toLocaleString()} ${
+                  stats.publishYearUnknown === 1 ? "copy has" : "copies have"
+                } no publish year recorded.`}
               </p>
             )}
           </>
