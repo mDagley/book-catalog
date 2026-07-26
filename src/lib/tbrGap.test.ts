@@ -21,34 +21,41 @@ afterEach(async () => {
 });
 
 describe("getTbrGap", () => {
-  it("excludes a TBR item that matches an owned physical book", async () => {
-    await prisma.book.create({
-      data: { title: "Test TBR Owned Book", copies: { create: { format: "PAPERBACK" } } },
-    });
+  it("excludes a TBR item marked owned", async () => {
     await prisma.goodreadsTbrItem.create({
-      data: { title: "Test TBR Owned Book", author: "Someone" },
+      data: { title: "Test TBR Owned Flag Set", author: "Someone", owned: true },
     });
 
     const gap = await getTbrGap();
 
-    expect(gap.some((item) => item.title === "Test TBR Owned Book")).toBe(false);
+    expect(gap.some((item) => item.title === "Test TBR Owned Flag Set")).toBe(false);
   });
 
-  it("excludes a TBR item that matches an ebook/audiobook-only Book", async () => {
-    await prisma.book.create({
-      data: {
-        title: "Test TBR Abs Book",
-        hasAudiobook: true,
-        audiobookCopies: { create: { absItemId: "test-tbr-abs-1" } },
-      },
-    });
+  it("reflects real ownership end-to-end: creating a matching Book, then marking, excludes the item", async () => {
     await prisma.goodreadsTbrItem.create({
-      data: { title: "Test TBR Abs Book", author: "Someone" },
+      data: { title: "Test TBR Owned End To End", author: "Someone" },
     });
+    expect(
+      (await getTbrGap()).some((item) => item.title === "Test TBR Owned End To End"),
+    ).toBe(true);
 
-    const gap = await getTbrGap();
+    await prisma.book.create({ data: { title: "Test TBR Owned End To End" } });
+    await markTbrItemsOwnedByTitle("Test TBR Owned End To End");
 
-    expect(gap.some((item) => item.title === "Test TBR Abs Book")).toBe(false);
+    expect(
+      (await getTbrGap()).some((item) => item.title === "Test TBR Owned End To End"),
+    ).toBe(false);
+  });
+
+  it("reflects a change immediately with no caching delay", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR No Cache Delay", author: "Someone" },
+    });
+    expect((await getTbrGap()).some((i) => i.title === "Test TBR No Cache Delay")).toBe(true);
+
+    await prisma.goodreadsTbrItem.update({ where: { id: item.id }, data: { owned: true } });
+
+    expect((await getTbrGap()).some((i) => i.title === "Test TBR No Cache Delay")).toBe(false);
   });
 
   it("includes a TBR item not owned in any form", async () => {
