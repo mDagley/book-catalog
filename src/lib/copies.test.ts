@@ -9,6 +9,7 @@ import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const createdBookIds: string[] = [];
 const savedCoverPaths: string[] = [];
+const createdTbrItemIds: string[] = [];
 
 afterEach(async () => {
   for (const id of createdBookIds) {
@@ -22,6 +23,8 @@ afterEach(async () => {
     await deleteCoverImage(p);
   }
   savedCoverPaths.length = 0;
+  await prisma.goodreadsTbrItem.deleteMany({ where: { id: { in: createdTbrItemIds } } });
+  createdTbrItemIds.length = 0;
 });
 
 async function createTestBook() {
@@ -234,5 +237,45 @@ describe("deleteCopyData", () => {
     await deleteCopyData(addResult.copyId);
 
     await expect(readFile(path.join(uploadsDir, coverPath))).rejects.toThrow();
+  });
+
+  it("marks a matching TBR item as no longer owned when the last copy's removal also deletes the book", async () => {
+    const bookId = await createTestBook();
+    const [onlyCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
+    // "Test Book For Copies" is exactly createTestBook()'s title, so this is
+    // a guaranteed (score-100) match -- no fuzzy-similarity risk to verify.
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Book For Copies", owned: true },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const result = await deleteCopyData(onlyCopy.id);
+
+    expect(result).toEqual({ bookId, bookDeleted: true });
+    // Remove from cleanup list since it's already gone
+    const idx = createdBookIds.indexOf(bookId);
+    if (idx !== -1) createdBookIds.splice(idx, 1);
+
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(false);
+  });
+
+  it("leaves a matching TBR item owned when the book survives its last physical copy being removed", async () => {
+    const bookId = await createTestBook();
+    await prisma.book.update({
+      where: { id: bookId },
+      data: { hasEbook: true, ebookCopies: { create: { absItemId: "test-copies-ebook-link-tbr" } } },
+    });
+    const [onlyCopy] = await prisma.physicalCopy.findMany({ where: { bookId } });
+    const tbr = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test Book For Copies", owned: true },
+    });
+    createdTbrItemIds.push(tbr.id);
+
+    const result = await deleteCopyData(onlyCopy.id);
+
+    expect(result).toEqual({ bookId, bookDeleted: false });
+    const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
+    expect(after.owned).toBe(true);
   });
 });

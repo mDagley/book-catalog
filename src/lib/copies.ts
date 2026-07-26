@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { parseCopyFields } from "@/lib/books";
 import { resolveCoverUpdate, type CoverSelectionInput } from "@/lib/copyCovers";
 import { deleteCoverImage } from "@/lib/coverStorage";
+import { recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 export interface CopyFormState {
   error?: string;
@@ -83,6 +84,11 @@ export async function deleteCopyData(
     // or audiobook) backs this row anymore.
     if (!book.hasEbook && !book.hasAudiobook) {
       await prisma.book.delete({ where: { id: copy.bookId } });
+      // This title no longer exists -- it may have been the only thing
+      // keeping a TBR item marked owned. Runs after the delete commits, and
+      // only in this branch: a Book that survives hasn't changed which
+      // titles exist, so no recheck is warranted then.
+      await recheckOwnedTbrItems();
       return { bookId: copy.bookId, bookDeleted: true };
     }
   }
