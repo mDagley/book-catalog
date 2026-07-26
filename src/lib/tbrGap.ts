@@ -57,6 +57,25 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
 }
 
+// Call whenever a new owned title starts existing (a Book is created, or an
+// existing Book's title changes to something new). Checks only currently-
+// unowned TBR items against this ONE title -- O(unowned TBR items), not the
+// full owned-books cross product -- and flips any fuzzy match to owned.
+export async function markTbrItemsOwnedByTitle(title: string): Promise<void> {
+  const unowned = await prisma.goodreadsTbrItem.findMany({
+    where: { owned: false },
+    select: { id: true, title: true },
+  });
+  const nowOwnedIds = unowned
+    .filter((item) => isTitleMatch(item.title, title))
+    .map((item) => item.id);
+  if (nowOwnedIds.length === 0) return;
+  await prisma.goodreadsTbrItem.updateMany({
+    where: { id: { in: nowOwnedIds } },
+    data: { owned: true },
+  });
+}
+
 // Cache the expensive fuzzy-matching computation rather than re-running it on
 // every page load. Revalidated on-demand via revalidateTag(TBR_GAP_CACHE_TAG)
 // when a manual sync completes via the /api/sync/* route handlers. The

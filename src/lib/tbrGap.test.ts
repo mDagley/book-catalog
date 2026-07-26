@@ -1,6 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { getTbrGap, groupByInitial, type TbrGapItem } from "@/lib/tbrGap";
+import {
+  getTbrGap,
+  groupByInitial,
+  markTbrItemsOwnedByTitle,
+  type TbrGapItem,
+} from "@/lib/tbrGap";
 
 afterEach(async () => {
   await prisma.goodreadsTbrItem.deleteMany({ where: { title: { startsWith: "Test TBR" } } });
@@ -224,5 +229,40 @@ describe("groupByInitial", () => {
         items: [item("Aaa First", "Sanderson, A"), item("Aaa Second", "Sanderson, B")],
       },
     ]);
+  });
+});
+
+describe("markTbrItemsOwnedByTitle", () => {
+  it("flips a currently-unowned matching item to owned", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Mark Elantris", author: "Brandon Sanderson" },
+    });
+
+    await markTbrItemsOwnedByTitle("Test TBR Mark Elantris");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.owned).toBe(true);
+  });
+
+  it("leaves a non-matching item unowned", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Mark Unrelated", author: "Someone" },
+    });
+
+    await markTbrItemsOwnedByTitle("Test TBR Mark Completely Different Book");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.owned).toBe(false);
+  });
+
+  it("does not touch an already-owned item", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Mark Already Owned", author: "Someone", owned: true },
+    });
+
+    await markTbrItemsOwnedByTitle("Test TBR Mark Already Owned");
+
+    const updated = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.owned).toBe(true);
   });
 });
