@@ -954,3 +954,52 @@ describe("saveCoverFromUrl", () => {
     expect(result.coverImagePath).toMatch(/^[a-f0-9-]+\.png$/);
   });
 });
+
+describe("updateSeriesData orphan position", () => {
+  // A position with no series name is unusable: the detail page's series
+  // section keys off seriesName, so the number could never be displayed, and
+  // it would silently re-apply if a name were added later. Rejected rather
+  // than dropped silently -- discarding user input without saying so is
+  // worse than refusing it.
+  it("rejects a position with no series name", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Orphan Position" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "", seriesPosition: "3" });
+
+    expect(result).toEqual({ error: "A series position needs a series name" });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
+    // Rejected outright, so nothing was recorded as a hand-edit either.
+    expect(updated.seriesManual).toBe(false);
+  });
+
+  it("rejects a whitespace-only series name paired with a position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Blank Name" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "   ", seriesPosition: "1" });
+
+    expect(result).toEqual({ error: "A series position needs a series name" });
+  });
+
+  it("still allows clearing both fields together", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Books Series Clear Both",
+        seriesName: "Old Series",
+        seriesPosition: 2,
+        seriesManual: true,
+      },
+    });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "", seriesPosition: "" });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
+  });
+});

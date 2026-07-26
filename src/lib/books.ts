@@ -299,6 +299,16 @@ export async function updateSeriesData(
     }
   }
 
+  // A position with no series name is unusable data: the detail page's
+  // series section keys off seriesName, so the number could never be shown,
+  // and it would silently re-apply if a name were added later. Rejected
+  // rather than quietly dropped -- discarding what someone typed without
+  // telling them is worse than refusing it. Clearing BOTH fields is still
+  // allowed; that's a deliberate un-recording, not an inconsistent state.
+  if (!seriesName && seriesPosition !== null) {
+    return { error: "A series position needs a series name" };
+  }
+
   await prisma.book.update({
     where: { id: bookId },
     data: {
