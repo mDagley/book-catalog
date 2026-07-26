@@ -6,6 +6,7 @@ import {
   createBookWithCopyData,
   saveCoverFromUrl,
   updateBookData,
+  updateSeriesData,
   type BookFormState,
 } from "@/lib/books";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
@@ -118,6 +119,26 @@ export async function updateBook(
     title: (formData.get("title") as string) ?? "",
     author: (formData.get("author") as string) ?? "",
     isbn: (formData.get("isbn") as string) ?? "",
+  });
+
+  if ("error" in result) {
+    return result;
+  }
+
+  revalidatePath("/books");
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/edit`);
+  redirect(`/books/${bookId}/edit`);
+}
+
+export async function updateSeries(
+  bookId: string,
+  _prevState: BookFormState,
+  formData: FormData,
+): Promise<BookFormState> {
+  const result = await updateSeriesData(bookId, {
+    seriesName: (formData.get("seriesName") as string) ?? "",
+    seriesPosition: (formData.get("seriesPosition") as string) ?? "",
   });
 
   if ("error" in result) {

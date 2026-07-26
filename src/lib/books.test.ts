@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
-import { createBookWithCopyData, updateBookData, saveCoverFromUrl } from "@/lib/books";
+import {
+  createBookWithCopyData,
+  updateBookData,
+  updateSeriesData,
+  saveCoverFromUrl,
+} from "@/lib/books";
 
 const createdBookIds: string[] = [];
 const createdTbrItemIds: string[] = [];
@@ -614,6 +619,76 @@ describe("updateBookData", () => {
 
     const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(after.owned).toBe(true);
+  });
+});
+
+describe("updateSeriesData", () => {
+  it("sets both fields and marks them manual", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Edit" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, {
+      seriesName: "Hand Typed Series",
+      seriesPosition: "3",
+    });
+
+    expect(result).toEqual({ ok: true });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBe("Hand Typed Series");
+    expect(updated.seriesPosition).toBe(3);
+    expect(updated.seriesManual).toBe(true);
+  });
+
+  it("accepts a decimal position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Decimal" } });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "Novella Series", seriesPosition: "2.5" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesPosition).toBe(2.5);
+  });
+
+  it("clears both fields when given empty input, but stays manual", async () => {
+    const book = await prisma.book.create({
+      data: {
+        title: "Test Books Series Clear",
+        seriesName: "Old Series",
+        seriesPosition: 1,
+        seriesManual: true,
+      },
+    });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "", seriesPosition: "" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
+    expect(updated.seriesPosition).toBeNull();
+    // Once hand-edited, always hand-edited -- matches readStatusManual/ratingManual.
+    expect(updated.seriesManual).toBe(true);
+  });
+
+  it("allows a series name with no position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series No Position" } });
+    createdBookIds.push(book.id);
+
+    await updateSeriesData(book.id, { seriesName: "Unnumbered Series", seriesPosition: "" });
+
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBe("Unnumbered Series");
+    expect(updated.seriesPosition).toBeNull();
+  });
+
+  it("rejects a non-numeric position", async () => {
+    const book = await prisma.book.create({ data: { title: "Test Books Series Bad Position" } });
+    createdBookIds.push(book.id);
+
+    const result = await updateSeriesData(book.id, { seriesName: "S", seriesPosition: "abc" });
+
+    expect(result).toEqual({ error: "Series position must be a number" });
+    const updated = await prisma.book.findUniqueOrThrow({ where: { id: book.id } });
+    expect(updated.seriesName).toBeNull();
   });
 });
 

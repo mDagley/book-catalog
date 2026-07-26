@@ -274,3 +274,39 @@ export async function updateBookData(
 
   return { ok: true };
 }
+
+// Saving series by hand always sets seriesManual, including when clearing
+// both fields -- "I deliberately removed this" is itself a hand-edit, and
+// matches the readStatusManual/ratingManual convention where un-setting a
+// value never silently hands control back to the sync.
+//
+// There is intentionally no "let parsing manage this again" control: unlike
+// read status and rating, which really do keep changing on Goodreads, a
+// title's series suffix is fixed at creation, so there would be nothing for
+// un-setting the flag to resume.
+export async function updateSeriesData(
+  bookId: string,
+  input: { seriesName: string; seriesPosition: string },
+): Promise<{ ok: true } | { error: string }> {
+  const seriesName = input.seriesName.trim();
+  const rawPosition = input.seriesPosition.trim();
+
+  let seriesPosition: number | null = null;
+  if (rawPosition) {
+    seriesPosition = Number(rawPosition);
+    if (!Number.isFinite(seriesPosition)) {
+      return { error: "Series position must be a number" };
+    }
+  }
+
+  await prisma.book.update({
+    where: { id: bookId },
+    data: {
+      seriesName: seriesName || null,
+      seriesPosition,
+      seriesManual: true,
+    },
+  });
+
+  return { ok: true };
+}
