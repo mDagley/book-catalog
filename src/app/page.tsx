@@ -64,6 +64,9 @@ export default async function HomePage({
         <Link href="/tbr" className="text-link underline">
           TBR gap view
         </Link>
+        <Link href="/stats" className="text-link underline">
+          Library stats
+        </Link>
       </div>
 
       {hasActiveFilters && results.length === 0 && (
