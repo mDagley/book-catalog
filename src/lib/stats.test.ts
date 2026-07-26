@@ -120,3 +120,82 @@ describe("getLibraryStats reading", () => {
     expect(stats.ratings.reduce((n, b) => n + b.count, 0)).toBe(stats.totals.books);
   });
 });
+
+describe("getLibraryStats physical shelf", () => {
+  it("counts formats per copy, not per book, and returns all four buckets", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Format Book",
+        copies: { create: [{ format: "PAPERBACK" }, { format: "PAPERBACK" }] },
+      },
+    });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.formats.map((b) => b.label)).toEqual([
+      "Hardcover",
+      "Paperback",
+      "Mass market",
+      "Other",
+    ]);
+    expect(stats.formats.find((b) => b.label === "Paperback")!.count).toBe(2);
+    expect(stats.formats.find((b) => b.label === "Hardcover")!.count).toBe(0);
+  });
+
+  it("format buckets sum to the total physical copy count", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Format Sum Book",
+        copies: { create: [{ format: "HARDCOVER" }, { format: "OTHER" }] },
+      },
+    });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.formats.reduce((n, b) => n + b.count, 0)).toBe(2);
+  });
+
+  it("buckets publish years by decade and reports copies with no year separately", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Decade Book",
+        copies: {
+          create: [
+            { format: "PAPERBACK", publishYear: 1998 },
+            { format: "PAPERBACK", publishYear: 1991 },
+            { format: "PAPERBACK", publishYear: 2003 },
+            { format: "PAPERBACK" },
+          ],
+        },
+      },
+    });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.decades).toEqual([
+      { label: "1990s", count: 2 },
+      { label: "2000s", count: 1 },
+    ]);
+    expect(stats.publishYearUnknown).toBe(1);
+  });
+
+  it("ranks publishers by copy count, most first", async () => {
+    await prisma.book.create({
+      data: {
+        title: "Test Stats Publisher Book",
+        copies: {
+          create: [
+            { format: "PAPERBACK", publisher: "Test Stats Tor" },
+            { format: "PAPERBACK", publisher: "Test Stats Tor" },
+            { format: "PAPERBACK", publisher: "Test Stats Gollancz" },
+          ],
+        },
+      },
+    });
+
+    const stats = await getLibraryStats();
+
+    expect(stats.topPublishers[0]).toEqual({ label: "Test Stats Tor", count: 2 });
+    expect(stats.topPublishers[1]).toEqual({ label: "Test Stats Gollancz", count: 1 });
+  });
+});

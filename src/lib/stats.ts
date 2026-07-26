@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { ReadStatus } from "@prisma/client";
+import type { Format, ReadStatus } from "@prisma/client";
 
 // groupBy only returns buckets that actually have rows, so every
 // distribution is projected onto a fixed, ordered bucket list. Without this
@@ -24,6 +24,19 @@ const RATING_BUCKETS: { label: string; value: number | null }[] = [
   { label: "1 star", value: 1 },
   { label: "Unrated", value: null },
 ];
+
+const FORMAT_BUCKETS: { label: string; value: Format }[] = [
+  { label: "Hardcover", value: "HARDCOVER" },
+  { label: "Paperback", value: "PAPERBACK" },
+  { label: "Mass market", value: "MASS_MARKET" },
+  { label: "Other", value: "OTHER" },
+];
+
+// How many publishers/authors the ranked lists show. Ten keeps the lists
+// readable; the visualization guidance treats more than ~7 colour-coded
+// classes as a table, but these are single-hue ranked bars where length
+// carries the data, so a longer list stays legible.
+const TOP_N = 10;
 
 export interface CountBucket {
   label: string;
@@ -68,6 +81,10 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     multiFormatRows,
     readStatusGroups,
     ratingGroups,
+    formatGroups,
+    publisherGroups,
+    decadeRows,
+    publishYearUnknown,
   ] = await Promise.all([
     prisma.book.count(),
     prisma.physicalCopy.count(),
@@ -91,6 +108,25 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     `,
     prisma.book.groupBy({ by: ["readStatus"], _count: { _all: true } }),
     prisma.book.groupBy({ by: ["rating"], _count: { _all: true } }),
+    prisma.physicalCopy.groupBy({ by: ["format"], _count: { _all: true } }),
+    prisma.physicalCopy.groupBy({
+      by: ["publisher"],
+      where: { publisher: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { publisher: "desc" } },
+      take: TOP_N,
+    }),
+    // Decade bucketing has no Prisma equivalent, so raw SQL. COUNT(*)::int,
+    // not COUNT(*) -- Postgres returns bigint otherwise, which is not JSON
+    // serializable out of a server component.
+    prisma.$queryRaw<{ decade: number; count: number }[]>`
+      SELECT (("publishYear" / 10) * 10)::int AS decade, COUNT(*)::int AS count
+      FROM "PhysicalCopy"
+      WHERE "publishYear" IS NOT NULL
+      GROUP BY decade
+      ORDER BY decade
+    `,
+    prisma.physicalCopy.count({ where: { publishYear: null } }),
   ]);
 
   const readStatus = READ_STATUS_BUCKETS.map(({ label, value }) => ({
@@ -101,6 +137,27 @@ export async function getLibraryStats(): Promise<LibraryStats> {
   const ratings = RATING_BUCKETS.map(({ label, value }) => ({
     label,
     count: ratingGroups.find((g) => g.rating === value)?._count._all ?? 0,
+  }));
+
+  const formats = FORMAT_BUCKETS.map(({ label, value }) => ({
+    label,
+    count: formatGroups.find((g) => g.format === value)?._count._all ?? 0,
+  }));
+
+  // `publisher` is filtered non-null in the query, so the cast is safe --
+  // Prisma still types the groupBy key as nullable.
+  const topPublishers = publisherGroups.map((g) => ({
+    label: g.publisher as string,
+    count: g._count._all,
+  }));
+
+  // Only decades that actually have copies are listed. Unlike the fixed
+  // bucket lists above, the range here is open-ended and data-dependent --
+  // padding every empty decade between the oldest and newest book would add
+  // noise, not information.
+  const decades = decadeRows.map((row) => ({
+    label: `${row.decade}s`,
+    count: row.count,
   }));
 
   return {
@@ -114,10 +171,10 @@ export async function getLibraryStats(): Promise<LibraryStats> {
     },
     readStatus,
     ratings,
-    formats: [],
-    topPublishers: [],
-    decades: [],
-    publishYearUnknown: 0,
+    formats,
+    topPublishers,
+    decades,
+    publishYearUnknown,
     topAuthors: [],
     tbr: { total: 0, owned: 0, gap: 0 },
   };
