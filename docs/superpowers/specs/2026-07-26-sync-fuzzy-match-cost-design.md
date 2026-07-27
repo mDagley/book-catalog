@@ -121,10 +121,10 @@ sync**, not once per shelf item. `findBestTitleMatch(candidates, title)` has no 
 hang that state, so `src/lib/matching.ts` gains:
 
 ```ts
-export interface TitleIndex {
-  findBest<T extends { title: string }>(title: string, threshold?: number): T | null;
+export interface TitleIndex<T> {
+  findBest(title: string, threshold?: number): T | null;
 }
-export function createTitleIndex<T extends { title: string }>(candidates: T[]): TitleIndex;
+export function createTitleIndex<T extends { title: string }>(candidates: T[]): TitleIndex<T>;
 ```
 
 `createTitleIndex` precomputes each candidate's `titleForms()` and per-form character
