@@ -9,6 +9,7 @@ import {
   findBestTitleMatch,
   charCounts,
   scoreUpperBound,
+  createTitleIndex,
 } from "@/lib/matching";
 
 describe("normalizeTitle", () => {
@@ -208,5 +209,98 @@ describe("scoreUpperBound", () => {
   it("treats two empty strings as a perfect score, matching sequenceMatcherRatio", () => {
     expect(scoreUpperBound("", charCounts(""), "", charCounts(""))).toBe(100);
     expect(sequenceMatcherRatio("", "") * 100).toBe(100);
+  });
+});
+
+describe("createTitleIndex", () => {
+  // Deliberately includes near-duplicates, a colon-prefix collision, an
+  // accent, and a length outlier -- the shapes most likely to expose a
+  // prefilter that drops real matches.
+  const candidates = [
+    { id: "1", title: "Mistborn: The Final Empire" },
+    { id: "2", title: "Mistborn: The Well of Ascension" },
+    { id: "3", title: "The Way of Kings" },
+    { id: "4", title: "Words of Radiance" },
+    { id: "5", title: "Café Society" },
+    { id: "6", title: "Dune" },
+    { id: "7", title: "The Empire of Shadow (Shadow Cycle, #1)" },
+  ];
+
+  const probes = [
+    "Mistborn: The Final Empire",
+    "Mistborn The Final Empire",
+    "The Well of Ascension",
+    "Way of Kings",
+    "The Way of Kings (The Stormlight Archive, #1)",
+    "Words of Radiance",
+    "Cafe Society",
+    "Dune",
+    "Dune Messiah",
+    "The Empire of Shadow",
+    "Something Entirely Unrelated",
+    "",
+  ];
+
+  // An INDEPENDENT reference implementation: the original unprefiltered
+  // findBestTitleMatch, verbatim. It must stay independent -- comparing the
+  // index against the real findBestTitleMatch would be circular, since that
+  // is now a wrapper around createTitleIndex, and the comparison would hold
+  // even with the prefilter completely broken (both sides would return null
+  // together). This reference goes through titleMatchScore instead, which
+  // the prefilter never touches.
+  function naiveFindBest<T extends { title: string }>(
+    pool: T[],
+    title: string,
+    threshold = 85,
+  ): T | null {
+    let best: T | null = null;
+    let bestScore = -1;
+    for (const candidate of pool) {
+      const score = titleMatchScore(candidate.title, title);
+      if (score >= threshold && score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  it("returns exactly what an unprefiltered scan returns, for every probe", () => {
+    // THE test that protects this design. The index must be a pure
+    // performance optimisation -- identical results, same object identity,
+    // no exceptions. If this cannot be made to pass, the prefilter is
+    // unsound and must not ship.
+    const index = createTitleIndex(candidates);
+    for (const probe of probes) {
+      expect(index.findBest(probe)).toBe(naiveFindBest(candidates, probe));
+    }
+  });
+
+  it("agrees with an unprefiltered scan at non-default thresholds too", () => {
+    const index = createTitleIndex(candidates);
+    for (const threshold of [50, 70, 85, 95, 100]) {
+      for (const probe of probes) {
+        expect(index.findBest(probe, threshold)).toBe(
+          naiveFindBest(candidates, probe, threshold),
+        );
+      }
+    }
+  });
+
+  it("keeps findBestTitleMatch's public behaviour identical as a wrapper", () => {
+    for (const probe of probes) {
+      expect(findBestTitleMatch(candidates, probe)).toBe(naiveFindBest(candidates, probe));
+    }
+  });
+
+  it("is reusable across many lookups without mutating its candidates", () => {
+    const snapshot = JSON.stringify(candidates);
+    const index = createTitleIndex(candidates);
+    for (const probe of probes) index.findBest(probe);
+    expect(JSON.stringify(candidates)).toBe(snapshot);
+  });
+
+  it("handles an empty candidate list", () => {
+    expect(createTitleIndex([]).findBest("anything")).toBeNull();
   });
 });

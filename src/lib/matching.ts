@@ -230,25 +230,81 @@ export function isTitleMatch(
   return titleMatchScore(titleA, titleB) >= threshold;
 }
 
+export interface TitleIndex<T> {
+  findBest(title: string, threshold?: number): T | null;
+}
+
+interface IndexedCandidate<T> {
+  candidate: T;
+  forms: string[];
+  counts: Map<string, number>[];
+}
+
+// Builds a reusable match index over `candidates`, precomputing each one's
+// titleForms() and per-form character counts ONCE. Callers that match many
+// incoming items against the same pool (the sync paths) build this once and
+// reuse it, instead of paying the setup cost per item.
+//
+// Every comparison is gated by scoreUpperBound first, so pairs that cannot
+// reach the threshold never run the O(n*m) matching-blocks algorithm.
+// Results are identical to a naive full scan by construction -- see
+// scoreUpperBound's comment, and the equivalence test in matching.test.ts.
+export function createTitleIndex<T extends { title: string }>(candidates: T[]): TitleIndex<T> {
+  const indexed: IndexedCandidate<T>[] = candidates.map((candidate) => {
+    const forms = titleForms(candidate.title);
+    return { candidate, forms, counts: forms.map(charCounts) };
+  });
+
+  return {
+    findBest(title: string, threshold: number = DEFAULT_MATCH_THRESHOLD): T | null {
+      const probeForms = titleForms(title);
+      const probeCounts = probeForms.map(charCounts);
+
+      let best: T | null = null;
+      let bestScore = -1;
+      for (const entry of indexed) {
+        let score = 0;
+        for (let i = 0; i < entry.forms.length; i++) {
+          for (let j = 0; j < probeForms.length; j++) {
+            // Skip the expensive ratio when it provably cannot beat what we
+            // already have, or cannot reach the threshold at all.
+            const bound = scoreUpperBound(
+              entry.forms[i],
+              entry.counts[i],
+              probeForms[j],
+              probeCounts[j],
+            );
+            if (bound < threshold || bound <= score) continue;
+            const candidateScore = sequenceMatcherRatio(entry.forms[i], probeForms[j]) * 100;
+            if (candidateScore > score) score = candidateScore;
+          }
+        }
+        // `>` not `>=`, matching findBestTitleMatch's original tie-breaking:
+        // the FIRST candidate at the best score wins.
+        if (score >= threshold && score > bestScore) {
+          best = entry.candidate;
+          bestScore = score;
+        }
+      }
+      return best;
+    },
+  };
+}
+
 // Scans `candidates` for the best fuzzy title match to `title`, returning
 // null if nothing scores at or above `threshold`. Generic over any shape
 // that carries a `title` string, so every fuzzy-match-then-attach-or-create
 // call site (absSync.ts, goodreadsSync.ts, createBookWithCopyData) shares
 // one implementation instead of each maintaining a near-identical private
 // copy.
+//
+// A one-shot wrapper over createTitleIndex. Callers matching MANY titles
+// against the SAME pool should build the index once themselves -- this
+// rebuilds it on every call.
 export function findBestTitleMatch<T extends { title: string }>(
   candidates: T[],
   title: string,
   threshold: number = DEFAULT_MATCH_THRESHOLD,
 ): T | null {
-  let best: T | null = null;
-  let bestScore = -1;
-  for (const candidate of candidates) {
-    const score = titleMatchScore(candidate.title, title);
-    if (score >= threshold && score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-  return best;
+  return createTitleIndex(candidates).findBest(title, threshold);
 }
