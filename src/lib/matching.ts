@@ -158,6 +158,55 @@ export function sequenceMatcherRatio(a: string, b: string): number {
   return (2 * matches) / (a.length + b.length);
 }
 
+// Character-frequency map, precomputed per string so the bound below stays
+// O(|a| + |b|) rather than rebuilding both maps on every comparison.
+export function charCounts(s: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  return counts;
+}
+
+// A true UPPER BOUND on sequenceMatcherRatio(a, b) * 100, computed in
+// O(|a| + |b|) instead of the ratio's own O(|a| * |b|).
+//
+// Why it holds: the ratio is 2M / (|a| + |b|), where M is the total size of
+// the matching blocks. Those blocks are common substrings, so the characters
+// they match form a common subsequence of a and b -- meaning the match's
+// character multiset is contained in BOTH strings. Hence
+// M <= sum_c min(count_a(c), count_b(c)), and the bound follows directly.
+//
+// This is a filter on WORK, not on RESULTS: when the bound is below the
+// match threshold the real score cannot reach it either, so the pair is
+// skipped with no possible change to any match decision. That distinction
+// matters here -- two earlier attempts to speed this code up restricted
+// which CANDIDATES were compared, and both silently lost real matches (see
+// the long comment above reconcileTbrItems in goodreadsSync.ts).
+export function scoreUpperBound(
+  a: string,
+  countsA: Map<string, number>,
+  b: string,
+  countsB: Map<string, number>,
+): number {
+  const total = a.length + b.length;
+  // Mirrors sequenceMatcherRatio's own two-empty-strings special case.
+  if (total === 0) return 100;
+  // Cheap length-only bound first, since common <= min(|a|, |b|). Needs no
+  // map iteration at all and rejects most pairs on its own. Returning it
+  // early yields a LOOSER (never lower) bound than the multiset one, so
+  // soundness holds for any caller threshold, including below the default.
+  const lengthBound = (200 * Math.min(a.length, b.length)) / total;
+  if (lengthBound < DEFAULT_MATCH_THRESHOLD) return lengthBound;
+
+  let common = 0;
+  // Iterate the smaller map; the result is symmetric either way.
+  const [small, large] = countsA.size <= countsB.size ? [countsA, countsB] : [countsB, countsA];
+  for (const [ch, n] of small) {
+    const other = large.get(ch);
+    if (other !== undefined) common += Math.min(n, other);
+  }
+  return (200 * common) / total;
+}
+
 // Compares every normalized form of titleA against every form of titleB and
 // returns the best score, 0-100 (matching thefuzz.fuzz.ratio()'s 0-100 scale).
 export function titleMatchScore(titleA: string, titleB: string): number {

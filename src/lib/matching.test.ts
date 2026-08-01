@@ -7,6 +7,8 @@ import {
   titleMatchScore,
   isTitleMatch,
   findBestTitleMatch,
+  charCounts,
+  scoreUpperBound,
 } from "@/lib/matching";
 
 describe("normalizeTitle", () => {
@@ -155,5 +157,56 @@ describe("findBestTitleMatch", () => {
 
     expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 99)).toBeNull();
     expect(findBestTitleMatch(candidates, "Somewhat Similar Titlee", 50)).not.toBeNull();
+  });
+});
+
+describe("scoreUpperBound", () => {
+  it("never underestimates the real similarity score", () => {
+    // The load-bearing invariant of the whole prefilter design: if the bound
+    // is ever BELOW the real score, a true match gets skipped and the sync
+    // silently loses data. Exercised over deliberately adversarial pairs --
+    // anagrams (identical character multisets, different order) are the
+    // worst case for a multiset-based bound.
+    const titles = [
+      "Mistborn: The Final Empire",
+      "Mistborn: The Well of Ascension",
+      "The Way of Kings",
+      "Way of Kings",
+      "Kings of the Way",
+      "Café",
+      "Cafe",
+      "Røverne",
+      "A",
+      "",
+      "The Hitchhiker's Guide to the Galaxy",
+      "Hitchhikers Guide to the Galaxy",
+      "Piranesi",
+      "Parisine",
+      "The Empire of Shadow (Shadow Cycle, #1)",
+      "The Empire of Shadow",
+    ];
+    for (const a of titles) {
+      for (const b of titles) {
+        const bound = scoreUpperBound(a, charCounts(a), b, charCounts(b));
+        const actual = sequenceMatcherRatio(a, b) * 100;
+        expect(bound).toBeGreaterThanOrEqual(actual - 1e-9);
+      }
+    }
+  });
+
+  it("is tight for identical strings", () => {
+    const s = "the way of kings";
+    expect(scoreUpperBound(s, charCounts(s), s, charCounts(s))).toBeCloseTo(100, 9);
+  });
+
+  it("rejects pairs that differ too much in length to possibly match", () => {
+    const a = "dune";
+    const b = "the wheel of time book eleven";
+    expect(scoreUpperBound(a, charCounts(a), b, charCounts(b))).toBeLessThan(85);
+  });
+
+  it("treats two empty strings as a perfect score, matching sequenceMatcherRatio", () => {
+    expect(scoreUpperBound("", charCounts(""), "", charCounts(""))).toBe(100);
+    expect(sequenceMatcherRatio("", "") * 100).toBe(100);
   });
 });
