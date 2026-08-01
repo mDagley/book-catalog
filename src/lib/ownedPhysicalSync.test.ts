@@ -252,6 +252,26 @@ describe("syncOwnedPhysicalBooks", () => {
     expect(after.owned).toBe(true);
   });
 
+  it("still matches a book created earlier in the same sync run", async () => {
+    // The candidate pool GROWS during a run. A matcher that snapshots the
+    // pool up front would miss the book the first item just created, and the
+    // second identical item would create a duplicate Book -- the exact bug
+    // PR #27 fixed.
+    mockShelfFetch(
+      buildRssPage([
+        { title: "Test Owned Physical Duplicate Run", author: "A" },
+        { title: "Test Owned Physical Duplicate Run", author: "A" },
+      ]),
+    );
+
+    await syncOwnedPhysicalBooks("1993628");
+
+    const books = await prisma.book.findMany({
+      where: { title: "Test Owned Physical Duplicate Run" },
+    });
+    expect(books).toHaveLength(1);
+  });
+
   it("defaults to the owned-physical shelf when no shelf name is given", async () => {
     const fetchMock = vi
       .fn()

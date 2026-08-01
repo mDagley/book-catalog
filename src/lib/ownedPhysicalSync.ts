@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { findBestTitleMatch } from "@/lib/matching";
+import { createTitleIndex, normalizeTitle } from "@/lib/matching";
 import { fetchAllGoodreadsBooks, type GoodreadsBook } from "@/lib/goodreadsSync";
 import { markTbrItemsOwnedByTitles } from "@/lib/tbrGap";
 import { parseSeriesFromTitle } from "@/lib/series";
@@ -29,18 +29,48 @@ function toCandidate(book: {
   return { id: book.id, title: book.title, isbn: book.isbn, copiesCount: book._count.copies };
 }
 
-// `candidates` is fetched with `orderBy: createdAt asc`, so the first array
-// match is deterministically the oldest -- same rule createBookWithCopyData's
-// ISBN branch uses for the same reason (Book.isbn has no unique constraint).
-function matchAgainstPool(
-  item: GoodreadsBook,
-  pool: OwnedPhysicalCandidate[],
-): OwnedPhysicalCandidate | null {
-  if (item.isbn) {
-    const isbnMatch = pool.find((c) => c.isbn === item.isbn);
-    if (isbnMatch) return isbnMatch;
-  }
-  return findBestTitleMatch(pool, item.title);
+// The candidate pool GROWS during a sync (applyShelfItem pushes newly
+// created books onto it), so this keeps an incrementally-extended index
+// rather than a frozen snapshot -- a book created earlier in the same run
+// must still be matchable, or the run creates duplicate rows (the bug
+// PR #27 fixed).
+interface PoolMatcher {
+  find(item: GoodreadsBook): OwnedPhysicalCandidate | null;
+  add(candidate: OwnedPhysicalCandidate): void;
+}
+
+function createPoolMatcher(pool: OwnedPhysicalCandidate[]): PoolMatcher {
+  // `pool` is fetched with `orderBy: createdAt asc`, so first-writer-wins on
+  // both maps deterministically keeps the OLDEST -- the same rule
+  // createBookWithCopyData's ISBN branch uses, since Book.isbn has no unique
+  // constraint.
+  const byIsbn = new Map<string, OwnedPhysicalCandidate>();
+  const byNormalizedTitle = new Map<string, OwnedPhysicalCandidate>();
+  const fuzzyPool: OwnedPhysicalCandidate[] = [];
+
+  const add = (candidate: OwnedPhysicalCandidate) => {
+    if (candidate.isbn && !byIsbn.has(candidate.isbn)) byIsbn.set(candidate.isbn, candidate);
+    const normalized = normalizeTitle(candidate.title);
+    if (!byNormalizedTitle.has(normalized)) byNormalizedTitle.set(normalized, candidate);
+    fuzzyPool.push(candidate);
+  };
+  for (const candidate of pool) add(candidate);
+
+  return {
+    add,
+    find(item: GoodreadsBook): OwnedPhysicalCandidate | null {
+      if (item.isbn) {
+        const isbnMatch = byIsbn.get(item.isbn);
+        if (isbnMatch) return isbnMatch;
+      }
+      const exact = byNormalizedTitle.get(normalizeTitle(item.title));
+      if (exact) return exact;
+      // Rebuilt per fuzzy miss rather than kept incrementally, because the
+      // pool only grows on a genuinely-new title -- rare in steady state,
+      // and the index is cheap next to the scan it replaces.
+      return createTitleIndex(fuzzyPool).findBest(item.title);
+    },
+  };
 }
 
 // Adds a placeholder physical copy (format: "OTHER", since Goodreads has no
@@ -70,18 +100,19 @@ async function attachPlaceholderCopy(match: OwnedPhysicalCandidate): Promise<voi
 // fuzzy-match-then-attach path in this codebase uses).
 async function applyShelfItem(
   item: GoodreadsBook,
-  candidates: OwnedPhysicalCandidate[],
+  matcher: PoolMatcher,
   createdTitles: string[],
 ): Promise<void> {
-  const match = matchAgainstPool(item, candidates);
+  const match = matcher.find(item);
 
   if (match) {
     await attachPlaceholderCopy(match);
     return;
   }
 
-  // No match in `candidates` (a snapshot taken once at the start of the
-  // whole sync run) -- before concluding this is a genuinely new book,
+  // No match via `matcher` (built from a snapshot taken once at the start of
+  // the whole sync run, though kept current within the run by matcher.add())
+  // -- before concluding this is a genuinely new book,
   // re-check the database fresh. The 30-minute cron tick has `noOverlap`
   // protection against overlapping ITSELF, but nothing prevents it from
   // overlapping a manual "Refresh now" click (or two manual clicks);
@@ -109,10 +140,10 @@ async function applyShelfItem(
     const freshCandidates = (
       await prisma.book.findMany({ select: CANDIDATE_SELECT, orderBy: { createdAt: "asc" } })
     ).map(toCandidate);
-    freshMatch = findBestTitleMatch(freshCandidates, item.title);
+    freshMatch = createTitleIndex(freshCandidates).findBest(item.title);
   }
   if (freshMatch) {
-    candidates.push(freshMatch);
+    matcher.add(freshMatch);
     await attachPlaceholderCopy(freshMatch);
     return;
   }
@@ -138,7 +169,7 @@ async function applyShelfItem(
   // (ISBN match, fuzzy-title match) deliberately record nothing: they
   // introduce no new title, they just add a copy to a Book already there.
   createdTitles.push(item.title);
-  candidates.push(toCandidate(created));
+  matcher.add(toCandidate(created));
 }
 
 // Syncs the user's "owned-physical" (or custom-configured) Goodreads shelf
@@ -156,11 +187,13 @@ export async function syncOwnedPhysicalBooks(
     select: CANDIDATE_SELECT,
     orderBy: { createdAt: "asc" },
   });
-  const candidates: OwnedPhysicalCandidate[] = books.map(toCandidate);
+  // Built once for the whole run; matcher.add() keeps it current as
+  // applyShelfItem creates new books.
+  const matcher = createPoolMatcher(books.map(toCandidate));
 
   const createdTitles: string[] = [];
   for (const item of items) {
-    await applyShelfItem(item, candidates, createdTitles);
+    await applyShelfItem(item, matcher, createdTitles);
   }
 
   // One pass for every title this shelf actually created. No-ops when the
