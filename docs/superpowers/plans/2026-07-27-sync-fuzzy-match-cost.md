@@ -226,25 +226,55 @@ describe("createTitleIndex", () => {
     "",
   ];
 
-  it("returns exactly what findBestTitleMatch returns, for every probe", () => {
+  // An INDEPENDENT reference implementation: the original unprefiltered
+  // findBestTitleMatch, verbatim. It must stay independent -- comparing the
+  // index against the real findBestTitleMatch would be circular, since
+  // Step 3 turns that into a wrapper around createTitleIndex, and the
+  // comparison would then hold even with the prefilter completely broken
+  // (both sides would return null together). This reference goes through
+  // titleMatchScore instead, which the prefilter never touches.
+  function naiveFindBest<T extends { title: string }>(
+    pool: T[],
+    title: string,
+    threshold = 85,
+  ): T | null {
+    let best: T | null = null;
+    let bestScore = -1;
+    for (const candidate of pool) {
+      const score = titleMatchScore(candidate.title, title);
+      if (score >= threshold && score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  it("returns exactly what an unprefiltered scan returns, for every probe", () => {
     // THE test that protects this design. The index must be a pure
     // performance optimisation -- identical results, same object identity,
     // no exceptions. If this cannot be made to pass, the prefilter is
     // unsound and must not ship.
     const index = createTitleIndex(candidates);
     for (const probe of probes) {
-      expect(index.findBest(probe)).toBe(findBestTitleMatch(candidates, probe));
+      expect(index.findBest(probe)).toBe(naiveFindBest(candidates, probe));
     }
   });
 
-  it("agrees with findBestTitleMatch at non-default thresholds too", () => {
+  it("agrees with an unprefiltered scan at non-default thresholds too", () => {
     const index = createTitleIndex(candidates);
     for (const threshold of [50, 70, 85, 95, 100]) {
       for (const probe of probes) {
         expect(index.findBest(probe, threshold)).toBe(
-          findBestTitleMatch(candidates, probe, threshold),
+          naiveFindBest(candidates, probe, threshold),
         );
       }
+    }
+  });
+
+  it("keeps findBestTitleMatch's public behaviour identical as a wrapper", () => {
+    for (const probe of probes) {
+      expect(findBestTitleMatch(candidates, probe)).toBe(naiveFindBest(candidates, probe));
     }
   });
 
@@ -858,4 +888,6 @@ Deployment needs no manual step: `docker-entrypoint.sh` runs `prisma migrate dep
 - [ ] **Full suite green:** `npx vitest run`
 - [ ] **Lint and types:** `npm run lint` and `npx tsc --noEmit`
 - [ ] **The equivalence test is real:** temporarily weaken `scoreUpperBound` to return `0` and confirm `createTitleIndex`'s equivalence test **fails**. A prefilter test that passes with a broken bound is worthless. Restore afterwards.
+
+  This only proves anything because the test compares against the *naive reference* in Task 2. Had it compared against `findBestTitleMatch` — as an earlier draft of this plan specified — both sides would go through the broken bound, return `null` together, and the assertion would still hold. The check would report success with the prefilter entirely disabled. If you ever rewrite this test, keep the reference independent of `createTitleIndex`.
 - [ ] **Measure the actual win.** Write a throwaway script (delete it afterwards — do not commit it) that seeds ~1800 books and matches ~800 titles against them, timing `findBestTitleMatch` over a plain array versus a reused `createTitleIndex`. The spec measured 18.7× for the prefilter and 21.3× with the exact tier; report what you actually observe rather than restating those numbers. A result under ~5× means something is wrong — most likely the index is being rebuilt per item somewhere.
