@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import type { ReadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn as normalizeIsbnShared } from "@/lib/isbn";
-import { findBestTitleMatch, normalizeTitle, isTitleMatch } from "@/lib/matching";
+import { findBestTitleMatch, normalizeTitle, isTitleMatch, createTitleIndex } from "@/lib/matching";
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { lookupIsbn } from "@/lib/isbnLookup";
 import { saveCoverFromUrl } from "@/lib/books";
@@ -161,6 +161,45 @@ const STATUS_SYNC_BOOK_SELECT = {
   ratingManual: true,
 } as const;
 
+interface ShelfMatcher {
+  find(title: string): StatusSyncBook | null;
+}
+
+// Two-tier matcher over the owned-Book pool, built ONCE per sync and reused
+// for all three shelves.
+//
+// Tier 1 -- exact normalized title, O(1). An exact match scores exactly 100
+// (normalizeTitle(t) is always one of titleForms(t), and ratio(x, x) = 1),
+// which is the maximum, so this tier can never select a worse candidate
+// than the fuzzy scan would. It differs only when some OTHER candidate also
+// scores 100 via a different form -- the "Mistborn: The Final Empire" vs
+// "Mistborn: The Well of Ascension" colon-prefix collision -- and happens to
+// sort earlier. Picking the literal title match in that tie is the intended
+// behaviour, and is covered by a test.
+//
+// Tier 2 -- fuzzy, via a prefiltered TitleIndex built once rather than per
+// shelf item. Deliberately NOT capped: unlike reconcileTbrItems, where the
+// items reaching fuzzy are the rare genuinely-new ones and a deferral
+// resolves next sync, here every to-read item for a book that isn't owned
+// reaches this tier and matches nothing on EVERY run. A cap would spend its
+// budget on the same first N items each time and permanently starve the
+// rest. See docs/superpowers/specs/2026-07-26-sync-fuzzy-match-cost-design.md.
+function createShelfMatcher(books: StatusSyncBook[]): ShelfMatcher {
+  const byNormalizedTitle = new Map<string, StatusSyncBook>();
+  for (const book of books) {
+    const normalized = normalizeTitle(book.title);
+    // First writer wins, so ties resolve by the fetch's `orderBy: id asc`.
+    if (!byNormalizedTitle.has(normalized)) byNormalizedTitle.set(normalized, book);
+  }
+  const index = createTitleIndex(books);
+
+  return {
+    find(title: string): StatusSyncBook | null {
+      return byNormalizedTitle.get(normalizeTitle(title)) ?? index.findBest(title);
+    },
+  };
+}
+
 // Applies one shelf's items onto already-owned Book rows only -- a shelf
 // item with no matching Book is ignored; this phase never creates a Book
 // from Goodreads shelf data. Each field's manual-override flag is respected
@@ -170,11 +209,12 @@ async function applyShelfToBooks(
   shelf: GoodreadsShelf,
   items: GoodreadsBook[],
   books: StatusSyncBook[],
+  matcher: ShelfMatcher,
 ): Promise<void> {
   const targetStatus = SHELF_READ_STATUS[shelf];
 
   for (const item of items) {
-    const match = findBestTitleMatch(books, item.title);
+    const match = matcher.find(item.title);
     if (!match) continue;
 
     const data: { readStatus?: ReadStatus; rating?: number } = {};
@@ -191,11 +231,13 @@ async function applyShelfToBooks(
       data,
       select: STATUS_SYNC_BOOK_SELECT,
     });
-    // `match` is the actual element findBestTitleMatch found inside `books`
-    // (not a copy), so mutating it in place keeps the in-memory list
-    // consistent with the DB for later shelf passes -- no re-scan needed,
-    // and no risk of a stale `findIndex` miss silently no-op'ing (assigning
-    // to `books[-1]`) the way a second array search could.
+    // `match` is the actual element from `books` (not a copy), so mutating
+    // it in place keeps the in-memory list consistent with the DB for later
+    // shelf passes -- no re-scan needed, and no risk of a stale `findIndex`
+    // miss silently no-op'ing (assigning to `books[-1]`) the way a second
+    // array search could. Only readStatus/rating change, never title, so
+    // the matcher built from these rows stays valid across all three
+    // shelves.
     Object.assign(match, updated);
   }
 }
@@ -531,8 +573,12 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
     select: STATUS_SYNC_BOOK_SELECT,
     orderBy: { id: "asc" },
   });
+  // Built once, reused for all three shelves. Rebuilding it per shelf would
+  // triple the setup cost for no benefit -- applyShelfToBooks only ever
+  // mutates readStatus/rating, never title.
+  const matcher = createShelfMatcher(books);
   for (const shelf of STATUS_SYNC_SHELVES) {
-    await applyShelfToBooks(shelf, shelfItems[shelf], books);
+    await applyShelfToBooks(shelf, shelfItems[shelf], books, matcher);
   }
 
   const synced = STATUS_SYNC_SHELVES.reduce((sum, shelf) => sum + shelfItems[shelf].length, 0);
