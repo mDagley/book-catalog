@@ -160,9 +160,18 @@ export function sequenceMatcherRatio(a: string, b: string): number {
 
 // Character-frequency map, precomputed per string so the bound below stays
 // O(|a| + |b|) rather than rebuilding both maps on every comparison.
+//
+// Indexed by UTF-16 CODE UNIT (s[i], not `for...of`'s code-point iteration),
+// to match sequenceMatcherRatio/getMatchingBlocks, which also index by code
+// unit (a[i], a.length). A surrogate pair (one astral character, e.g. an
+// emoji) is TWO code units but ONE code point -- counting it as one entry
+// here while the ratio's own length/matching math counts two would make the
+// bound's numerator and denominator disagree, producing a real
+// underestimate (confirmed: two identical single-emoji strings scored 100
+// via sequenceMatcherRatio but bounded at 50 with the code-point version).
 export function charCounts(s: string): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  for (let i = 0; i < s.length; i++) counts.set(s[i], (counts.get(s[i]) ?? 0) + 1);
   return counts;
 }
 

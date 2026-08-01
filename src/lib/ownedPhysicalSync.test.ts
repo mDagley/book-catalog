@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { syncOwnedPhysicalBooks, DEFAULT_OWNED_PHYSICAL_SHELF } from "@/lib/ownedPhysicalSync";
+import * as matching from "@/lib/matching";
 
 const originalFetch = global.fetch;
 
@@ -270,6 +271,43 @@ describe("syncOwnedPhysicalBooks", () => {
       where: { title: "Test Owned Physical Duplicate Run" },
     });
     expect(books).toHaveLength(1);
+  });
+
+  it("reuses one fuzzy match index across multiple misses instead of rebuilding it per item", async () => {
+    // Two existing books, each fuzzy- (not exact-) matched by a distinct
+    // shelf item -- an edition-note parenthetical is enough to make
+    // normalizeTitle differ while titleMatchScore still clears the
+    // threshold via titleForms()'s series-suffix stripping, so both items
+    // reach the fuzzy tier without ever creating a new book (no add() calls
+    // in between -- the pool is genuinely unchanged across the two lookups).
+    await prisma.book.create({ data: { title: "Test Owned Physical Fuzzy Cache Book A" } });
+    await prisma.book.create({ data: { title: "Test Owned Physical Fuzzy Cache Book B" } });
+
+    mockShelfFetch(
+      buildRssPage([
+        { title: "Test Owned Physical Fuzzy Cache Book A (Special Edition)" },
+        { title: "Test Owned Physical Fuzzy Cache Book B (Special Edition)" },
+      ]),
+    );
+
+    const createTitleIndexSpy = vi.spyOn(matching, "createTitleIndex");
+
+    await syncOwnedPhysicalBooks("1993628");
+
+    const matchedA = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Owned Physical Fuzzy Cache Book A" },
+      include: { copies: true },
+    });
+    const matchedB = await prisma.book.findFirstOrThrow({
+      where: { title: "Test Owned Physical Fuzzy Cache Book B" },
+      include: { copies: true },
+    });
+    expect(matchedA.copies).toHaveLength(1);
+    expect(matchedB.copies).toHaveLength(1);
+
+    // The pool matcher's fuzzy tier should build its index once and reuse it
+    // across both misses, since nothing was added to the pool in between.
+    expect(createTitleIndexSpy).toHaveBeenCalledTimes(1);
   });
 
   it("defaults to the owned-physical shelf when no shelf name is given", async () => {

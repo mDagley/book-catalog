@@ -47,12 +47,21 @@ function createPoolMatcher(pool: OwnedPhysicalCandidate[]): PoolMatcher {
   const byIsbn = new Map<string, OwnedPhysicalCandidate>();
   const byNormalizedTitle = new Map<string, OwnedPhysicalCandidate>();
   const fuzzyPool: OwnedPhysicalCandidate[] = [];
+  // Built lazily on the first fuzzy miss, then reused across any further
+  // misses against the SAME pool -- invalidated (set back to null) only by
+  // add(), which is the only thing that can change what a fuzzy lookup
+  // should find. Without this, a shelf with several consecutive fuzzy
+  // misses (e.g. multiple items with an edition-note suffix) rebuilds
+  // titleForms()/charCounts() for the entire pool on every single one, even
+  // though nothing in the pool changed between them.
+  let cachedIndex: ReturnType<typeof createTitleIndex<OwnedPhysicalCandidate>> | null = null;
 
   const add = (candidate: OwnedPhysicalCandidate) => {
     if (candidate.isbn && !byIsbn.has(candidate.isbn)) byIsbn.set(candidate.isbn, candidate);
     const normalized = normalizeTitle(candidate.title);
     if (!byNormalizedTitle.has(normalized)) byNormalizedTitle.set(normalized, candidate);
     fuzzyPool.push(candidate);
+    cachedIndex = null;
   };
   for (const candidate of pool) add(candidate);
 
@@ -65,10 +74,8 @@ function createPoolMatcher(pool: OwnedPhysicalCandidate[]): PoolMatcher {
       }
       const exact = byNormalizedTitle.get(normalizeTitle(item.title));
       if (exact) return exact;
-      // Rebuilt per fuzzy miss rather than kept incrementally, because the
-      // pool only grows on a genuinely-new title -- rare in steady state,
-      // and the index is cheap next to the scan it replaces.
-      return createTitleIndex(fuzzyPool).findBest(item.title);
+      cachedIndex ??= createTitleIndex(fuzzyPool);
+      return cachedIndex.findBest(item.title);
     },
   };
 }

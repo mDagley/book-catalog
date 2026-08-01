@@ -210,6 +210,28 @@ describe("scoreUpperBound", () => {
     expect(scoreUpperBound("", charCounts(""), "", charCounts(""))).toBe(100);
     expect(sequenceMatcherRatio("", "") * 100).toBe(100);
   });
+
+  it("does not underestimate for strings containing astral (surrogate-pair) characters", () => {
+    // sequenceMatcherRatio/getMatchingBlocks index by UTF-16 CODE UNIT
+    // (a[i], a.length), but charCounts previously iterated with `for...of`,
+    // which walks Unicode CODE POINTS -- a surrogate pair (one emoji, two
+    // UTF-16 units) counts as a single entry there but as two units in
+    // a.length. That mismatch made the bound's denominator (UTF-16 units)
+    // and numerator (code-point multiset overlap) disagree, producing a
+    // real underestimate: two identical single-emoji strings score 100 via
+    // sequenceMatcherRatio but bounded at 50 before this fix (confirmed
+    // empirically before writing this test). Every real caller normalizes
+    // through titleForms() first, which strips non-ASCII entirely, so this
+    // was unreachable via createTitleIndex/findBestTitleMatch in practice --
+    // but charCounts/scoreUpperBound are exported with an unconditional
+    // "never underestimates" guarantee, so it must hold for direct callers
+    // and future ones too.
+    const a = "\u{1F389} Party Book"; // leading emoji, surrogate pair
+    const b = "\u{1F389} Party Book";
+    const bound = scoreUpperBound(a, charCounts(a), b, charCounts(b));
+    const actual = sequenceMatcherRatio(a, b) * 100;
+    expect(bound).toBeGreaterThanOrEqual(actual - 1e-9);
+  });
 });
 
 describe("createTitleIndex", () => {
