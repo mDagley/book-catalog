@@ -34,6 +34,8 @@ model Book {
   seriesName     String?
   seriesPosition Float?
   seriesManual   Boolean @default(false)
+
+  @@index([isbn])
 }
 
 model PhysicalCopy {
@@ -46,6 +48,8 @@ model PhysicalCopy {
   specialNotes   String?
   coverImagePath String?
   createdAt      DateTime @default(now())
+
+  @@index([bookId])
 }
 
 enum Format {
@@ -64,6 +68,8 @@ model EbookCopy {
   coverCheckedAt          DateTime?
   coverFetchFailureReason String?
   createdAt               DateTime  @default(now())
+
+  @@index([bookId])
 }
 
 model AudiobookCopy {
@@ -75,6 +81,8 @@ model AudiobookCopy {
   coverCheckedAt          DateTime?
   coverFetchFailureReason String?
   createdAt               DateTime  @default(now())
+
+  @@index([bookId])
 }
 
 model GoodreadsTbrItem {
