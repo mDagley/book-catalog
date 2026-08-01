@@ -523,7 +523,14 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
 
   await reconcileTbrItems(shelfItems["to-read"]);
 
-  const books: StatusSyncBook[] = await prisma.book.findMany({ select: STATUS_SYNC_BOOK_SELECT });
+  // Stable order so fuzzy tie-breaking is reproducible: findBestTitleMatch
+  // keeps the FIRST candidate at the best score, so an unordered fetch makes
+  // "which of two equally-good books got the status" vary between runs.
+  // Same pattern as fetchMissingTbrCovers and backfillAbsCovers.
+  const books: StatusSyncBook[] = await prisma.book.findMany({
+    select: STATUS_SYNC_BOOK_SELECT,
+    orderBy: { id: "asc" },
+  });
   for (const shelf of STATUS_SYNC_SHELVES) {
     await applyShelfToBooks(shelf, shelfItems[shelf], books);
   }
