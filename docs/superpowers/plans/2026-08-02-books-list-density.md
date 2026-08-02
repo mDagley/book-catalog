@@ -1433,7 +1433,7 @@ export function CatalogResultCard({
     return (
       <li data-testid="catalog-row">
         {result.bookId ? (
-          <Link href={`/books/${result.bookId}`} className={rowClassName}>
+          <Link href={`/books/${result.bookId}`} className={rowClassName} aria-label={result.title}>
             {content}
           </Link>
         ) : (
@@ -1475,6 +1475,8 @@ export function CatalogResultCard({
 ```
 
 `data-testid="catalog-row"` on both branches is a stable hook for Task 13's row-pitch measurement.
+
+**Corrected 2026-08-02, during Task 10's code review:** the compact `<Link>` above now carries `aria-label={result.title}`. Without it, the link's accessible name is computed from its content -- `CoverThumbnail`'s `alt="Cover"` plus, for READ books, `PandaStamp`'s `<title>Read</title>` -- reading as "Cover Read {title} {author} {meta}" to a screen reader. A non-empty `aria-label` short-circuits name-from-content entirely, so it just reads the title. This is a correctness bug in a link's accessible name, not one of the deferred 2026-07-26 UX-assessment findings (live regions, search-input labels, focus-ring contrast) the Non-goals section excuses -- it didn't exist until this task introduced it, so it doesn't fall under that carve-out. Fixed immediately rather than deferred, since Task 14's verification checklist (below) had no accessibility-tree check that would have caught it once this branch went live.
 
 - [ ] **Step 4: Run to verify the tests pass**
 
@@ -2101,6 +2103,8 @@ Navigate to `http://localhost:3000/books`. Confirm density defaults to compact (
 - [ ] **Step 5: Verify the whole row navigates**
 
 Click anywhere on a compact row that is NOT the cover or title text specifically (e.g. the empty space to the right of the author line). Confirm navigation to `/books/[id]`. Go back.
+
+Also take a `browser_snapshot` (accessibility tree) of the compact list and confirm each row's link reads as just the book's title -- not "Cover Read {title} {author} {meta}" or similar. This checks the `aria-label={result.title}` fix added during Task 10's review; if it's regressed (e.g. the `aria-label` was removed or the JSX restructured), this is the only place in this plan that would catch it.
 
 - [ ] **Step 6: Verify long-title truncation**
 
