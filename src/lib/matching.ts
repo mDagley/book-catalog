@@ -158,6 +158,64 @@ export function sequenceMatcherRatio(a: string, b: string): number {
   return (2 * matches) / (a.length + b.length);
 }
 
+// Character-frequency map, precomputed per string so the bound below stays
+// O(|a| + |b|) rather than rebuilding both maps on every comparison.
+//
+// Indexed by UTF-16 CODE UNIT (s[i], not `for...of`'s code-point iteration),
+// to match sequenceMatcherRatio/getMatchingBlocks, which also index by code
+// unit (a[i], a.length). A surrogate pair (one astral character, e.g. an
+// emoji) is TWO code units but ONE code point -- counting it as one entry
+// here while the ratio's own length/matching math counts two would make the
+// bound's numerator and denominator disagree, producing a real
+// underestimate (confirmed: two identical single-emoji strings scored 100
+// via sequenceMatcherRatio but bounded at 50 with the code-point version).
+export function charCounts(s: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (let i = 0; i < s.length; i++) counts.set(s[i], (counts.get(s[i]) ?? 0) + 1);
+  return counts;
+}
+
+// A true UPPER BOUND on sequenceMatcherRatio(a, b) * 100, computed in
+// O(|a| + |b|) instead of the ratio's own O(|a| * |b|).
+//
+// Why it holds: the ratio is 2M / (|a| + |b|), where M is the total size of
+// the matching blocks. Those blocks are common substrings, so the characters
+// they match form a common subsequence of a and b -- meaning the match's
+// character multiset is contained in BOTH strings. Hence
+// M <= sum_c min(count_a(c), count_b(c)), and the bound follows directly.
+//
+// This is a filter on WORK, not on RESULTS: when the bound is below the
+// match threshold the real score cannot reach it either, so the pair is
+// skipped with no possible change to any match decision. That distinction
+// matters here -- two earlier attempts to speed this code up restricted
+// which CANDIDATES were compared, and both silently lost real matches (see
+// the long comment above reconcileTbrItems in goodreadsSync.ts).
+export function scoreUpperBound(
+  a: string,
+  countsA: Map<string, number>,
+  b: string,
+  countsB: Map<string, number>,
+): number {
+  const total = a.length + b.length;
+  // Mirrors sequenceMatcherRatio's own two-empty-strings special case.
+  if (total === 0) return 100;
+  // Cheap length-only bound first, since common <= min(|a|, |b|). Needs no
+  // map iteration at all and rejects most pairs on its own. Returning it
+  // early yields a LOOSER (never lower) bound than the multiset one, so
+  // soundness holds for any caller threshold, including below the default.
+  const lengthBound = (200 * Math.min(a.length, b.length)) / total;
+  if (lengthBound < DEFAULT_MATCH_THRESHOLD) return lengthBound;
+
+  let common = 0;
+  // Iterate the smaller map; the result is symmetric either way.
+  const [small, large] = countsA.size <= countsB.size ? [countsA, countsB] : [countsB, countsA];
+  for (const [ch, n] of small) {
+    const other = large.get(ch);
+    if (other !== undefined) common += Math.min(n, other);
+  }
+  return (200 * common) / total;
+}
+
 // Compares every normalized form of titleA against every form of titleB and
 // returns the best score, 0-100 (matching thefuzz.fuzz.ratio()'s 0-100 scale).
 export function titleMatchScore(titleA: string, titleB: string): number {
@@ -181,25 +239,81 @@ export function isTitleMatch(
   return titleMatchScore(titleA, titleB) >= threshold;
 }
 
+export interface TitleIndex<T> {
+  findBest(title: string, threshold?: number): T | null;
+}
+
+interface IndexedCandidate<T> {
+  candidate: T;
+  forms: string[];
+  counts: Map<string, number>[];
+}
+
+// Builds a reusable match index over `candidates`, precomputing each one's
+// titleForms() and per-form character counts ONCE. Callers that match many
+// incoming items against the same pool (the sync paths) build this once and
+// reuse it, instead of paying the setup cost per item.
+//
+// Every comparison is gated by scoreUpperBound first, so pairs that cannot
+// reach the threshold never run the O(n*m) matching-blocks algorithm.
+// Results are identical to a naive full scan by construction -- see
+// scoreUpperBound's comment, and the equivalence test in matching.test.ts.
+export function createTitleIndex<T extends { title: string }>(candidates: T[]): TitleIndex<T> {
+  const indexed: IndexedCandidate<T>[] = candidates.map((candidate) => {
+    const forms = titleForms(candidate.title);
+    return { candidate, forms, counts: forms.map(charCounts) };
+  });
+
+  return {
+    findBest(title: string, threshold: number = DEFAULT_MATCH_THRESHOLD): T | null {
+      const probeForms = titleForms(title);
+      const probeCounts = probeForms.map(charCounts);
+
+      let best: T | null = null;
+      let bestScore = -1;
+      for (const entry of indexed) {
+        let score = 0;
+        for (let i = 0; i < entry.forms.length; i++) {
+          for (let j = 0; j < probeForms.length; j++) {
+            // Skip the expensive ratio when it provably cannot beat what we
+            // already have, or cannot reach the threshold at all.
+            const bound = scoreUpperBound(
+              entry.forms[i],
+              entry.counts[i],
+              probeForms[j],
+              probeCounts[j],
+            );
+            if (bound < threshold || bound <= score) continue;
+            const candidateScore = sequenceMatcherRatio(entry.forms[i], probeForms[j]) * 100;
+            if (candidateScore > score) score = candidateScore;
+          }
+        }
+        // `>` not `>=`, matching findBestTitleMatch's original tie-breaking:
+        // the FIRST candidate at the best score wins.
+        if (score >= threshold && score > bestScore) {
+          best = entry.candidate;
+          bestScore = score;
+        }
+      }
+      return best;
+    },
+  };
+}
+
 // Scans `candidates` for the best fuzzy title match to `title`, returning
 // null if nothing scores at or above `threshold`. Generic over any shape
 // that carries a `title` string, so every fuzzy-match-then-attach-or-create
 // call site (absSync.ts, goodreadsSync.ts, createBookWithCopyData) shares
 // one implementation instead of each maintaining a near-identical private
 // copy.
+//
+// A one-shot wrapper over createTitleIndex. Callers matching MANY titles
+// against the SAME pool should build the index once themselves -- this
+// rebuilds it on every call.
 export function findBestTitleMatch<T extends { title: string }>(
   candidates: T[],
   title: string,
   threshold: number = DEFAULT_MATCH_THRESHOLD,
 ): T | null {
-  let best: T | null = null;
-  let bestScore = -1;
-  for (const candidate of candidates) {
-    const score = titleMatchScore(candidate.title, title);
-    if (score >= threshold && score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-  return best;
+  return createTitleIndex(candidates).findBest(title, threshold);
 }

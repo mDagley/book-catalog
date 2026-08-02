@@ -556,6 +556,64 @@ describe("syncGoodreadsTbr", () => {
     expect(items[0].title).toBe("Test Goodreads Sync The Way of Kings (2010 Edition)");
   });
 
+  it("resolves title ties deterministically across repeated syncs", async () => {
+    // Two books that fuzzy-match the same shelf item equally well. Without a
+    // stable orderBy on the candidate fetch, which one receives the status is
+    // whatever order Postgres happened to return.
+    await prisma.book.createMany({
+      data: [
+        { title: "Test Goodreads Sync Mistborn: The Final Empire" },
+        { title: "Test Goodreads Sync Mistborn: The Well of Ascension" },
+      ],
+    });
+
+    const readWinners: (string | null)[] = [];
+    for (let run = 0; run < 3; run++) {
+      await prisma.book.updateMany({
+        where: { title: { startsWith: "Test Goodreads Sync" } },
+        data: { readStatus: null },
+      });
+      mockShelfFetch({
+        read: [buildRssPage([{ title: "Test Goodreads Sync Mistborn", author: "Brandon Sanderson" }])],
+      });
+      await syncGoodreadsTbr("1993628");
+      const matched = await prisma.book.findMany({
+        where: { title: { startsWith: "Test Goodreads Sync" }, readStatus: "READ" },
+        select: { title: true },
+        orderBy: { title: "asc" },
+      });
+      readWinners.push(matched.map((b) => b.title).join("|") || null);
+    }
+
+    expect(new Set(readWinners).size).toBe(1);
+  });
+
+  it("prefers an exact title match over an equally-scoring colon-prefix collision", async () => {
+    // "Mistborn" scores 100 against "Mistborn: The Final Empire" via
+    // titleForms()'s colon-split prefix form -- the same collision documented
+    // above reconcileTbrItems. A book whose FULL title is exactly "Mistborn"
+    // must win, even though the collision sits earlier in id order.
+    const collision = await prisma.book.create({
+      data: { title: "Test Goodreads Sync Mistborn: The Final Empire" },
+    });
+    const exact = await prisma.book.create({
+      data: { title: "Test Goodreads Sync Mistborn" },
+    });
+    expect(collision.id < exact.id).toBe(true); // collision is scanned first
+
+    mockShelfFetch({
+      read: [buildRssPage([{ title: "Test Goodreads Sync Mistborn", author: "Brandon Sanderson" }])],
+    });
+    await syncGoodreadsTbr("1993628");
+
+    const [collisionAfter, exactAfter] = await Promise.all([
+      prisma.book.findUniqueOrThrow({ where: { id: collision.id }, select: { readStatus: true } }),
+      prisma.book.findUniqueOrThrow({ where: { id: exact.id }, select: { readStatus: true } }),
+    ]);
+    expect(exactAfter.readStatus).toBe("READ");
+    expect(collisionAfter.readStatus).toBeNull();
+  });
+
   it("deletes an existing item's cover file when the item is removed from the shelf", async () => {
     const coverPath = await saveCoverImage(ONE_PX_PNG_DATA_URL);
     await prisma.goodreadsTbrItem.create({
