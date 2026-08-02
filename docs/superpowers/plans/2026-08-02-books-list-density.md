@@ -1527,8 +1527,11 @@ interface CatalogFiltersProps {
   // block renders expanded (a filtered list that LOOKS unfiltered is worse
   // than the height it saves); when false it collapses to a one-line
   // "Filters" summary, which is why /books' first screen was showing only
-  // 2 books despite a 900px viewport.
-  defaultOpen: boolean;
+  // 2 books despite a 900px viewport. Optional, defaulting to true (today's
+  // always-expanded behavior) -- this keeps this commit compiling on its
+  // own, since both call sites are only updated to pass it explicitly in
+  // later tasks (12-13).
+  defaultOpen?: boolean;
 }
 
 // The ownership-type/status/format filter row shared between the home
@@ -1536,7 +1539,13 @@ interface CatalogFiltersProps {
 // inside each page's own <form>, alongside that page's own
 // SearchAutocomplete and its own submit button (a submit button living
 // here would be unreachable while collapsed).
-export function CatalogFilters({ types, status, statusMode, format, defaultOpen }: CatalogFiltersProps) {
+export function CatalogFilters({
+  types,
+  status,
+  statusMode,
+  format,
+  defaultOpen = true,
+}: CatalogFiltersProps) {
   return (
     <details open={defaultOpen}>
       <summary className="cursor-pointer select-none text-sm text-foreground/70">Filters</summary>
@@ -1610,7 +1619,7 @@ export function CatalogFilters({ types, status, statusMode, format, defaultOpen 
 - [ ] **Step 2: Type-check**
 
 Run: `npx tsc --noEmit`
-Expected: errors at both call sites (`src/app/page.tsx`, `src/app/books/page.tsx`) — `defaultOpen` is now required, and both still expect a `Button` import that's no longer used inside `CatalogFilters`. These are resolved in Tasks 12-13, which rewire both pages. This is expected and acceptable mid-plan (a single logical change spanning a shared component and its two callers).
+Expected: clean, no errors. `defaultOpen` is optional (defaults to `true`), so neither existing call site (`src/app/page.tsx`, `src/app/books/page.tsx`) needs to change yet for this to compile. Note: this commit DOES remove `CatalogFilters`' own internal submit button, so both pages' search forms are submit-button-less until Tasks 12-13 add their own — a real but short-lived functional gap (not a type error), acceptable because Tasks 12-13 immediately follow in this same execution and no one interacts with the app in between.
 
 - [ ] **Step 3: Commit**
 
@@ -1618,8 +1627,6 @@ Expected: errors at both call sites (`src/app/page.tsx`, `src/app/books/page.tsx
 git add src/components/CatalogFilters.tsx
 git commit -m "feat: make CatalogFilters a collapsible details widget"
 ```
-
-(Type errors from the two callers are fixed in the very next tasks, which touch those files directly — commit now to keep this a single-purpose, revertable change.)
 
 ---
 
@@ -1801,6 +1808,14 @@ export default async function BooksPage({
           defaultValue={query}
           placeholder="Search by title, author, or ISBN"
         />
+        {/* Carries the active letter forward across a search/sort/filter
+            resubmit -- e.g. typing a new query while browsing letter "M"
+            keeps that letter applied. Deliberately unconditional: if the
+            submitted sort no longer supports letter-jump (createdAt/rating),
+            parseStartsWithLetter's own gating on the read side (via
+            supportsLetterJump above) already drops it silently, matching
+            every other inapplicable-param case in this file. */}
+        {activeLetter && <input type="hidden" name="startsWith" value={activeLetter} />}
         <label className="flex items-center gap-1 text-sm text-foreground/70">
           Sort
           <select
@@ -1901,7 +1916,7 @@ export default async function BooksPage({
 - [ ] **Step 2: Type-check**
 
 Run: `npx tsc --noEmit`
-Expected: no errors in this file. (`src/app/page.tsx` still has an error until Task 13 — expected mid-plan.)
+Expected: clean, zero errors anywhere (`defaultOpen`'s optionality from Task 11 means `src/app/page.tsx` was never broken by this — it just hasn't been updated with its own density toggle/submit button yet, which is Task 13).
 
 - [ ] **Step 3: Run the full test suite**
 
@@ -2043,7 +2058,7 @@ export default async function HomePage({
 - [ ] **Step 2: Type-check the whole project**
 
 Run: `npx tsc --noEmit`
-Expected: zero errors anywhere (this was the last file with an outstanding error from Task 11).
+Expected: zero errors anywhere.
 
 - [ ] **Step 3: Run the full test suite**
 
@@ -2079,7 +2094,9 @@ Load via `ToolSearch` with query `select:mcp__plugin_playwright_playwright__brow
 
 - [ ] **Step 4: Verify compact density row pitch and count**
 
-Navigate to `http://localhost:3000/books`. Confirm density defaults to compact (no cookie yet). Resize to 1280×900. Use `browser_evaluate` to measure the pitch between two consecutive `[data-testid="catalog-row"]` elements (difference in `getBoundingClientRect().top`). Expect roughly 102px, not the old 280px. Confirm materially more than 3 books are visible above the fold without scrolling.
+Navigate to `http://localhost:3000/books`. Confirm density defaults to compact (no cookie yet). Resize to 1280×900. Use `browser_evaluate` to measure the pitch between two consecutive `[data-testid="catalog-row"]` elements (difference in `getBoundingClientRect().top`).
+
+**Acceptance criterion:** at least 6 books fully visible on first paint with no scrolling (up from the old design's 2) — this is the actual goal ("meaningfully denser while keeping covers"), not a specific pixel count. ~102px was an estimate from CSS-injection experiments during spec-writing, not a hard requirement measured against the shipped markup (real padding/line-height/font metrics will differ somewhat). If the measured pitch is close to but not exactly 102px (say, 90-140px) and the 6-book criterion is met, that's a pass — don't chase an exact pixel match. Only treat it as a real problem if the row is dramatically larger than expected (e.g. still 200px+, indicating something in Task 10's compact layout isn't actually applying) or the 6-book bar isn't cleared.
 
 - [ ] **Step 5: Verify the whole row navigates**
 
