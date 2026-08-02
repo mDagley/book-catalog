@@ -60,7 +60,7 @@ export function CatalogResultCard({ result }: { result: SearchResult }) {
       {result.readStatus === "READ" && (
         <PandaStamp title="Read" className="absolute right-3 top-3 h-5 w-5 text-status-positive" />
       )}
-      <CoverThumbnail coverImagePath={result.coverImagePath} />
+      <CoverThumbnail coverImagePath={result.coverImagePath} className="mb-2" />
       <p className="font-display font-semibold text-foreground-strong">{result.title}</p>
       {result.author && <p className="text-sm text-foreground/70">{result.author}</p>}
       {metaParts.length > 0 && (
