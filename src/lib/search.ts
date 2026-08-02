@@ -140,10 +140,23 @@ export function buildCatalogWhere(options: SearchOptions): Prisma.BookWhereInput
   const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(trimmed);
   const normalizedIsbnQuery = trimmed && looksLikeIsbnQuery ? normalizeIsbn(trimmed) : "";
 
-  // See searchCatalog's original comment (preserved here): this OR is only
-  // applied as a required filter when the caller explicitly asked for an
-  // ownership-narrowed view. A plain, unfiltered text/ISBN search should
-  // still surface any matching Book regardless of ownership.
+  // Every included ownership type ORs together into one clause -- a Book
+  // matches if it satisfies ANY currently-included type. `format` narrows
+  // only the physical branch; an ebook/audiobook result is unaffected by it,
+  // since format is a physical-copy-only concept (matches the pre-unification
+  // behavior, where format never gated the separate ABS-item query either).
+  //
+  // This ownership OR is only applied as a required filter when the caller
+  // explicitly asked for an ownership-narrowed view (a `types` filter and/or
+  // a `format` filter). A plain, unfiltered text/ISBN search should still
+  // surface any matching Book regardless of ownership. This isn't reachable
+  // through the app's own UI today -- every Book-creation path
+  // (createBookWithCopyData, and absSync.ts's link/create logic) always sets
+  // at least one ownership signal -- but the guard is kept defensively
+  // against a future change to those invariants, the same as the
+  // pre-unification default browse, which never required ownership absent an
+  // explicit filter (see the old `explicitPhysicalFilterActive` guard this
+  // replaces and generalizes).
   const explicitOwnershipFilterActive = types !== undefined || format !== undefined;
   const filters: Prisma.BookWhereInput[] = [];
   if (explicitOwnershipFilterActive) {
@@ -182,7 +195,6 @@ function buildOrderBy(
     case "title":
       return [{ title: "asc" }, { id: "asc" }];
     case "id":
-    default:
       return [{ id: "asc" }];
   }
 }
@@ -236,7 +248,7 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const where = buildCatalogWhere(options);
   const orderBy = buildOrderBy(options.sortBy ?? "id");
 
-  const books: BookWithDetails[] = await fetchBooksWithDetails(where, orderBy, format, limit);
+  const books = await fetchBooksWithDetails(where, orderBy, format, limit);
 
   return books.map((book) => ({
     title: book.title,

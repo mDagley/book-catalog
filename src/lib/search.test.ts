@@ -108,6 +108,10 @@ describe("searchCatalog", () => {
     expect(await searchCatalog({ types: [] })).toEqual([]);
   });
 
+  it("returns an empty array for an empty status array, not an unbounded scan (mirrors the types: [] fix)", async () => {
+    expect(await searchCatalog({ status: [] })).toEqual([]);
+  });
+
   it("sorts by title ascending when sortBy is 'title'", async () => {
     await prisma.book.create({ data: { title: "Test Search Sort Zebra" } });
     await prisma.book.create({ data: { title: "Test Search Sort Apple" } });
