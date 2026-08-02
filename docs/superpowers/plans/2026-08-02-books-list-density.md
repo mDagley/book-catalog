@@ -190,11 +190,12 @@ In `src/lib/search.ts`, replace the entire `searchCatalog` function (lines 112-2
 // nothing to look up.
 function hasNoActiveQuery(options: SearchOptions): boolean {
   const trimmed = options.query?.trim() ?? "";
+  const types = options.types && options.types.length > 0 ? options.types : undefined;
   const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
   return (
     !(options.browseAll ?? false) &&
     !trimmed &&
-    !options.types &&
+    !types &&
     !options.format &&
     !statusValues
   );
@@ -278,16 +279,18 @@ function fetchBooksWithDetails(
 type BookWithDetails = Awaited<ReturnType<typeof fetchBooksWithDetails>>[number];
 
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
-  if (hasNoActiveQuery(options)) return [];
-
   // Throws rather than silently ignoring a bad value: dropping an invalid
   // `limit` would turn a caller bug into an unbounded full-catalog query --
   // exactly the performance problem pagination exists to prevent -- and the
   // failure would be invisible until the catalog grew large enough to hurt.
+  // Validated before the early return below, so a bad `limit` throws even
+  // when no query/filter is active (e.g. `searchCatalog({ limit: -5 })`).
   const limit = options.limit;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
     throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
   }
+
+  if (hasNoActiveQuery(options)) return [];
 
   const types = options.types && options.types.length > 0 ? options.types : undefined;
   const format = options.format;
@@ -322,6 +325,12 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 ```
 
 This is behavior-preserving: `buildCatalogWhere` is the exact same filter-building logic, `buildOrderBy` currently only handles the two existing cases, and `fetchBooksWithDetails` is the exact same `prisma.book.findMany` call. `startsWith` handling is deliberately NOT added yet (Task 5).
+
+**Corrected 2026-08-02, during Task 2's implementation:** the code above (now reflecting the fix, not the original draft) had two real regressions relative to the pre-refactor function, neither caught by the existing test suite because every existing `limit`-validation test passes `browseAll: true`:
+1. `hasNoActiveQuery` must be checked in `searchCatalog` *after* the `limit` validation, not before — otherwise `searchCatalog({ limit: -5 })` (no query/filter, no `browseAll`) silently returns `[]` instead of throwing, unlike the original function.
+2. `hasNoActiveQuery` must normalize `types` (empty array → `undefined`) the same way `buildCatalogWhere` already does, not check `!options.types` directly — otherwise `searchCatalog({ types: [] })` fails to hit the early return (an empty array is truthy) and falls through to an unbounded full-catalog query.
+
+Both are fixed in the code block above. If executing this task from a stale copy of this file, apply both corrections before implementing.
 
 - [ ] **Step 3: Run the full existing suite to confirm zero regressions**
 
