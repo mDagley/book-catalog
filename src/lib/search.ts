@@ -96,6 +96,21 @@ export function parseStatusModeParam(value: string | undefined): StatusFilterMod
   return value === "and" ? "and" : "or";
 }
 
+const VALID_SORT_VALUES = ["title", "author", "createdAt", "rating"] as const;
+
+export function parseSortParam(
+  value: string | undefined,
+): "title" | "author" | "createdAt" | "rating" {
+  return value && (VALID_SORT_VALUES as readonly string[]).includes(value)
+    ? (value as "title" | "author" | "createdAt" | "rating")
+    : "title";
+}
+
+export function parseStartsWithLetter(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value === "#" || /^[A-Za-z]$/.test(value) ? value.toUpperCase() : undefined;
+}
+
 // "and" is meaningful when combining a status with "unrated" (e.g.
 // "reading AND unrated"); ANDing two distinct readStatus values together
 // isn't a separate case to guard against -- a Book's readStatus is a

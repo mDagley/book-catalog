@@ -8,6 +8,8 @@ import {
   parseTypesParam,
   parseStatusParam,
   parseStatusModeParam,
+  parseSortParam,
+  parseStartsWithLetter,
   buildStatusWhere,
   buildCatalogWhere,
 } from "@/lib/search";
@@ -954,5 +956,47 @@ describe("getAvailableStartsWithLetters", () => {
     );
 
     expect(letters).toEqual([]);
+  });
+});
+
+describe("parseSortParam", () => {
+  it("returns 'title' for an undefined value", () => {
+    expect(parseSortParam(undefined)).toBe("title");
+  });
+
+  it("returns the value for each valid sort", () => {
+    expect(parseSortParam("title")).toBe("title");
+    expect(parseSortParam("author")).toBe("author");
+    expect(parseSortParam("createdAt")).toBe("createdAt");
+    expect(parseSortParam("rating")).toBe("rating");
+  });
+
+  it("falls back to 'title' for an unrecognized value", () => {
+    expect(parseSortParam("bogus")).toBe("title");
+  });
+
+  it("falls back to 'title' for 'id' (not a user-facing sort option)", () => {
+    expect(parseSortParam("id")).toBe("title");
+  });
+});
+
+describe("parseStartsWithLetter", () => {
+  it("returns undefined for an undefined or empty value", () => {
+    expect(parseStartsWithLetter(undefined)).toBeUndefined();
+    expect(parseStartsWithLetter("")).toBeUndefined();
+  });
+
+  it("uppercases a valid single letter", () => {
+    expect(parseStartsWithLetter("m")).toBe("M");
+  });
+
+  it("accepts '#'", () => {
+    expect(parseStartsWithLetter("#")).toBe("#");
+  });
+
+  it("returns undefined for anything else (multi-char, digit, symbol)", () => {
+    expect(parseStartsWithLetter("mm")).toBeUndefined();
+    expect(parseStartsWithLetter("5")).toBeUndefined();
+    expect(parseStartsWithLetter("$")).toBeUndefined();
   });
 });
