@@ -109,27 +109,29 @@ export function buildStatusWhere(
   return statusMode === "and" ? { AND: statusConditions } : { OR: statusConditions };
 }
 
-export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
+// True when neither text/ISBN search nor any filter is active and the
+// caller didn't opt into browsing everything -- the historical "empty
+// unfiltered home page" behavior, shared by searchCatalog, countCatalog,
+// and getAvailableStartsWithLetters so all three agree on when there's
+// nothing to look up.
+function hasNoActiveQuery(options: SearchOptions): boolean {
+  const trimmed = options.query?.trim() ?? "";
+  const types = options.types && options.types.length > 0 ? options.types : undefined;
+  const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
+  return (
+    !(options.browseAll ?? false) &&
+    !trimmed &&
+    !types &&
+    !options.format &&
+    !statusValues
+  );
+}
+
+export function buildCatalogWhere(options: SearchOptions): Prisma.BookWhereInput {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
   const format = options.format;
   const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
-  const browseAll = options.browseAll ?? false;
-  const sortBy = options.sortBy ?? "id";
-
-  // Throws rather than silently ignoring a bad value: dropping an invalid
-  // `limit` would turn a caller bug into an unbounded full-catalog query --
-  // exactly the performance problem pagination exists to prevent -- and the
-  // failure would be invisible until the catalog grew large enough to hurt.
-  // Matches this codebase's existing preference for loud failure over silent
-  // degradation. Floats are rejected outright rather than truncated, so a
-  // caller doing arithmetic on a page size finds out immediately.
-  const limit = options.limit;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
-  }
-
-  if (!browseAll && !trimmed && !types && !format && !statusValues) return [];
 
   const includePhysical = !types || types.includes("physical");
   const includeEbook = !types || types.includes("ebook");
@@ -138,23 +140,10 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const looksLikeIsbnQuery = /^[0-9Xx\s-]+$/.test(trimmed);
   const normalizedIsbnQuery = trimmed && looksLikeIsbnQuery ? normalizeIsbn(trimmed) : "";
 
-  // Every included ownership type ORs together into one clause -- a Book
-  // matches if it satisfies ANY currently-included type. `format` narrows
-  // only the physical branch; an ebook/audiobook result is unaffected by it,
-  // since format is a physical-copy-only concept (matches the pre-unification
-  // behavior, where format never gated the separate ABS-item query either).
-  //
-  // This ownership OR is only applied as a required filter when the caller
-  // explicitly asked for an ownership-narrowed view (a `types` filter and/or
-  // a `format` filter). A plain, unfiltered text/ISBN search should still
-  // surface any matching Book regardless of ownership. This isn't reachable
-  // through the app's own UI today -- every Book-creation path
-  // (createBookWithCopyData, and absSync.ts's link/create logic) always sets
-  // at least one ownership signal -- but the guard is kept defensively
-  // against a future change to those invariants, the same as the
-  // pre-unification default browse, which never required ownership absent an
-  // explicit filter (see the old `explicitPhysicalFilterActive` guard this
-  // replaces and generalizes).
+  // See searchCatalog's original comment (preserved here): this OR is only
+  // applied as a required filter when the caller explicitly asked for an
+  // ownership-narrowed view. A plain, unfiltered text/ISBN search should
+  // still surface any matching Book regardless of ownership.
   const explicitOwnershipFilterActive = types !== undefined || format !== undefined;
   const filters: Prisma.BookWhereInput[] = [];
   if (explicitOwnershipFilterActive) {
@@ -180,26 +169,74 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     });
   }
 
-  const books = await prisma.book.findMany({
-    where: { AND: filters },
+  return { AND: filters };
+}
+
+// Secondary `id` sort breaks ties for books sharing a title -- without it,
+// Postgres doesn't guarantee stable ordering among tied rows, so the same
+// query could return a different order across runs as the catalog grows.
+function buildOrderBy(
+  sortBy: NonNullable<SearchOptions["sortBy"]>,
+): Prisma.BookOrderByWithRelationInput[] {
+  switch (sortBy) {
+    case "title":
+      return [{ title: "asc" }, { id: "asc" }];
+    case "id":
+    default:
+      return [{ id: "asc" }];
+  }
+}
+
+function fetchBooksWithDetails(
+  where: Prisma.BookWhereInput,
+  orderBy: Prisma.BookOrderByWithRelationInput[],
+  format: Format | undefined,
+  take?: number,
+) {
+  return prisma.book.findMany({
+    where,
     include: {
       copies: { where: format ? { format } : undefined },
       ebookCopies: { select: { coverImagePath: true } },
       audiobookCopies: { select: { coverImagePath: true } },
     },
-    // Secondary `id` sort breaks ties for books sharing a title -- without
-    // it, Postgres doesn't guarantee stable ordering among tied rows, so
-    // the same query could return a different order across runs as the
-    // catalog grows.
-    orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
-    // `limit` is opt-in -- omitted entirely (rather than defaulted) so the
+    orderBy,
+    // `take` is opt-in -- omitted entirely (rather than defaulted) so the
     // home-page search caller, which never passes it, keeps its existing
-    // unlimited behavior. Validated above rather than passed through raw:
+    // unlimited behavior. Validated by searchCatalog before it gets here:
     // Prisma reads a NEGATIVE take as "the last N rows", so an unvalidated
     // -5 would silently return rows from the opposite end of the ordering
     // instead of erroring (confirmed empirically).
-    ...(limit !== undefined ? { take: limit } : {}),
+    ...(take !== undefined ? { take } : {}),
   });
+}
+
+type BookWithDetails = Awaited<ReturnType<typeof fetchBooksWithDetails>>[number];
+
+export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
+  // Throws rather than silently ignoring a bad value: dropping an invalid
+  // `limit` would turn a caller bug into an unbounded full-catalog query --
+  // exactly the performance problem pagination exists to prevent -- and the
+  // failure would be invisible until the catalog grew large enough to hurt.
+  // Validated before the early return below, so a bad `limit` throws even
+  // when no query/filter is active (e.g. `searchCatalog({ limit: -5 })`).
+  const limit = options.limit;
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
+  }
+
+  if (hasNoActiveQuery(options)) return [];
+
+  const types = options.types && options.types.length > 0 ? options.types : undefined;
+  const format = options.format;
+  const includePhysical = !types || types.includes("physical");
+  const includeEbook = !types || types.includes("ebook");
+  const includeAudiobook = !types || types.includes("audiobook");
+
+  const where = buildCatalogWhere(options);
+  const orderBy = buildOrderBy(options.sortBy ?? "id");
+
+  const books: BookWithDetails[] = await fetchBooksWithDetails(where, orderBy, format, limit);
 
   return books.map((book) => ({
     title: book.title,

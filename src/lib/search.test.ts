@@ -7,6 +7,7 @@ import {
   parseStatusParam,
   parseStatusModeParam,
   buildStatusWhere,
+  buildCatalogWhere,
 } from "@/lib/search";
 import { saveCoverImage, deleteCoverImage } from "@/lib/coverStorage";
 
@@ -99,6 +100,12 @@ describe("searchCatalog", () => {
 
     expect(await searchCatalog({})).toEqual([]);
     expect(await searchCatalog({ browseAll: false })).toEqual([]);
+  });
+
+  it("treats an empty types array as no filter (still an empty-query result)", async () => {
+    await prisma.book.create({ data: { title: "Test Search Empty Types Array" } });
+
+    expect(await searchCatalog({ types: [] })).toEqual([]);
   });
 
   it("sorts by title ascending when sortBy is 'title'", async () => {
@@ -503,6 +510,17 @@ describe("buildStatusWhere", () => {
   });
 });
 
+describe("buildCatalogWhere", () => {
+  it("returns an empty AND for no filters and no query", () => {
+    expect(buildCatalogWhere({})).toEqual({ AND: [] });
+  });
+
+  it("combines a text query and a types filter into separate AND clauses", () => {
+    const where = buildCatalogWhere({ query: "dune", types: ["ebook"] });
+    expect(where.AND).toHaveLength(2);
+  });
+});
+
 describe("parseFormatParam", () => {
   it("returns undefined for an undefined or empty value", () => {
     expect(parseFormatParam(undefined)).toBeUndefined();
@@ -609,5 +627,9 @@ describe("searchCatalog limit validation", () => {
 
   it("accepts a positive integer", async () => {
     await expect(searchCatalog({ browseAll: true, limit: 1 })).resolves.toBeInstanceOf(Array);
+  });
+
+  it("throws for an invalid limit even with no query or filter active", async () => {
+    await expect(searchCatalog({ limit: -5 })).rejects.toThrow(/positive integer/);
   });
 });
