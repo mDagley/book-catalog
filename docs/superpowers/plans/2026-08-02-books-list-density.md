@@ -253,11 +253,14 @@ function buildOrderBy(
     case "title":
       return [{ title: "asc" }, { id: "asc" }];
     case "id":
-    default:
       return [{ id: "asc" }];
   }
 }
+```
 
+**Corrected 2026-08-02, during Task 2's code review:** the `default:` branch above was removed. A `default:` case defeats TypeScript's exhaustiveness check on the `switch` — Task 3 widens `sortBy`'s union, and with `default:` present a forgotten case there would silently fall through to id-order with no compile error (verified empirically during review). With `default:` gone, forgetting a case is a compile error instead.
+
+```ts
 function fetchBooksWithDetails(
   where: Prisma.BookWhereInput,
   orderBy: Prisma.BookOrderByWithRelationInput[],
@@ -484,11 +487,12 @@ function buildOrderBy(
     case "rating":
       return [{ rating: { sort: "desc", nulls: "last" } }, { title: "asc" }, { id: "asc" }];
     case "id":
-    default:
       return [{ id: "asc" }];
   }
 }
 ```
+
+(No `default:` branch — Task 2's code review found that a `default:` here defeats TypeScript's exhaustiveness check, silently swallowing a forgotten case if `sortBy`'s union is ever widened again without updating this switch. Keep every case explicit.)
 
 - [ ] **Step 4: Run to verify the tests pass**
 
