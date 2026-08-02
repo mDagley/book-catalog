@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/isbn";
 import { resolveListingCover } from "@/lib/listingCover";
+import { letterBucket, sortLetters } from "@/lib/alphabetize";
 import type { Format, Prisma, ReadStatus } from "@prisma/client";
 
 export interface SearchResultCopy {
@@ -32,6 +33,9 @@ export interface SearchOptions {
   statusMode?: StatusFilterMode;
   browseAll?: boolean;
   sortBy?: "id" | "title" | "author" | "createdAt" | "rating";
+  // Not SQL-expressible against this schema's default collation (see the
+  // module comment above resolveStartsWithIds) -- applied in JS.
+  startsWith?: { letter: string; field: "title" | "author" };
   limit?: number;
 }
 
@@ -231,6 +235,33 @@ function fetchBooksWithDetails(
 
 type BookWithDetails = Awaited<ReturnType<typeof fetchBooksWithDetails>>[number];
 
+// A letter filter can't be pushed into the SQL WHERE clause: it depends on
+// letterBucket's diacritic-stripping (see alphabetize.ts), and Postgres's
+// default collation doesn't fold accents the way ILIKE would need to for
+// that to work. Instead this scans a lightweight id/title/author-only
+// projection (no joins -- cheap even at full-catalog scale, the same shape
+// as the 3ms-median aggregate queries measured for /stats against a
+// 2000-book fixture), buckets each row in JS, and returns the matching ids
+// in the query's own sort order.
+async function resolveStartsWithIds(
+  startsWith: { letter: string; field: "title" | "author" },
+  where: Prisma.BookWhereInput,
+  orderBy: Prisma.BookOrderByWithRelationInput[],
+): Promise<string[]> {
+  const rows = await prisma.book.findMany({
+    where,
+    select: { id: true, title: true, author: true },
+    orderBy,
+  });
+  return rows
+    .filter(
+      (row) =>
+        letterBucket(startsWith.field === "title" ? row.title : (row.author ?? "")) ===
+        startsWith.letter,
+    )
+    .map((row) => row.id);
+}
+
 export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
   // Throws rather than silently ignoring a bad value: dropping an invalid
   // `limit` would turn a caller bug into an unbounded full-catalog query --
@@ -254,7 +285,28 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
   const where = buildCatalogWhere(options);
   const orderBy = buildOrderBy(options.sortBy ?? "id");
 
-  const books = await fetchBooksWithDetails(where, orderBy, format, limit);
+  let books: BookWithDetails[];
+  if (options.startsWith) {
+    const ids = await resolveStartsWithIds(options.startsWith, where, orderBy);
+    const pageIds = limit !== undefined ? ids.slice(0, limit) : ids;
+    if (pageIds.length === 0) {
+      books = [];
+    } else {
+      const rows = await fetchBooksWithDetails(
+        { AND: [where, { id: { in: pageIds } }] },
+        orderBy,
+        format,
+      );
+      // Prisma's `id: { in: ... }` does not preserve the given array's
+      // order, so the already-correctly-sorted `pageIds` order is restored.
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      books = pageIds
+        .map((id) => byId.get(id))
+        .filter((row): row is NonNullable<typeof row> => row !== undefined);
+    }
+  } else {
+    books = await fetchBooksWithDetails(where, orderBy, format, limit);
+  }
 
   return books.map((book) => ({
     title: book.title,
@@ -288,5 +340,27 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
 export async function countCatalog(options: SearchOptions): Promise<number> {
   if (hasNoActiveQuery(options)) return 0;
   const where = buildCatalogWhere(options);
+  if (options.startsWith) {
+    const orderBy = buildOrderBy(options.sortBy ?? "id");
+    const ids = await resolveStartsWithIds(options.startsWith, where, orderBy);
+    return ids.length;
+  }
   return prisma.book.count({ where });
+}
+
+// The set of letters that currently have at least one match, for rendering
+// the jump-nav itself -- deliberately ignores `options.startsWith` (the
+// nav must keep listing every available letter, not collapse to just the
+// one currently selected).
+export async function getAvailableStartsWithLetters(
+  options: SearchOptions,
+  field: "title" | "author",
+): Promise<string[]> {
+  if (hasNoActiveQuery(options)) return [];
+  const where = buildCatalogWhere(options);
+  const rows = await prisma.book.findMany({ where, select: { title: true, author: true } });
+  const letters = new Set(
+    rows.map((row) => letterBucket(field === "title" ? row.title : (row.author ?? ""))),
+  );
+  return sortLetters([...letters]);
 }
