@@ -172,6 +172,79 @@ describe("searchCatalog", () => {
     expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id]);
   });
 
+  it("sorts by author ascending when sortBy is 'author', with authorless books last", async () => {
+    await prisma.book.create({ data: { title: "Test Search Author Sort No Author" } });
+    await prisma.book.create({ data: { title: "Test Search Author Sort Zed", author: "Zed" } });
+    await prisma.book.create({ data: { title: "Test Search Author Sort Amy", author: "Amy" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "author" });
+
+    const ours = results.filter((r) => r.title.startsWith("Test Search Author Sort"));
+    expect(ours.map((r) => r.title)).toEqual([
+      "Test Search Author Sort Amy",
+      "Test Search Author Sort Zed",
+      "Test Search Author Sort No Author",
+    ]);
+  });
+
+  it("breaks author-sort ties by title, then keeps a stable order across repeated calls", async () => {
+    await prisma.book.create({ data: { title: "Test Search Author Tie B", author: "Same Author" } });
+    await prisma.book.create({ data: { title: "Test Search Author Tie A", author: "Same Author" } });
+
+    const first = await searchCatalog({ browseAll: true, sortBy: "author" });
+    const second = await searchCatalog({ browseAll: true, sortBy: "author" });
+
+    const titlesFirst = first
+      .filter((r) => r.title.startsWith("Test Search Author Tie"))
+      .map((r) => r.title);
+    const titlesSecond = second
+      .filter((r) => r.title.startsWith("Test Search Author Tie"))
+      .map((r) => r.title);
+    expect(titlesFirst).toEqual(["Test Search Author Tie A", "Test Search Author Tie B"]);
+    expect(titlesSecond).toEqual(titlesFirst);
+  });
+
+  it("sorts by createdAt descending when sortBy is 'createdAt'", async () => {
+    const first = await prisma.book.create({ data: { title: "Test Search Created First" } });
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await prisma.book.create({ data: { title: "Test Search Created Second" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "createdAt" });
+
+    const ours = results.filter((r) => r.bookId === first.id || r.bookId === second.id);
+    expect(ours.map((r) => r.bookId)).toEqual([second.id, first.id]);
+  });
+
+  it("sorts by rating descending when sortBy is 'rating', with unrated books last", async () => {
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Unrated" } });
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Three", rating: 3 } });
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Five", rating: 5 } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "rating" });
+
+    const ours = results.filter((r) => r.title.startsWith("Test Search Rating Sort"));
+    expect(ours.map((r) => r.title)).toEqual([
+      "Test Search Rating Sort Five",
+      "Test Search Rating Sort Three",
+      "Test Search Rating Sort Unrated",
+    ]);
+  });
+
+  it("applies sort before the limit, not after", async () => {
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Zebra" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Mango" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Apple" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title", limit: 2 });
+
+    const ours = results
+      .filter((r) => r.title.startsWith("Test Search Sort Before Limit"))
+      .map((r) => r.title);
+    // Of the full sorted order (Apple, Mango, Zebra), the first two -- not
+    // two arbitrary rows re-sorted after an arbitrary limit.
+    expect(ours).toEqual(["Test Search Sort Before Limit Apple", "Test Search Sort Before Limit Mango"]);
+  });
+
   it("supports standalone browse by ownership type with no query text", async () => {
     await prisma.book.create({
       data: {

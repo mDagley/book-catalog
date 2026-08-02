@@ -31,7 +31,7 @@ export interface SearchOptions {
   status?: ReadStatusFilterValue[];
   statusMode?: StatusFilterMode;
   browseAll?: boolean;
-  sortBy?: "id" | "title";
+  sortBy?: "id" | "title" | "author" | "createdAt" | "rating";
   limit?: number;
 }
 
@@ -194,6 +194,12 @@ function buildOrderBy(
   switch (sortBy) {
     case "title":
       return [{ title: "asc" }, { id: "asc" }];
+    case "author":
+      return [{ author: { sort: "asc", nulls: "last" } }, { title: "asc" }, { id: "asc" }];
+    case "createdAt":
+      return [{ createdAt: "desc" }, { id: "desc" }];
+    case "rating":
+      return [{ rating: { sort: "desc", nulls: "last" } }, { title: "asc" }, { id: "asc" }];
     case "id":
       return [{ id: "asc" }];
   }
