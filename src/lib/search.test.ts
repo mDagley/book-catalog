@@ -109,6 +109,8 @@ describe("searchCatalog", () => {
   });
 
   it("returns an empty array for an empty status array, not an unbounded scan (mirrors the types: [] fix)", async () => {
+    await prisma.book.create({ data: { title: "Test Search Empty Status Array" } });
+
     expect(await searchCatalog({ status: [] })).toEqual([]);
   });
 
