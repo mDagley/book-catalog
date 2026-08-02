@@ -742,6 +742,8 @@ describe("getAvailableStartsWithLetters", () => {
 
 Add `countCatalog` and `getAvailableStartsWithLetters` to the test file's import list.
 
+**Corrected 2026-08-02, during Task 5's implementation:** the fixture titles above are broken as written. `letterBucket` (see `alphabetize.ts`) buckets on the literal first character of the WHOLE string, not per-word — so `"Test Search Letter Mistborn"` and `"Test Search Letter Elantris"` both bucket under `"T"`, never `"M"`/`"E"`, since they share the `"Test Search Letter"` prefix. Any title-field fixture must put the target letter's word first (e.g. `"Mistborn Test Search Letter"`), and any `.startsWith("Test Search Letter")` scoping filter in the test body must become `.includes("Test Search Letter")` once the prefix moves. This also exposed that this file's `afterEach` cleanup (`title: { startsWith: "Test Search" }`) never catches a fixture whose title doesn't begin with that prefix (e.g. the `"#"`-bucket fixture, `"1984 Test Search Letter Hash"`) — widen all four `afterEach` `deleteMany` where-clauses to `contains: "Test Search"` instead, or such rows leak into the shared dev/test DB across runs and can silently corrupt unrelated tests that scan broadly (confirmed: this leak was already corrupting the pre-existing "applies sort before the limit, not after" test before the fix). Author-field fixtures and the already-correctly-ordered `"#"` fixture don't need reordering, only the `afterEach` widening.
+
 - [ ] **Step 2: Run to verify the new tests fail**
 
 Run: `npm test -- search.test`
