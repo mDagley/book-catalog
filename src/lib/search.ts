@@ -284,3 +284,9 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     coverImagePath: resolveListingCover(book),
   }));
 }
+
+export async function countCatalog(options: SearchOptions): Promise<number> {
+  if (hasNoActiveQuery(options)) return 0;
+  const where = buildCatalogWhere(options);
+  return prisma.book.count({ where });
+}

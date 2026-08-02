@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import {
   searchCatalog,
+  countCatalog,
   parseFormatParam,
   parseTypesParam,
   parseStatusParam,
@@ -737,5 +738,38 @@ describe("searchCatalog limit validation", () => {
 
   it("throws for an invalid limit even with no query or filter active", async () => {
     await expect(searchCatalog({ limit: -5 })).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe("countCatalog", () => {
+  it("matches the number of rows searchCatalog returns unpaginated, for the same filters", async () => {
+    await prisma.book.create({ data: { title: "Test Search Count One" } });
+    await prisma.book.create({ data: { title: "Test Search Count Two" } });
+
+    const results = await searchCatalog({ query: "Test Search Count" });
+    const count = await countCatalog({ query: "Test Search Count" });
+
+    expect(count).toBe(results.length);
+  });
+
+  it("is independent of limit", async () => {
+    await prisma.book.create({ data: { title: "Test Search Count Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search Count Limit Two" } });
+    await prisma.book.create({ data: { title: "Test Search Count Limit Three" } });
+
+    const count = await countCatalog({ query: "Test Search Count Limit", limit: 1 });
+
+    expect(count).toBe(3);
+  });
+
+  it("returns 0 when there is no query and no filters (matching searchCatalog's empty behavior)", async () => {
+    expect(await countCatalog({})).toBe(0);
+  });
+
+  it("respects browseAll", async () => {
+    const before = await countCatalog({ browseAll: true });
+    await prisma.book.create({ data: { title: "Test Search Count Browse All" } });
+
+    expect(await countCatalog({ browseAll: true })).toBe(before + 1);
   });
 });
