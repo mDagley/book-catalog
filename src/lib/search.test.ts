@@ -215,6 +215,21 @@ describe("searchCatalog", () => {
     expect(ours.map((r) => r.bookId)).toEqual([second.id, first.id]);
   });
 
+  it("breaks createdAt-sort ties by id descending", async () => {
+    const tiedTimestamp = new Date("2020-01-01T00:00:00Z");
+    const first = await prisma.book.create({
+      data: { title: "Test Search CreatedAt Tie A", createdAt: tiedTimestamp },
+    });
+    const second = await prisma.book.create({
+      data: { title: "Test Search CreatedAt Tie B", createdAt: tiedTimestamp },
+    });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "createdAt" });
+
+    const ours = results.filter((r) => r.bookId === first.id || r.bookId === second.id);
+    expect(ours.map((r) => r.bookId)).toEqual([second.id, first.id]);
+  });
+
   it("sorts by rating descending when sortBy is 'rating', with unrated books last", async () => {
     await prisma.book.create({ data: { title: "Test Search Rating Sort Unrated" } });
     await prisma.book.create({ data: { title: "Test Search Rating Sort Three", rating: 3 } });
@@ -228,6 +243,18 @@ describe("searchCatalog", () => {
       "Test Search Rating Sort Three",
       "Test Search Rating Sort Unrated",
     ]);
+  });
+
+  it("breaks rating-sort ties by title, for two books sharing the same rating", async () => {
+    await prisma.book.create({ data: { title: "Test Search Rating Tie B", rating: 4 } });
+    await prisma.book.create({ data: { title: "Test Search Rating Tie A", rating: 4 } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "rating" });
+
+    const ours = results
+      .filter((r) => r.title.startsWith("Test Search Rating Tie"))
+      .map((r) => r.title);
+    expect(ours).toEqual(["Test Search Rating Tie A", "Test Search Rating Tie B"]);
   });
 
   it("applies sort before the limit, not after", async () => {
