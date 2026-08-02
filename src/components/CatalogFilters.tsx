@@ -19,9 +19,7 @@ interface CatalogFiltersProps {
   // than the height it saves); when false it collapses to a one-line
   // "Filters" summary, which is why /books' first screen was showing only
   // 2 books despite a 900px viewport. Optional, defaulting to true (today's
-  // always-expanded behavior) -- this keeps this commit compiling on its
-  // own, since both call sites are only updated to pass it explicitly in
-  // later tasks (12-13).
+  // always-expanded behavior).
   defaultOpen?: boolean;
 }
 

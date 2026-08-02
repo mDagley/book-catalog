@@ -1,15 +1,21 @@
 import Link from "next/link";
 import {
   searchCatalog,
+  countCatalog,
+  getAvailableStartsWithLetters,
   parseFormatParam,
   parseTypesParam,
   parseStatusParam,
   parseStatusModeParam,
+  parseSortParam,
+  parseStartsWithLetter,
 } from "@/lib/search";
+import { getDensity } from "@/lib/density";
+import { setDensity } from "@/lib/actions/density";
 import { CatalogFilters } from "@/components/CatalogFilters";
 import { CatalogResultCard } from "@/components/CatalogResultCard";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
-import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
+import { Button, BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -22,6 +28,13 @@ const DEFAULT_PAGE_SIZE = 50;
 // offering a button that can't advance.
 const MAX_PAGE_SIZE = 500;
 
+const SORT_OPTIONS = [
+  { value: "title", label: "Title A–Z" },
+  { value: "author", label: "Author A–Z" },
+  { value: "createdAt", label: "Recently added" },
+  { value: "rating", label: "Rating high→low" },
+] as const;
+
 export default async function BooksPage({
   searchParams,
 }: {
@@ -31,6 +44,8 @@ export default async function BooksPage({
     format?: string;
     status?: string | string[];
     statusMode?: string;
+    sort?: string;
+    startsWith?: string;
     limit?: string;
   }>;
 }) {
@@ -40,6 +55,8 @@ export default async function BooksPage({
     format: formatParam,
     status: statusParam,
     statusMode: statusModeParam,
+    sort: sortParam,
+    startsWith: startsWithParam,
     limit: limitParam,
   } = await searchParams;
   const query = q?.trim() ?? "";
@@ -47,6 +64,18 @@ export default async function BooksPage({
   const format = parseFormatParam(formatParam);
   const status = parseStatusParam(statusParam);
   const statusMode = parseStatusModeParam(statusModeParam);
+  const sortBy = parseSortParam(sortParam);
+  // Jump-to-letter only makes sense under an alphabetical sort (see the
+  // design spec's Jump-to-letter section) -- a hand-typed ?startsWith=
+  // under "recently added" or "rating" is silently ignored, matching every
+  // other parse* helper's treatment of an inapplicable/malformed param.
+  const supportsLetterJump = sortBy === "title" || sortBy === "author";
+  const letterField: "title" | "author" = sortBy === "author" ? "author" : "title";
+  const activeLetter = supportsLetterJump ? parseStartsWithLetter(startsWithParam) : undefined;
+
+  const density = await getDensity("books");
+  const hasActiveFilters = Boolean(query || types || format || status);
+
   // Number() rather than parseInt() so partially-numeric junk ("50abc") is
   // rejected outright instead of silently becoming 50. Anything not a
   // positive integer falls back to the default; anything above the ceiling is
@@ -58,18 +87,20 @@ export default async function BooksPage({
       ? Math.min(parsedLimit, MAX_PAGE_SIZE)
       : DEFAULT_PAGE_SIZE;
 
-  // Fetch one extra row to detect whether more results exist beyond this
-  // page, without a second count query.
-  const fetched = await searchCatalog({
+  const baseOptions = {
     query,
     types,
     format,
     status,
     statusMode,
     browseAll: true,
-    sortBy: "title",
-    limit: limit + 1,
-  });
+    sortBy,
+    ...(activeLetter ? { startsWith: { letter: activeLetter, field: letterField } } : {}),
+  };
+
+  // Fetch one extra row to detect whether more results exist beyond this
+  // page, without a second count query.
+  const fetched = await searchCatalog({ ...baseOptions, limit: limit + 1 });
   const hasMore = fetched.length > limit;
   const results = hasMore ? fetched.slice(0, limit) : fetched;
   // At the ceiling the next step would clamp straight back to it, so the link
@@ -78,12 +109,33 @@ export default async function BooksPage({
   const atMaxPageSize = limit >= MAX_PAGE_SIZE;
   const canLoadMore = hasMore && !atMaxPageSize;
 
-  const loadMoreParams = new URLSearchParams();
-  if (query) loadMoreParams.set("q", query);
-  if (types) loadMoreParams.set("types", types.join(","));
-  if (format) loadMoreParams.set("format", format);
-  if (status) loadMoreParams.set("status", status.join(","));
-  if (statusMode !== "or") loadMoreParams.set("statusMode", statusMode);
+  const totalCount = await countCatalog(baseOptions);
+
+  // The nav must list every available letter, not collapse to just the
+  // currently-selected one -- so this deliberately queries WITHOUT the
+  // startsWith filter, even when one is active.
+  const availableLetters = supportsLetterJump
+    ? await getAvailableStartsWithLetters(
+        { query, types, format, status, statusMode, browseAll: true, sortBy },
+        letterField,
+      )
+    : [];
+
+  // Shared by "Load more" and the jump-to-letter links -- every param
+  // EXCEPT limit/startsWith, which each caller sets for itself.
+  function buildBaseParams(): URLSearchParams {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (types) params.set("types", types.join(","));
+    if (format) params.set("format", format);
+    if (status) params.set("status", status.join(","));
+    if (statusMode !== "or") params.set("statusMode", statusMode);
+    if (sortBy !== "title") params.set("sort", sortBy);
+    return params;
+  }
+
+  const loadMoreParams = buildBaseParams();
+  if (activeLetter) loadMoreParams.set("startsWith", activeLetter);
   loadMoreParams.set("limit", String(Math.min(limit + DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)));
 
   return (
@@ -114,16 +166,84 @@ export default async function BooksPage({
           defaultValue={query}
           placeholder="Search by title, author, or ISBN"
         />
-        <CatalogFilters types={types} status={status} statusMode={statusMode} format={format} />
+        {/* Carries the active letter forward across a search/sort/filter
+            resubmit -- e.g. typing a new query while browsing letter "M"
+            keeps that letter applied. Deliberately unconditional: if the
+            submitted sort no longer supports letter-jump (createdAt/rating),
+            parseStartsWithLetter's own gating on the read side (via
+            supportsLetterJump above) already drops it silently, matching
+            every other inapplicable-param case in this file. */}
+        {activeLetter && <input type="hidden" name="startsWith" value={activeLetter} />}
+        <label className="flex items-center gap-1 text-sm text-foreground/70">
+          Sort
+          <select
+            name="sort"
+            defaultValue={sortBy}
+            className="rounded-lg border border-perforation bg-background px-2 py-1 text-sm text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <CatalogFilters
+          types={types}
+          status={status}
+          statusMode={statusMode}
+          format={format}
+          defaultOpen={hasActiveFilters}
+        />
+        <Button type="submit">Search</Button>
       </form>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/70">
+        <p>
+          {results.length === totalCount
+            ? `${totalCount} book${totalCount === 1 ? "" : "s"}`
+            : `Showing ${results.length} of ${totalCount} book${totalCount === 1 ? "" : "s"}`}
+        </p>
+        <form action={setDensity.bind(null, "books", density === "compact" ? "comfortable" : "compact")}>
+          <button type="submit" className="text-link underline">
+            {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
+          </button>
+        </form>
+      </div>
+
+      {supportsLetterJump && availableLetters.length > 0 && (
+        <nav className="mb-4 flex flex-wrap gap-2 text-sm" aria-label="Jump to letter">
+          {availableLetters.map((letter) => {
+            const params = buildBaseParams();
+            params.set("startsWith", letter);
+            const isActive = letter === activeLetter;
+            return (
+              <Link
+                key={letter}
+                href={`/books?${params.toString()}`}
+                className={
+                  isActive ? "font-semibold text-foreground-strong underline" : "text-link underline"
+                }
+              >
+                {letter}
+              </Link>
+            );
+          })}
+          {activeLetter && (
+            <Link href={`/books?${buildBaseParams().toString()}`} className="text-foreground/70 underline">
+              Clear
+            </Link>
+          )}
+        </nav>
+      )}
 
       {results.length === 0 ? (
         <p className="text-foreground/70">No books found.</p>
       ) : (
         <>
-          <ul className="space-y-3">
+          <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
             {results.map((result) => (
-              <CatalogResultCard key={result.bookId ?? result.title} result={result} />
+              <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
             ))}
           </ul>
 
