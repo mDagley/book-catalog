@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isTitleMatch, normalizeTitle } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
+import { letterBucket, sortLetters } from "@/lib/alphabetize";
 
 export interface TbrGapItem {
   id: string;
@@ -16,19 +17,6 @@ export interface TbrGapItem {
 // means for a given item.
 function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
   return item.author?.trim() || item.title.trim();
-}
-
-// Strips diacritics before the A-Z test so bucketing agrees with sortKey's
-// locale-aware, base-letter-insensitive sort (an author like "Émile Zola"
-// sorts among the E's -- it should bucket under "E", not fall through to
-// "#" just because its first character isn't plain ASCII).
-function letterBucket(key: string): string {
-  const normalized = key
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toUpperCase();
-  const firstChar = normalized.charAt(0);
-  return /[A-Z]/.test(firstChar) ? firstChar : "#";
 }
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
@@ -239,10 +227,6 @@ export function groupByInitial(items: TbrGapItem[]): TbrGapGroup[] {
     }
   }
 
-  const letters = [...groups.keys()].sort((a, b) => {
-    if (a === "#") return 1;
-    if (b === "#") return -1;
-    return a.localeCompare(b);
-  });
+  const letters = sortLetters([...groups.keys()]);
   return letters.map((letter) => ({ letter, items: groups.get(letter)! }));
 }
