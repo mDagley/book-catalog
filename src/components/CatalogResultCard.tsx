@@ -110,7 +110,7 @@ export function CatalogResultCard({
     return (
       <li data-testid="catalog-row">
         {result.bookId ? (
-          <Link href={`/books/${result.bookId}`} className={rowClassName}>
+          <Link href={`/books/${result.bookId}`} className={rowClassName} aria-label={result.title}>
             {content}
           </Link>
         ) : (
