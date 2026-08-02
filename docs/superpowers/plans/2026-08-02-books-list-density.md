@@ -506,6 +506,8 @@ git commit -m "feat: add author/createdAt/rating sort options to searchCatalog"
 
 ### Task 4: Add `countCatalog`
 
+**Note from Task 2's code review:** `buildCatalogWhere` computes `includePhysical`/`includeEbook`/`includeAudiobook` internally and discards them; `searchCatalog` recomputes the same expressions from `options.types` for its own result-shaping. `countCatalog` doesn't need these flags at all (it only needs `buildCatalogWhere`'s `where` clause), so this doesn't block Task 4 — just don't add a fourth independent recomputation of the same normalization if you find yourself needing one. If Task 5's `getAvailableStartsWithLetters` or `resolveStartsWithIds` end up needing these flags too, that's the point to actually extract a shared `resolveTypeInclusion(options.types)` helper rather than copying the expression again.
+
 **Files:**
 - Modify: `src/lib/search.ts`
 - Test: `src/lib/search.test.ts`
