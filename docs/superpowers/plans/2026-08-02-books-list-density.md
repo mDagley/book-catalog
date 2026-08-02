@@ -1714,7 +1714,10 @@ export default async function BooksPage({
   // under "recently added" or "rating" is silently ignored, matching every
   // other parse* helper's treatment of an inapplicable/malformed param.
   const supportsLetterJump = sortBy === "title" || sortBy === "author";
-  const letterField = sortBy === "author" ? "author" : "title";
+  // Explicit annotation needed -- TypeScript infers this ternary as plain
+  // `string`, not the `"title" | "author"` literal union startsWith.field
+  // expects, without it (found during Task 12's implementation).
+  const letterField: "title" | "author" = sortBy === "author" ? "author" : "title";
   const activeLetter = supportsLetterJump ? parseStartsWithLetter(startsWithParam) : undefined;
 
   const density = await getDensity("books");
