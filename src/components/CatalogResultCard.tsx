@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReadStatus } from "@prisma/client";
 import type { SearchResult } from "@/lib/search";
+import type { Density } from "@/lib/density";
 import { FORMAT_LABELS } from "@/components/CopyFormFields";
 import { READ_STATUS_LABELS, ratingStars } from "@/components/ReadingProgressFields";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
@@ -17,21 +18,24 @@ const STATUS_CLASS = {
   TO_READ: "text-foreground/70",
 } satisfies Record<ReadStatus, string>;
 
-interface MetaPart {
+export interface MetaPart {
   key: string;
   label: string;
   className?: string;
   ariaLabel?: string;
 }
 
-// One catalog entry as rendered in a search/browse result list -- shared
-// between the home page's unified search and /books' "All Books" browse
-// view, both of which render searchCatalog() results identically.
-export function CatalogResultCard({ result }: { result: SearchResult }) {
-  const metaParts: MetaPart[] = [
+// Comfortable shows each physical copy's publisher/year; compact strips
+// that down to just the format name -- per the design spec, publisher/year
+// is "the bulk of today's meta line and rarely what you scan for".
+export function buildMetaParts(result: SearchResult, density: Density): MetaPart[] {
+  return [
     ...result.physicalCopies.map((copy) => ({
       key: `physical-${copy.id}`,
-      label: `${FORMAT_LABELS[copy.format]}${copy.publisher ? `, ${copy.publisher}` : ""}${copy.publishYear ? ` ${copy.publishYear}` : ""}`,
+      label:
+        density === "comfortable"
+          ? `${FORMAT_LABELS[copy.format]}${copy.publisher ? `, ${copy.publisher}` : ""}${copy.publishYear ? ` ${copy.publishYear}` : ""}`
+          : FORMAT_LABELS[copy.format],
     })),
     ...(result.hasEbook ? [{ key: "ebook", label: "Ebook" }] : []),
     ...(result.hasAudiobook ? [{ key: "audiobook", label: "Audiobook" }] : []),
@@ -54,9 +58,70 @@ export function CatalogResultCard({ result }: { result: SearchResult }) {
         ]
       : []),
   ];
+}
+
+// One catalog entry as rendered in a search/browse result list -- shared
+// between the home page's unified search and /books' "All Books" browse
+// view. `density` defaults to "comfortable" (the home page's own default;
+// /books passes its own cookie-backed value explicitly).
+export function CatalogResultCard({
+  result,
+  density = "comfortable",
+}: {
+  result: SearchResult;
+  density?: Density;
+}) {
+  const metaParts = buildMetaParts(result, density);
+
+  if (density === "compact") {
+    const rowClassName =
+      "relative flex items-center gap-3 rounded-xl border border-dashed border-perforation bg-surface p-2";
+    const content = (
+      <>
+        {result.readStatus === "READ" && (
+          <PandaStamp
+            title="Read"
+            className="absolute right-2 top-2 h-4 w-4 text-status-positive"
+          />
+        )}
+        <CoverThumbnail coverImagePath={result.coverImagePath} size="compact" />
+        <div className="min-w-0 flex-1">
+          <p
+            className="truncate font-display font-semibold text-foreground-strong"
+            title={result.title}
+          >
+            {result.title}
+          </p>
+          {result.author && <p className="truncate text-sm text-foreground/70">{result.author}</p>}
+          {metaParts.length > 0 && (
+            <p className="flex flex-wrap items-center font-mono text-xs uppercase tracking-wide text-foreground/70">
+              {metaParts.map((part, index) => (
+                <span key={part.key} className={part.className} aria-label={part.ariaLabel}>
+                  {index > 0 && <span className="mx-1 text-foreground/40">·</span>}
+                  {part.label}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      </>
+    );
+
+    return (
+      <li data-testid="catalog-row">
+        {result.bookId ? (
+          <Link href={`/books/${result.bookId}`} className={rowClassName}>
+            {content}
+          </Link>
+        ) : (
+          <div className={rowClassName}>{content}</div>
+        )}
+      </li>
+    );
+  }
 
   return (
-    <TicketCard className="relative p-3">
+    <TicketCard className="relative p-3" data-testid="catalog-row">
       {result.readStatus === "READ" && (
         <PandaStamp title="Read" className="absolute right-3 top-3 h-5 w-5 text-status-positive" />
       )}
