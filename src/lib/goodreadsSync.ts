@@ -208,7 +208,6 @@ function createShelfMatcher(books: StatusSyncBook[]): ShelfMatcher {
 async function applyShelfToBooks(
   shelf: GoodreadsShelf,
   items: GoodreadsBook[],
-  books: StatusSyncBook[],
   matcher: ShelfMatcher,
 ): Promise<void> {
   const targetStatus = SHELF_READ_STATUS[shelf];
@@ -231,12 +230,12 @@ async function applyShelfToBooks(
       data,
       select: STATUS_SYNC_BOOK_SELECT,
     });
-    // `match` is the actual element from `books` (not a copy), so mutating
-    // it in place keeps the in-memory list consistent with the DB for later
-    // shelf passes -- no re-scan needed, and no risk of a stale `findIndex`
-    // miss silently no-op'ing (assigning to `books[-1]`) the way a second
-    // array search could. Only readStatus/rating change, never title, so
-    // the matcher built from these rows stays valid across all three
+    // `match` is the actual element from the `books` array the caller's
+    // matcher was built from (not a copy), so mutating it in place keeps
+    // that array consistent with the DB for later shelf passes -- no
+    // re-scan needed, and no risk of a stale `findIndex` miss silently
+    // no-op'ing the way a second array search could. Only readStatus/rating
+    // change, never title, so the matcher stays valid across all three
     // shelves.
     Object.assign(match, updated);
   }
@@ -578,7 +577,7 @@ export async function syncGoodreadsTbr(userId: string): Promise<{ synced: number
   // mutates readStatus/rating, never title.
   const matcher = createShelfMatcher(books);
   for (const shelf of STATUS_SYNC_SHELVES) {
-    await applyShelfToBooks(shelf, shelfItems[shelf], books, matcher);
+    await applyShelfToBooks(shelf, shelfItems[shelf], matcher);
   }
 
   const synced = STATUS_SYNC_SHELVES.reduce((sum, shelf) => sum + shelfItems[shelf].length, 0);
