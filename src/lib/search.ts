@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeIsbn } from "@/lib/isbn";
 import { resolveListingCover } from "@/lib/listingCover";
+import { letterBucket, sortLetters } from "@/lib/alphabetize";
 import type { Format, Prisma, ReadStatus } from "@prisma/client";
 
 export interface SearchResultCopy {
@@ -31,7 +32,10 @@ export interface SearchOptions {
   status?: ReadStatusFilterValue[];
   statusMode?: StatusFilterMode;
   browseAll?: boolean;
-  sortBy?: "id" | "title";
+  sortBy?: "id" | "title" | "author" | "createdAt" | "rating";
+  // Not SQL-expressible against this schema's default collation (see the
+  // module comment above resolveStartsWithIds) -- applied in JS.
+  startsWith?: { letter: string; field: "title" | "author" };
   limit?: number;
 }
 
@@ -92,6 +96,21 @@ export function parseStatusModeParam(value: string | undefined): StatusFilterMod
   return value === "and" ? "and" : "or";
 }
 
+const VALID_SORT_VALUES = ["title", "author", "createdAt", "rating"] as const;
+
+export function parseSortParam(
+  value: string | undefined,
+): "title" | "author" | "createdAt" | "rating" {
+  return value && (VALID_SORT_VALUES as readonly string[]).includes(value)
+    ? (value as "title" | "author" | "createdAt" | "rating")
+    : "title";
+}
+
+export function parseStartsWithLetter(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value === "#" || /^[A-Za-z]$/.test(value) ? value.toUpperCase() : undefined;
+}
+
 // "and" is meaningful when combining a status with "unrated" (e.g.
 // "reading AND unrated"); ANDing two distinct readStatus values together
 // isn't a separate case to guard against -- a Book's readStatus is a
@@ -109,27 +128,30 @@ export function buildStatusWhere(
   return statusMode === "and" ? { AND: statusConditions } : { OR: statusConditions };
 }
 
-export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
+// True when neither text/ISBN search nor any filter is active and the
+// caller didn't opt into browsing everything -- the historical "empty
+// unfiltered home page" behavior, shared by searchCatalog, countCatalog,
+// and getAvailableStartsWithLetters so all three agree on when there's
+// nothing to look up.
+function hasNoActiveQuery(options: SearchOptions): boolean {
+  const trimmed = options.query?.trim() ?? "";
+  const types = options.types && options.types.length > 0 ? options.types : undefined;
+  const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
+  return (
+    !(options.browseAll ?? false) &&
+    !trimmed &&
+    !types &&
+    !options.format &&
+    !statusValues &&
+    !options.startsWith
+  );
+}
+
+export function buildCatalogWhere(options: SearchOptions): Prisma.BookWhereInput {
   const trimmed = options.query?.trim() ?? "";
   const types = options.types && options.types.length > 0 ? options.types : undefined;
   const format = options.format;
   const statusValues = options.status && options.status.length > 0 ? options.status : undefined;
-  const browseAll = options.browseAll ?? false;
-  const sortBy = options.sortBy ?? "id";
-
-  // Throws rather than silently ignoring a bad value: dropping an invalid
-  // `limit` would turn a caller bug into an unbounded full-catalog query --
-  // exactly the performance problem pagination exists to prevent -- and the
-  // failure would be invisible until the catalog grew large enough to hurt.
-  // Matches this codebase's existing preference for loud failure over silent
-  // degradation. Floats are rejected outright rather than truncated, so a
-  // caller doing arithmetic on a page size finds out immediately.
-  const limit = options.limit;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
-  }
-
-  if (!browseAll && !trimmed && !types && !format && !statusValues) return [];
 
   const includePhysical = !types || types.includes("physical");
   const includeEbook = !types || types.includes("ebook");
@@ -180,26 +202,127 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     });
   }
 
-  const books = await prisma.book.findMany({
-    where: { AND: filters },
+  return { AND: filters };
+}
+
+// Secondary `id` sort breaks ties for books sharing a title -- without it,
+// Postgres doesn't guarantee stable ordering among tied rows, so the same
+// query could return a different order across runs as the catalog grows.
+function buildOrderBy(
+  sortBy: NonNullable<SearchOptions["sortBy"]>,
+): Prisma.BookOrderByWithRelationInput[] {
+  switch (sortBy) {
+    case "title":
+      return [{ title: "asc" }, { id: "asc" }];
+    case "author":
+      return [{ author: { sort: "asc", nulls: "last" } }, { title: "asc" }, { id: "asc" }];
+    case "createdAt":
+      return [{ createdAt: "desc" }, { id: "desc" }];
+    case "rating":
+      return [{ rating: { sort: "desc", nulls: "last" } }, { title: "asc" }, { id: "asc" }];
+    case "id":
+      return [{ id: "asc" }];
+  }
+}
+
+function fetchBooksWithDetails(
+  where: Prisma.BookWhereInput,
+  orderBy: Prisma.BookOrderByWithRelationInput[],
+  format: Format | undefined,
+  take?: number,
+) {
+  return prisma.book.findMany({
+    where,
     include: {
       copies: { where: format ? { format } : undefined },
       ebookCopies: { select: { coverImagePath: true } },
       audiobookCopies: { select: { coverImagePath: true } },
     },
-    // Secondary `id` sort breaks ties for books sharing a title -- without
-    // it, Postgres doesn't guarantee stable ordering among tied rows, so
-    // the same query could return a different order across runs as the
-    // catalog grows.
-    orderBy: sortBy === "title" ? [{ title: "asc" }, { id: "asc" }] : { id: "asc" },
-    // `limit` is opt-in -- omitted entirely (rather than defaulted) so the
+    orderBy,
+    // `take` is opt-in -- omitted entirely (rather than defaulted) so the
     // home-page search caller, which never passes it, keeps its existing
-    // unlimited behavior. Validated above rather than passed through raw:
+    // unlimited behavior. Validated by searchCatalog before it gets here:
     // Prisma reads a NEGATIVE take as "the last N rows", so an unvalidated
     // -5 would silently return rows from the opposite end of the ordering
     // instead of erroring (confirmed empirically).
-    ...(limit !== undefined ? { take: limit } : {}),
+    ...(take !== undefined ? { take } : {}),
   });
+}
+
+type BookWithDetails = Awaited<ReturnType<typeof fetchBooksWithDetails>>[number];
+
+// A letter filter can't be pushed into the SQL WHERE clause: it depends on
+// letterBucket's diacritic-stripping (see alphabetize.ts), and Postgres's
+// default collation doesn't fold accents the way ILIKE would need to for
+// that to work. Instead this scans a lightweight id/title/author-only
+// projection (no joins -- cheap even at full-catalog scale, the same shape
+// as the 3ms-median aggregate queries measured for /stats against a
+// 2000-book fixture), buckets each row in JS, and returns the matching ids
+// in the query's own sort order.
+async function resolveStartsWithIds(
+  startsWith: { letter: string; field: "title" | "author" },
+  where: Prisma.BookWhereInput,
+  orderBy: Prisma.BookOrderByWithRelationInput[],
+): Promise<string[]> {
+  const rows = await prisma.book.findMany({
+    where,
+    select: { id: true, title: true, author: true },
+    orderBy,
+  });
+  return rows
+    .filter(
+      (row) =>
+        letterBucket(startsWith.field === "title" ? row.title : (row.author ?? "")) ===
+        startsWith.letter,
+    )
+    .map((row) => row.id);
+}
+
+export async function searchCatalog(options: SearchOptions): Promise<SearchResult[]> {
+  // Throws rather than silently ignoring a bad value: dropping an invalid
+  // `limit` would turn a caller bug into an unbounded full-catalog query --
+  // exactly the performance problem pagination exists to prevent -- and the
+  // failure would be invisible until the catalog grew large enough to hurt.
+  // Validated before the early return below, so a bad `limit` throws even
+  // when no query/filter is active (e.g. `searchCatalog({ limit: -5 })`).
+  const limit = options.limit;
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error(`searchCatalog: limit must be a positive integer, received ${limit}`);
+  }
+
+  if (hasNoActiveQuery(options)) return [];
+
+  const types = options.types && options.types.length > 0 ? options.types : undefined;
+  const format = options.format;
+  const includePhysical = !types || types.includes("physical");
+  const includeEbook = !types || types.includes("ebook");
+  const includeAudiobook = !types || types.includes("audiobook");
+
+  const where = buildCatalogWhere(options);
+  const orderBy = buildOrderBy(options.sortBy ?? "id");
+
+  let books: BookWithDetails[];
+  if (options.startsWith) {
+    const ids = await resolveStartsWithIds(options.startsWith, where, orderBy);
+    const pageIds = limit !== undefined ? ids.slice(0, limit) : ids;
+    if (pageIds.length === 0) {
+      books = [];
+    } else {
+      const rows = await fetchBooksWithDetails(
+        { AND: [where, { id: { in: pageIds } }] },
+        orderBy,
+        format,
+      );
+      // Prisma's `id: { in: ... }` does not preserve the given array's
+      // order, so the already-correctly-sorted `pageIds` order is restored.
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      books = pageIds
+        .map((id) => byId.get(id))
+        .filter((row): row is NonNullable<typeof row> => row !== undefined);
+    }
+  } else {
+    books = await fetchBooksWithDetails(where, orderBy, format, limit);
+  }
 
   return books.map((book) => ({
     title: book.title,
@@ -228,4 +351,32 @@ export async function searchCatalog(options: SearchOptions): Promise<SearchResul
     rating: book.rating,
     coverImagePath: resolveListingCover(book),
   }));
+}
+
+export async function countCatalog(options: SearchOptions): Promise<number> {
+  if (hasNoActiveQuery(options)) return 0;
+  const where = buildCatalogWhere(options);
+  if (options.startsWith) {
+    const orderBy = buildOrderBy(options.sortBy ?? "id");
+    const ids = await resolveStartsWithIds(options.startsWith, where, orderBy);
+    return ids.length;
+  }
+  return prisma.book.count({ where });
+}
+
+// The set of letters that currently have at least one match, for rendering
+// the jump-nav itself -- deliberately ignores `options.startsWith` (the
+// nav must keep listing every available letter, not collapse to just the
+// one currently selected).
+export async function getAvailableStartsWithLetters(
+  options: SearchOptions,
+  field: "title" | "author",
+): Promise<string[]> {
+  if (hasNoActiveQuery(options)) return [];
+  const where = buildCatalogWhere(options);
+  const rows = await prisma.book.findMany({ where, select: { title: true, author: true } });
+  const letters = new Set(
+    rows.map((row) => letterBucket(field === "title" ? row.title : (row.author ?? ""))),
+  );
+  return sortLetters([...letters]);
 }

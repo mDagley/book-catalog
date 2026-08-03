@@ -6,10 +6,13 @@ import {
   parseStatusParam,
   parseStatusModeParam,
 } from "@/lib/search";
+import { getDensity } from "@/lib/density";
+import { setDensity } from "@/lib/actions/density";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { CatalogResultCard } from "@/components/CatalogResultCard";
 import { CatalogFilters } from "@/components/CatalogFilters";
+import { Button } from "@/components/ui/Button";
 
 export const dynamic = "force-dynamic";
 
@@ -37,11 +40,20 @@ export default async function HomePage({
   const status = parseStatusParam(statusParam);
   const statusMode = parseStatusModeParam(statusModeParam);
 
+  const density = await getDensity("home");
   const results = await searchCatalog({ query, types, format, status, statusMode });
-  const hasActiveFilters = Boolean(query || types || format || status);
+  // Whether ANY search input is active (query included) -- used to decide
+  // whether "No matches found" is meaningful (an empty, filter-less page
+  // load should never show it).
+  const hasActiveSearch = Boolean(query || types || format || status);
+  // Whether the filter CHROME specifically is active -- deliberately
+  // excludes `query`, per the design spec: the search box is always
+  // visible regardless of the filter block's state, so typing a query
+  // shouldn't force the types/status/format disclosure open too.
+  const hasActiveFilterChrome = Boolean(types || format || status);
 
   return (
-    <main className="mx-auto max-w-2xl p-4">
+    <main className="mx-auto w-full min-w-0 max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">Book Catalog</h1>
         <RefreshSyncButton />
@@ -54,29 +66,43 @@ export default async function HomePage({
           defaultValue={query}
           placeholder="Do I already own this?"
         />
-        <CatalogFilters types={types} status={status} statusMode={statusMode} format={format} />
+        <CatalogFilters
+          types={types}
+          status={status}
+          statusMode={statusMode}
+          format={format}
+          defaultOpen={hasActiveFilterChrome}
+        />
+        <Button type="submit">Search</Button>
       </form>
 
-      <div className="mb-4 flex gap-4 text-sm">
-        <Link href="/books" className="text-link underline">
-          Manage all books
-        </Link>
-        <Link href="/tbr" className="text-link underline">
-          TBR gap view
-        </Link>
-        <Link href="/stats" className="text-link underline">
-          Library stats
-        </Link>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm">
+        <div className="flex gap-4">
+          <Link href="/books" className="text-link underline">
+            Manage all books
+          </Link>
+          <Link href="/tbr" className="text-link underline">
+            TBR gap view
+          </Link>
+          <Link href="/stats" className="text-link underline">
+            Library stats
+          </Link>
+        </div>
+        <form action={setDensity.bind(null, "home", density === "compact" ? "comfortable" : "compact")}>
+          <button type="submit" className="text-link underline">
+            {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
+          </button>
+        </form>
       </div>
 
-      {hasActiveFilters && results.length === 0 && (
+      {hasActiveSearch && results.length === 0 && (
         <p className="text-foreground/70">No matches found.</p>
       )}
 
       {results.length > 0 && (
-        <ul className="space-y-3">
+        <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
           {results.map((result) => (
-            <CatalogResultCard key={result.bookId ?? result.title} result={result} />
+            <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
           ))}
         </ul>
       )}

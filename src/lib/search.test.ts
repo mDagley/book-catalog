@@ -2,11 +2,16 @@ import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import {
   searchCatalog,
+  countCatalog,
+  getAvailableStartsWithLetters,
   parseFormatParam,
   parseTypesParam,
   parseStatusParam,
   parseStatusModeParam,
+  parseSortParam,
+  parseStartsWithLetter,
   buildStatusWhere,
+  buildCatalogWhere,
 } from "@/lib/search";
 import { saveCoverImage, deleteCoverImage } from "@/lib/coverStorage";
 
@@ -15,16 +20,21 @@ const ONE_PX_PNG_DATA_URL =
 const savedCoverPaths: string[] = [];
 
 afterEach(async () => {
+  // `contains` (not `startsWith`): the startsWith-letter-filter tests below
+  // deliberately put fixture titles' target letter as the literal first
+  // character (e.g. "Mistborn Test Search Letter Combo"), with the
+  // "Test Search" marker elsewhere in the string rather than at the very
+  // start. `startsWith` would silently fail to clean those up.
   await prisma.physicalCopy.deleteMany({
-    where: { book: { title: { startsWith: "Test Search" } } },
+    where: { book: { title: { contains: "Test Search" } } },
   });
   await prisma.ebookCopy.deleteMany({
-    where: { book: { title: { startsWith: "Test Search" } } },
+    where: { book: { title: { contains: "Test Search" } } },
   });
   await prisma.audiobookCopy.deleteMany({
-    where: { book: { title: { startsWith: "Test Search" } } },
+    where: { book: { title: { contains: "Test Search" } } },
   });
-  await prisma.book.deleteMany({ where: { title: { startsWith: "Test Search" } } });
+  await prisma.book.deleteMany({ where: { title: { contains: "Test Search" } } });
   for (const p of savedCoverPaths) {
     await deleteCoverImage(p);
   }
@@ -101,6 +111,18 @@ describe("searchCatalog", () => {
     expect(await searchCatalog({ browseAll: false })).toEqual([]);
   });
 
+  it("treats an empty types array as no filter (still an empty-query result)", async () => {
+    await prisma.book.create({ data: { title: "Test Search Empty Types Array" } });
+
+    expect(await searchCatalog({ types: [] })).toEqual([]);
+  });
+
+  it("returns an empty array for an empty status array, not an unbounded scan (mirrors the types: [] fix)", async () => {
+    await prisma.book.create({ data: { title: "Test Search Empty Status Array" } });
+
+    expect(await searchCatalog({ status: [] })).toEqual([]);
+  });
+
   it("sorts by title ascending when sortBy is 'title'", async () => {
     await prisma.book.create({ data: { title: "Test Search Sort Zebra" } });
     await prisma.book.create({ data: { title: "Test Search Sort Apple" } });
@@ -157,6 +179,106 @@ describe("searchCatalog", () => {
 
     const ourResults = results.filter((r) => r.title.startsWith("Test Search Sort Order"));
     expect(ourResults.map((r) => r.bookId)).toEqual([first.id, second.id]);
+  });
+
+  it("sorts by author ascending when sortBy is 'author', with authorless books last", async () => {
+    await prisma.book.create({ data: { title: "Test Search Author Sort No Author" } });
+    await prisma.book.create({ data: { title: "Test Search Author Sort Zed", author: "Zed" } });
+    await prisma.book.create({ data: { title: "Test Search Author Sort Amy", author: "Amy" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "author" });
+
+    const ours = results.filter((r) => r.title.startsWith("Test Search Author Sort"));
+    expect(ours.map((r) => r.title)).toEqual([
+      "Test Search Author Sort Amy",
+      "Test Search Author Sort Zed",
+      "Test Search Author Sort No Author",
+    ]);
+  });
+
+  it("breaks author-sort ties by title, then keeps a stable order across repeated calls", async () => {
+    await prisma.book.create({ data: { title: "Test Search Author Tie B", author: "Same Author" } });
+    await prisma.book.create({ data: { title: "Test Search Author Tie A", author: "Same Author" } });
+
+    const first = await searchCatalog({ browseAll: true, sortBy: "author" });
+    const second = await searchCatalog({ browseAll: true, sortBy: "author" });
+
+    const titlesFirst = first
+      .filter((r) => r.title.startsWith("Test Search Author Tie"))
+      .map((r) => r.title);
+    const titlesSecond = second
+      .filter((r) => r.title.startsWith("Test Search Author Tie"))
+      .map((r) => r.title);
+    expect(titlesFirst).toEqual(["Test Search Author Tie A", "Test Search Author Tie B"]);
+    expect(titlesSecond).toEqual(titlesFirst);
+  });
+
+  it("sorts by createdAt descending when sortBy is 'createdAt'", async () => {
+    const first = await prisma.book.create({ data: { title: "Test Search Created First" } });
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await prisma.book.create({ data: { title: "Test Search Created Second" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "createdAt" });
+
+    const ours = results.filter((r) => r.bookId === first.id || r.bookId === second.id);
+    expect(ours.map((r) => r.bookId)).toEqual([second.id, first.id]);
+  });
+
+  it("breaks createdAt-sort ties by id descending", async () => {
+    const tiedTimestamp = new Date("2020-01-01T00:00:00Z");
+    const first = await prisma.book.create({
+      data: { title: "Test Search CreatedAt Tie A", createdAt: tiedTimestamp },
+    });
+    const second = await prisma.book.create({
+      data: { title: "Test Search CreatedAt Tie B", createdAt: tiedTimestamp },
+    });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "createdAt" });
+
+    const ours = results.filter((r) => r.bookId === first.id || r.bookId === second.id);
+    expect(ours.map((r) => r.bookId)).toEqual([second.id, first.id]);
+  });
+
+  it("sorts by rating descending when sortBy is 'rating', with unrated books last", async () => {
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Unrated" } });
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Three", rating: 3 } });
+    await prisma.book.create({ data: { title: "Test Search Rating Sort Five", rating: 5 } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "rating" });
+
+    const ours = results.filter((r) => r.title.startsWith("Test Search Rating Sort"));
+    expect(ours.map((r) => r.title)).toEqual([
+      "Test Search Rating Sort Five",
+      "Test Search Rating Sort Three",
+      "Test Search Rating Sort Unrated",
+    ]);
+  });
+
+  it("breaks rating-sort ties by title, for two books sharing the same rating", async () => {
+    await prisma.book.create({ data: { title: "Test Search Rating Tie B", rating: 4 } });
+    await prisma.book.create({ data: { title: "Test Search Rating Tie A", rating: 4 } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "rating" });
+
+    const ours = results
+      .filter((r) => r.title.startsWith("Test Search Rating Tie"))
+      .map((r) => r.title);
+    expect(ours).toEqual(["Test Search Rating Tie A", "Test Search Rating Tie B"]);
+  });
+
+  it("applies sort before the limit, not after", async () => {
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Zebra" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Mango" } });
+    await prisma.book.create({ data: { title: "Test Search Sort Before Limit Apple" } });
+
+    const results = await searchCatalog({ browseAll: true, sortBy: "title", limit: 2 });
+
+    const ours = results
+      .filter((r) => r.title.startsWith("Test Search Sort Before Limit"))
+      .map((r) => r.title);
+    // Of the full sorted order (Apple, Mango, Zebra), the first two -- not
+    // two arbitrary rows re-sorted after an arbitrary limit.
+    expect(ours).toEqual(["Test Search Sort Before Limit Apple", "Test Search Sort Before Limit Mango"]);
   });
 
   it("supports standalone browse by ownership type with no query text", async () => {
@@ -503,6 +625,17 @@ describe("buildStatusWhere", () => {
   });
 });
 
+describe("buildCatalogWhere", () => {
+  it("returns an empty AND for no filters and no query", () => {
+    expect(buildCatalogWhere({})).toEqual({ AND: [] });
+  });
+
+  it("combines a text query and a types filter into separate AND clauses", () => {
+    const where = buildCatalogWhere({ query: "dune", types: ["ebook"] });
+    expect(where.AND).toHaveLength(2);
+  });
+});
+
 describe("parseFormatParam", () => {
   it("returns undefined for an undefined or empty value", () => {
     expect(parseFormatParam(undefined)).toBeUndefined();
@@ -609,5 +742,303 @@ describe("searchCatalog limit validation", () => {
 
   it("accepts a positive integer", async () => {
     await expect(searchCatalog({ browseAll: true, limit: 1 })).resolves.toBeInstanceOf(Array);
+  });
+
+  it("throws for an invalid limit even with no query or filter active", async () => {
+    await expect(searchCatalog({ limit: -5 })).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe("countCatalog", () => {
+  it("matches the number of rows searchCatalog returns unpaginated, for the same filters", async () => {
+    await prisma.book.create({ data: { title: "Test Search Count One" } });
+    await prisma.book.create({ data: { title: "Test Search Count Two" } });
+
+    const results = await searchCatalog({ query: "Test Search Count" });
+    const count = await countCatalog({ query: "Test Search Count" });
+
+    expect(count).toBe(results.length);
+  });
+
+  it("is independent of limit", async () => {
+    await prisma.book.create({ data: { title: "Test Search Count Limit One" } });
+    await prisma.book.create({ data: { title: "Test Search Count Limit Two" } });
+    await prisma.book.create({ data: { title: "Test Search Count Limit Three" } });
+
+    const count = await countCatalog({ query: "Test Search Count Limit", limit: 1 });
+
+    expect(count).toBe(3);
+  });
+
+  it("returns 0 when there is no query and no filters (matching searchCatalog's empty behavior)", async () => {
+    expect(await countCatalog({})).toBe(0);
+  });
+
+  it("respects browseAll", async () => {
+    const before = await countCatalog({ browseAll: true });
+    await prisma.book.create({ data: { title: "Test Search Count Browse All" } });
+
+    expect(await countCatalog({ browseAll: true })).toBe(before + 1);
+  });
+});
+
+describe("searchCatalog startsWith filter", () => {
+  it("returns only books whose title starts with the given letter, under title sort", async () => {
+    // The target letter must be the fixture title's literal first
+    // character -- letterBucket buckets on the whole string's first char
+    // (see alphabetize.ts / tbrGap.ts's identical convention), so a shared
+    // "Test Search Letter" prefix would bucket every fixture under "T"
+    // regardless of the word that follows. "Test Search Letter" is kept in
+    // the title (just not at the front) so afterEach's `contains` cleanup
+    // still catches it.
+    await prisma.book.create({ data: { title: "Mistborn Test Search Letter" } });
+    await prisma.book.create({ data: { title: "Elantris Test Search Letter" } });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "title",
+      startsWith: { letter: "M", field: "title" },
+    });
+
+    const ours = results.filter((r) => r.title.includes("Test Search Letter"));
+    expect(ours.map((r) => r.title)).toEqual(["Mistborn Test Search Letter"]);
+  });
+
+  it("filters on author, not title, when field is 'author'", async () => {
+    await prisma.book.create({ data: { title: "Test Search Letter Author A", author: "Zed Author" } });
+    await prisma.book.create({ data: { title: "Test Search Letter Author B", author: "Amy Author" } });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "author",
+      startsWith: { letter: "Z", field: "author" },
+    });
+
+    const ours = results.filter((r) => r.title.startsWith("Test Search Letter Author"));
+    expect(ours.map((r) => r.title)).toEqual(["Test Search Letter Author A"]);
+  });
+
+  it("buckets a diacritic-initial author under its unaccented letter", async () => {
+    await prisma.book.create({
+      data: { title: "Test Search Letter Diacritic Book", author: "Émile Diacritic Zola" },
+    });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "author",
+      startsWith: { letter: "E", field: "author" },
+    });
+
+    expect(results.map((r) => r.title)).toContain("Test Search Letter Diacritic Book");
+  });
+
+  it("buckets a non-letter first character under '#'", async () => {
+    await prisma.book.create({ data: { title: "1984 Test Search Letter Hash" } });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "title",
+      startsWith: { letter: "#", field: "title" },
+    });
+
+    expect(results.map((r) => r.title)).toContain("1984 Test Search Letter Hash");
+  });
+
+  it("combines the letter filter with an existing types filter", async () => {
+    // Both fixtures start with "M" -- the point of this test is that the
+    // second book is excluded by the *types* filter (it's physical-only,
+    // no ebook), not by the letter filter, so both must genuinely bucket
+    // under "M" for the assertion to mean anything.
+    await prisma.book.create({
+      data: {
+        title: "Mistborn Test Search Letter Combo",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "search-test-letter-combo-ebook" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Man In The High Castle Test Search Letter Combo",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "title",
+      types: ["ebook"],
+      startsWith: { letter: "M", field: "title" },
+    });
+
+    expect(results.map((r) => r.title)).toContain("Mistborn Test Search Letter Combo");
+    expect(results.map((r) => r.title)).not.toContain(
+      "Man In The High Castle Test Search Letter Combo",
+    );
+  });
+
+  it("applies the letter filter and sort before the limit", async () => {
+    await prisma.book.create({ data: { title: "Mango Test Search Letter Limit" } });
+    await prisma.book.create({ data: { title: "Mars Test Search Letter Limit" } });
+    await prisma.book.create({ data: { title: "Zebra Test Search Letter Limit" } });
+
+    const results = await searchCatalog({
+      browseAll: true,
+      sortBy: "title",
+      startsWith: { letter: "M", field: "title" },
+      limit: 1,
+    });
+
+    const ours = results.filter((r) => r.title.includes("Test Search Letter Limit"));
+    expect(ours.map((r) => r.title)).toEqual(["Mango Test Search Letter Limit"]);
+  });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Copilot review finding on PR #40: hasNoActiveQuery didn't consider
+    // startsWith an active filter, so this returned [] as if nothing was
+    // being asked for -- inconsistent with startsWith being a real filter.
+    await prisma.book.create({ data: { title: "Mistborn Test Search Letter Standalone" } });
+    await prisma.book.create({ data: { title: "Elantris Test Search Letter Standalone" } });
+
+    const results = await searchCatalog({
+      sortBy: "title",
+      startsWith: { letter: "M", field: "title" },
+    });
+
+    const ours = results.filter((r) => r.title.includes("Test Search Letter Standalone"));
+    expect(ours.map((r) => r.title)).toEqual(["Mistborn Test Search Letter Standalone"]);
+  });
+});
+
+describe("countCatalog with a startsWith filter", () => {
+  it("counts only the letter-matching rows, independent of limit", async () => {
+    await prisma.book.create({ data: { title: "Mango Test Search Count Letter" } });
+    await prisma.book.create({ data: { title: "Mars Test Search Count Letter" } });
+    await prisma.book.create({ data: { title: "Zebra Test Search Count Letter" } });
+
+    const count = await countCatalog({
+      query: "Test Search Count Letter",
+      sortBy: "title",
+      startsWith: { letter: "M", field: "title" },
+      limit: 1,
+    });
+
+    expect(count).toBe(2);
+  });
+
+  it("agrees with searchCatalog's row count for a format-only filter (no text query, no startsWith)", async () => {
+    // Flagged by Task 4's code review: countCatalog and searchCatalog share
+    // buildCatalogWhere, but nothing had actually exercised .count() vs
+    // .findMany() agreement on the relation-subquery branch (copies: {
+    // some: { format } }) specifically, only the plain-text-query path.
+    await prisma.book.create({
+      data: { title: "Test Search Count Format Match", copies: { create: { format: "HARDCOVER" } } },
+    });
+    await prisma.book.create({
+      data: { title: "Test Search Count Format NoMatch", copies: { create: { format: "PAPERBACK" } } },
+    });
+
+    const results = await searchCatalog({ browseAll: true, format: "HARDCOVER" });
+    const count = await countCatalog({ browseAll: true, format: "HARDCOVER" });
+
+    const ourResults = results.filter((r) => r.title.startsWith("Test Search Count Format"));
+    expect(count).toBeGreaterThanOrEqual(ourResults.length);
+    // A tighter, scoped check: count restricted to just our fixture titles
+    // via a query, matching searchCatalog's own row count for the same
+    // narrower filter.
+    const scopedResults = await searchCatalog({ query: "Test Search Count Format", format: "HARDCOVER" });
+    const scopedCount = await countCatalog({ query: "Test Search Count Format", format: "HARDCOVER" });
+    expect(scopedCount).toBe(scopedResults.length);
+    expect(scopedResults.map((r) => r.title)).toEqual(["Test Search Count Format Match"]);
+  });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Uses a letter ("Q") no other fixture in this file starts with, so the
+    // unscoped count is precise without needing query/browseAll to narrow it.
+    await prisma.book.create({ data: { title: "Quicksilver Test Search Count Letter Standalone" } });
+
+    const count = await countCatalog({
+      sortBy: "title",
+      startsWith: { letter: "Q", field: "title" },
+    });
+
+    expect(count).toBe(1);
+  });
+});
+
+describe("getAvailableStartsWithLetters", () => {
+  it("returns the distinct sorted letters present, ignoring any active startsWith", async () => {
+    await prisma.book.create({ data: { title: "Mango Test Search Letters Available" } });
+    await prisma.book.create({ data: { title: "Zebra Test Search Letters Available" } });
+
+    const letters = await getAvailableStartsWithLetters(
+      { query: "Test Search Letters Available", browseAll: false },
+      "title",
+    );
+
+    expect(letters).toEqual(["M", "Z"]);
+  });
+
+  it("returns an empty array when nothing matches", async () => {
+    const letters = await getAvailableStartsWithLetters(
+      { query: "Test Search Letters Nonexistent Zzzzz" },
+      "title",
+    );
+
+    expect(letters).toEqual([]);
+  });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Uses a letter ("Q") no other fixture in this file starts with, so the
+    // unscoped result is precise without needing query/browseAll to narrow it.
+    await prisma.book.create({ data: { title: "Quicksilver Test Search Letters Available Standalone" } });
+
+    const letters = await getAvailableStartsWithLetters(
+      { sortBy: "title", startsWith: { letter: "Q", field: "title" } },
+      "title",
+    );
+
+    expect(letters).toEqual(["Q"]);
+  });
+});
+
+describe("parseSortParam", () => {
+  it("returns 'title' for an undefined value", () => {
+    expect(parseSortParam(undefined)).toBe("title");
+  });
+
+  it("returns the value for each valid sort", () => {
+    expect(parseSortParam("title")).toBe("title");
+    expect(parseSortParam("author")).toBe("author");
+    expect(parseSortParam("createdAt")).toBe("createdAt");
+    expect(parseSortParam("rating")).toBe("rating");
+  });
+
+  it("falls back to 'title' for an unrecognized value", () => {
+    expect(parseSortParam("bogus")).toBe("title");
+  });
+
+  it("falls back to 'title' for 'id' (not a user-facing sort option)", () => {
+    expect(parseSortParam("id")).toBe("title");
+  });
+});
+
+describe("parseStartsWithLetter", () => {
+  it("returns undefined for an undefined or empty value", () => {
+    expect(parseStartsWithLetter(undefined)).toBeUndefined();
+    expect(parseStartsWithLetter("")).toBeUndefined();
+  });
+
+  it("uppercases a valid single letter", () => {
+    expect(parseStartsWithLetter("m")).toBe("M");
+  });
+
+  it("accepts '#'", () => {
+    expect(parseStartsWithLetter("#")).toBe("#");
+  });
+
+  it("returns undefined for anything else (multi-char, digit, symbol)", () => {
+    expect(parseStartsWithLetter("mm")).toBeUndefined();
+    expect(parseStartsWithLetter("5")).toBeUndefined();
+    expect(parseStartsWithLetter("$")).toBeUndefined();
   });
 });

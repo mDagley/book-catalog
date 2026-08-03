@@ -74,7 +74,7 @@ export default async function TbrGapPage({
             <ul className="space-y-2">
               {group.items.map((item) => (
                 <TicketCard key={item.id} className="p-3">
-                  <CoverThumbnail coverImagePath={item.coverImagePath} />
+                  <CoverThumbnail coverImagePath={item.coverImagePath} className="mb-2" />
                   <p className="font-medium text-foreground-strong">{item.title}</p>
                   {item.author && <p className="text-sm text-foreground/70">{item.author}</p>}
                 </TicketCard>
