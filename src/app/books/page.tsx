@@ -171,11 +171,11 @@ export default async function BooksPage({
         />
         {/* Carries the active letter forward across a search/sort/filter
             resubmit -- e.g. typing a new query while browsing letter "M"
-            keeps that letter applied. Deliberately unconditional: if the
-            submitted sort no longer supports letter-jump (createdAt/rating),
-            parseStartsWithLetter's own gating on the read side (via
-            supportsLetterJump above) already drops it silently, matching
-            every other inapplicable-param case in this file. */}
+            keeps that letter applied. Unconditional on whether the NEXT sort
+            will support it: if the submitted sort no longer does
+            (createdAt/rating), supportsLetterJump's own gating on the read
+            side already drops it silently, matching every other
+            inapplicable-param case in this file. */}
         {activeLetter && <input type="hidden" name="startsWith" value={activeLetter} />}
         <label className="flex items-center gap-1 text-sm text-foreground/70">
           Sort
@@ -198,7 +198,7 @@ export default async function BooksPage({
           format={format}
           defaultOpen={hasActiveFilters}
         />
-        <Button type="submit">Search</Button>
+        <Button type="submit" variant="secondary">Search</Button>
       </form>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/70">
