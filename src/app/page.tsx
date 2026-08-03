@@ -42,7 +42,15 @@ export default async function HomePage({
 
   const density = await getDensity("home");
   const results = await searchCatalog({ query, types, format, status, statusMode });
-  const hasActiveFilters = Boolean(query || types || format || status);
+  // Whether ANY search input is active (query included) -- used to decide
+  // whether "No matches found" is meaningful (an empty, filter-less page
+  // load should never show it).
+  const hasActiveSearch = Boolean(query || types || format || status);
+  // Whether the filter CHROME specifically is active -- deliberately
+  // excludes `query`, per the design spec: the search box is always
+  // visible regardless of the filter block's state, so typing a query
+  // shouldn't force the types/status/format disclosure open too.
+  const hasActiveFilterChrome = Boolean(types || format || status);
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-2xl p-4">
@@ -63,7 +71,7 @@ export default async function HomePage({
           status={status}
           statusMode={statusMode}
           format={format}
-          defaultOpen={hasActiveFilters}
+          defaultOpen={hasActiveFilterChrome}
         />
         <Button type="submit">Search</Button>
       </form>
@@ -87,7 +95,7 @@ export default async function HomePage({
         </form>
       </div>
 
-      {hasActiveFilters && results.length === 0 && (
+      {hasActiveSearch && results.length === 0 && (
         <p className="text-foreground/70">No matches found.</p>
       )}
 

@@ -77,7 +77,10 @@ export default async function BooksPage({
   const activeLetter = supportsLetterJump ? parseStartsWithLetter(startsWithParam) : undefined;
 
   const density = await getDensity("books");
-  const hasActiveFilters = Boolean(query || types || format || status);
+  // Deliberately excludes `query` -- per the design spec, the search box is
+  // always visible regardless of the filter chrome's state, so typing a
+  // query shouldn't force the types/status/format block open too.
+  const hasActiveFilters = Boolean(types || format || status);
 
   // Number() rather than parseInt() so partially-numeric junk ("50abc") is
   // rejected outright instead of silently becoming 50. Anything not a
