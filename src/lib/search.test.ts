@@ -891,6 +891,22 @@ describe("searchCatalog startsWith filter", () => {
     const ours = results.filter((r) => r.title.includes("Test Search Letter Limit"));
     expect(ours.map((r) => r.title)).toEqual(["Mango Test Search Letter Limit"]);
   });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Copilot review finding on PR #40: hasNoActiveQuery didn't consider
+    // startsWith an active filter, so this returned [] as if nothing was
+    // being asked for -- inconsistent with startsWith being a real filter.
+    await prisma.book.create({ data: { title: "Mistborn Test Search Letter Standalone" } });
+    await prisma.book.create({ data: { title: "Elantris Test Search Letter Standalone" } });
+
+    const results = await searchCatalog({
+      sortBy: "title",
+      startsWith: { letter: "M", field: "title" },
+    });
+
+    const ours = results.filter((r) => r.title.includes("Test Search Letter Standalone"));
+    expect(ours.map((r) => r.title)).toEqual(["Mistborn Test Search Letter Standalone"]);
+  });
 });
 
 describe("countCatalog with a startsWith filter", () => {
@@ -934,6 +950,19 @@ describe("countCatalog with a startsWith filter", () => {
     expect(scopedCount).toBe(scopedResults.length);
     expect(scopedResults.map((r) => r.title)).toEqual(["Test Search Count Format Match"]);
   });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Uses a letter ("Q") no other fixture in this file starts with, so the
+    // unscoped count is precise without needing query/browseAll to narrow it.
+    await prisma.book.create({ data: { title: "Quicksilver Test Search Count Letter Standalone" } });
+
+    const count = await countCatalog({
+      sortBy: "title",
+      startsWith: { letter: "Q", field: "title" },
+    });
+
+    expect(count).toBe(1);
+  });
 });
 
 describe("getAvailableStartsWithLetters", () => {
@@ -956,6 +985,19 @@ describe("getAvailableStartsWithLetters", () => {
     );
 
     expect(letters).toEqual([]);
+  });
+
+  it("treats startsWith as an active filter on its own, without browseAll or a query", async () => {
+    // Uses a letter ("Q") no other fixture in this file starts with, so the
+    // unscoped result is precise without needing query/browseAll to narrow it.
+    await prisma.book.create({ data: { title: "Quicksilver Test Search Letters Available Standalone" } });
+
+    const letters = await getAvailableStartsWithLetters(
+      { sortBy: "title", startsWith: { letter: "Q", field: "title" } },
+      "title",
+    );
+
+    expect(letters).toEqual(["Q"]);
   });
 });
 

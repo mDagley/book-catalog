@@ -142,7 +142,8 @@ function hasNoActiveQuery(options: SearchOptions): boolean {
     !trimmed &&
     !types &&
     !options.format &&
-    !statusValues
+    !statusValues &&
+    !options.startsWith
   );
 }
 
