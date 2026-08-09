@@ -10,20 +10,21 @@ import {
   type BookFormState,
 } from "@/lib/books";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
+import { stringField, optionalStringField } from "@/lib/formData";
 
 export async function createBookWithCopy(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
   const result = await createBookWithCopyData({
-    title: (formData.get("title") as string) ?? "",
-    author: (formData.get("author") as string) ?? "",
-    isbn: (formData.get("isbn") as string) ?? "",
-    format: (formData.get("format") as string) ?? "",
-    publisher: (formData.get("publisher") as string) ?? "",
-    publishYear: (formData.get("publishYear") as string) ?? "",
-    specialNotes: (formData.get("specialNotes") as string) ?? "",
-    coverImagePath: formData.get("coverImagePath")?.toString(),
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    isbn: stringField(formData, "isbn"),
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
+    coverImagePath: optionalStringField(formData, "coverImagePath"),
   });
 
   if ("error" in result) {
@@ -57,16 +58,16 @@ export async function createBookFromScan(
   formData: FormData,
 ): Promise<ScanFormState> {
   const values = {
-    title: formData.get("title")?.toString() ?? "",
-    author: formData.get("author")?.toString() ?? "",
-    format: formData.get("format")?.toString() ?? "",
-    publisher: formData.get("publisher")?.toString() ?? "",
-    publishYear: formData.get("publishYear")?.toString() ?? "",
-    specialNotes: formData.get("specialNotes")?.toString() ?? "",
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
   };
 
-  const selectedCoverDataUrl = formData.get("selectedCoverDataUrl")?.toString() ?? "";
-  const selectedCoverSource = formData.get("selectedCoverSource")?.toString();
+  const selectedCoverDataUrl = stringField(formData, "selectedCoverDataUrl");
+  const selectedCoverSource = optionalStringField(formData, "selectedCoverSource");
 
   let coverImagePath: string | undefined;
   if (selectedCoverDataUrl) {
@@ -90,7 +91,7 @@ export async function createBookFromScan(
   const result = await createBookWithCopyData({
     title: values.title,
     author: values.author,
-    isbn: formData.get("isbn")?.toString() ?? "",
+    isbn: stringField(formData, "isbn"),
     format: values.format,
     publisher: values.publisher,
     publishYear: values.publishYear,
@@ -116,9 +117,9 @@ export async function updateBook(
   formData: FormData,
 ): Promise<BookFormState> {
   const result = await updateBookData(bookId, {
-    title: (formData.get("title") as string) ?? "",
-    author: (formData.get("author") as string) ?? "",
-    isbn: (formData.get("isbn") as string) ?? "",
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    isbn: stringField(formData, "isbn"),
   });
 
   if ("error" in result) {
@@ -137,13 +138,8 @@ export async function updateSeries(
   formData: FormData,
 ): Promise<BookFormState> {
   const result = await updateSeriesData(bookId, {
-    // `?.toString()`, not `as string` -- formData.get returns string | File |
-    // null, and the cast is erased at runtime, so a crafted multipart request
-    // sending a File here would reach updateSeriesData and throw on .trim(),
-    // turning bad input into a 500. Matches the safer idiom already used by
-    // createBookFromScan in this same file.
-    seriesName: formData.get("seriesName")?.toString() ?? "",
-    seriesPosition: formData.get("seriesPosition")?.toString() ?? "",
+    seriesName: stringField(formData, "seriesName"),
+    seriesPosition: stringField(formData, "seriesPosition"),
   });
 
   if ("error" in result) {
