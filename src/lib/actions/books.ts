@@ -11,24 +11,43 @@ import {
 } from "@/lib/books";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
 
+// A <select>/<input> field always submits as a string, but FormData.get()'s
+// return type is `FormDataEntryValue | null` (string | File | null) --
+// `as string` would silently keep a `File` instance if this field somehow
+// arrived as one (e.g. a hand-crafted multipart request), and `?.toString()`
+// isn't a safe substitute either: File/Blob inherit Object.prototype's
+// Symbol.toStringTag-aware toString(), so `file.toString()` returns the real
+// string `"[object File]"` -- not undefined, not a crash. That string is
+// non-empty, passes `.trim()`/required-field checks downstream, and would
+// get persisted as a book's actual title/author/etc. Checking the real
+// runtime type instead means a tampered request's field is coerced to ""
+// and rejected by validation, rather than silently writing garbage data.
+function stringField(formData: FormData, name: string): string {
+  const value = formData.get(name);
+  return typeof value === "string" ? value : "";
+}
+
+// Same guarantee as stringField, for fields where "absent" (undefined) is a
+// meaningful, distinct state from "present but empty" -- coerces a File (or
+// anything else non-string) to undefined rather than "".
+function optionalStringField(formData: FormData, name: string): string | undefined {
+  const value = formData.get(name);
+  return typeof value === "string" ? value : undefined;
+}
+
 export async function createBookWithCopy(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
-  // `?.toString()`, not `as string` -- formData.get returns string | File |
-  // null, and the cast is erased at runtime, so a crafted multipart request
-  // sending a File here would reach createBookWithCopyData and throw on
-  // .trim(), turning bad input into a 500. Matches the safer idiom already
-  // used by createBookFromScan/updateSeries in this same file.
   const result = await createBookWithCopyData({
-    title: formData.get("title")?.toString() ?? "",
-    author: formData.get("author")?.toString() ?? "",
-    isbn: formData.get("isbn")?.toString() ?? "",
-    format: formData.get("format")?.toString() ?? "",
-    publisher: formData.get("publisher")?.toString() ?? "",
-    publishYear: formData.get("publishYear")?.toString() ?? "",
-    specialNotes: formData.get("specialNotes")?.toString() ?? "",
-    coverImagePath: formData.get("coverImagePath")?.toString(),
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    isbn: stringField(formData, "isbn"),
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
+    coverImagePath: optionalStringField(formData, "coverImagePath"),
   });
 
   if ("error" in result) {
@@ -62,16 +81,16 @@ export async function createBookFromScan(
   formData: FormData,
 ): Promise<ScanFormState> {
   const values = {
-    title: formData.get("title")?.toString() ?? "",
-    author: formData.get("author")?.toString() ?? "",
-    format: formData.get("format")?.toString() ?? "",
-    publisher: formData.get("publisher")?.toString() ?? "",
-    publishYear: formData.get("publishYear")?.toString() ?? "",
-    specialNotes: formData.get("specialNotes")?.toString() ?? "",
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
   };
 
-  const selectedCoverDataUrl = formData.get("selectedCoverDataUrl")?.toString() ?? "";
-  const selectedCoverSource = formData.get("selectedCoverSource")?.toString();
+  const selectedCoverDataUrl = stringField(formData, "selectedCoverDataUrl");
+  const selectedCoverSource = optionalStringField(formData, "selectedCoverSource");
 
   let coverImagePath: string | undefined;
   if (selectedCoverDataUrl) {
@@ -95,7 +114,7 @@ export async function createBookFromScan(
   const result = await createBookWithCopyData({
     title: values.title,
     author: values.author,
-    isbn: formData.get("isbn")?.toString() ?? "",
+    isbn: stringField(formData, "isbn"),
     format: values.format,
     publisher: values.publisher,
     publishYear: values.publishYear,
@@ -120,12 +139,10 @@ export async function updateBook(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
-  // `?.toString()`, not `as string` -- see createBookWithCopy's comment above
-  // for why the cast is unsafe here.
   const result = await updateBookData(bookId, {
-    title: formData.get("title")?.toString() ?? "",
-    author: formData.get("author")?.toString() ?? "",
-    isbn: formData.get("isbn")?.toString() ?? "",
+    title: stringField(formData, "title"),
+    author: stringField(formData, "author"),
+    isbn: stringField(formData, "isbn"),
   });
 
   if ("error" in result) {
@@ -144,13 +161,8 @@ export async function updateSeries(
   formData: FormData,
 ): Promise<BookFormState> {
   const result = await updateSeriesData(bookId, {
-    // `?.toString()`, not `as string` -- formData.get returns string | File |
-    // null, and the cast is erased at runtime, so a crafted multipart request
-    // sending a File here would reach updateSeriesData and throw on .trim(),
-    // turning bad input into a 500. Matches the safer idiom already used by
-    // createBookFromScan in this same file.
-    seriesName: formData.get("seriesName")?.toString() ?? "",
-    seriesPosition: formData.get("seriesPosition")?.toString() ?? "",
+    seriesName: stringField(formData, "seriesName"),
+    seriesPosition: stringField(formData, "seriesPosition"),
   });
 
   if ("error" in result) {
