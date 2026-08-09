@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { updateEbookCopyCoverData } from "@/lib/ebookCopies";
 import type { CopyFormState } from "@/lib/copies";
+import { stringField, optionalStringField } from "@/lib/formData";
 
 export async function updateEbookCopyCover(
   copyId: string,
@@ -12,8 +13,8 @@ export async function updateEbookCopyCover(
   formData: FormData,
 ): Promise<CopyFormState> {
   const result = await updateEbookCopyCoverData(copyId, {
-    selectedCoverDataUrl: formData.get("selectedCoverDataUrl")?.toString() ?? "",
-    selectedCoverSource: formData.get("selectedCoverSource")?.toString(),
+    selectedCoverDataUrl: stringField(formData, "selectedCoverDataUrl"),
+    selectedCoverSource: optionalStringField(formData, "selectedCoverSource"),
   });
 
   if ("error" in result) {
