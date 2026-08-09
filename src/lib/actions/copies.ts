@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { addCopyData, updateCopyData, deleteCopyData, type CopyFormState } from "@/lib/copies";
+import { stringField, optionalStringField } from "@/lib/formData";
 
 export async function addCopy(
   bookId: string,
@@ -11,10 +12,10 @@ export async function addCopy(
   formData: FormData,
 ): Promise<CopyFormState> {
   const result = await addCopyData(bookId, {
-    format: (formData.get("format") as string) ?? "",
-    publisher: (formData.get("publisher") as string) ?? "",
-    publishYear: (formData.get("publishYear") as string) ?? "",
-    specialNotes: (formData.get("specialNotes") as string) ?? "",
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
   });
 
   if ("error" in result) {
@@ -33,12 +34,12 @@ export async function updateCopy(
   formData: FormData,
 ): Promise<CopyFormState> {
   const result = await updateCopyData(copyId, {
-    format: (formData.get("format") as string) ?? "",
-    publisher: (formData.get("publisher") as string) ?? "",
-    publishYear: (formData.get("publishYear") as string) ?? "",
-    specialNotes: (formData.get("specialNotes") as string) ?? "",
-    selectedCoverDataUrl: formData.get("selectedCoverDataUrl")?.toString() ?? "",
-    selectedCoverSource: formData.get("selectedCoverSource")?.toString(),
+    format: stringField(formData, "format"),
+    publisher: stringField(formData, "publisher"),
+    publishYear: stringField(formData, "publishYear"),
+    specialNotes: stringField(formData, "specialNotes"),
+    selectedCoverDataUrl: stringField(formData, "selectedCoverDataUrl"),
+    selectedCoverSource: optionalStringField(formData, "selectedCoverSource"),
   });
 
   if ("error" in result) {
