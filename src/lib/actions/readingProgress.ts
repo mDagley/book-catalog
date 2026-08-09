@@ -7,18 +7,7 @@ import {
   clearReadStatusManualData,
   clearRatingManualData,
 } from "@/lib/readingProgress";
-
-// A <select>/<input> field always submits as a string, but FormData.get()'s
-// return type is `FormDataEntryValue | null` (string | File | null) --
-// `as string` would silently keep a `File` instance if this field somehow
-// arrived as one (e.g. a hand-crafted multipart request), rather than
-// actually converting it. Checking the real runtime type instead of casting
-// means a tampered request falls through to "" (and downstream validation)
-// rather than a stray File object propagating into the parser.
-function stringField(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
+import { stringField } from "@/lib/formData";
 
 export async function updateReadStatus(bookId: string, formData: FormData): Promise<void> {
   const result = await updateReadStatusData(bookId, stringField(formData, "readStatus"));
