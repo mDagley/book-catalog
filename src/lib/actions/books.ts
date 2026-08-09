@@ -15,14 +15,19 @@ export async function createBookWithCopy(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
+  // `?.toString()`, not `as string` -- formData.get returns string | File |
+  // null, and the cast is erased at runtime, so a crafted multipart request
+  // sending a File here would reach createBookWithCopyData and throw on
+  // .trim(), turning bad input into a 500. Matches the safer idiom already
+  // used by createBookFromScan/updateSeries in this same file.
   const result = await createBookWithCopyData({
-    title: (formData.get("title") as string) ?? "",
-    author: (formData.get("author") as string) ?? "",
-    isbn: (formData.get("isbn") as string) ?? "",
-    format: (formData.get("format") as string) ?? "",
-    publisher: (formData.get("publisher") as string) ?? "",
-    publishYear: (formData.get("publishYear") as string) ?? "",
-    specialNotes: (formData.get("specialNotes") as string) ?? "",
+    title: formData.get("title")?.toString() ?? "",
+    author: formData.get("author")?.toString() ?? "",
+    isbn: formData.get("isbn")?.toString() ?? "",
+    format: formData.get("format")?.toString() ?? "",
+    publisher: formData.get("publisher")?.toString() ?? "",
+    publishYear: formData.get("publishYear")?.toString() ?? "",
+    specialNotes: formData.get("specialNotes")?.toString() ?? "",
     coverImagePath: formData.get("coverImagePath")?.toString(),
   });
 
@@ -115,10 +120,12 @@ export async function updateBook(
   _prevState: BookFormState,
   formData: FormData,
 ): Promise<BookFormState> {
+  // `?.toString()`, not `as string` -- see createBookWithCopy's comment above
+  // for why the cast is unsafe here.
   const result = await updateBookData(bookId, {
-    title: (formData.get("title") as string) ?? "",
-    author: (formData.get("author") as string) ?? "",
-    isbn: (formData.get("isbn") as string) ?? "",
+    title: formData.get("title")?.toString() ?? "",
+    author: formData.get("author")?.toString() ?? "",
+    isbn: formData.get("isbn")?.toString() ?? "",
   });
 
   if ("error" in result) {
