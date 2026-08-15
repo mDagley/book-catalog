@@ -12,8 +12,11 @@ import {
 } from "@/lib/search";
 import { getDensity } from "@/lib/density";
 import { setDensity } from "@/lib/actions/density";
+import { getViewMode } from "@/lib/viewMode";
+import { setViewMode } from "@/lib/actions/viewMode";
 import { CatalogFilters } from "@/components/CatalogFilters";
 import { CatalogResultCard } from "@/components/CatalogResultCard";
+import { CoverGridCard } from "@/components/CoverGridCard";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { Button, BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
@@ -77,6 +80,7 @@ export default async function BooksPage({
   const activeLetter = supportsLetterJump ? parseStartsWithLetter(startsWithParam) : undefined;
 
   const density = await getDensity("books");
+  const viewMode = await getViewMode("books");
   // Deliberately excludes `query` -- per the design spec, the search box is
   // always visible regardless of the filter chrome's state, so typing a
   // query shouldn't force the types/status/format block open too.
@@ -145,7 +149,7 @@ export default async function BooksPage({
   loadMoreParams.set("limit", String(Math.min(limit + DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)));
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-2xl p-4">
+    <main className={`mx-auto w-full min-w-0 p-4 ${viewMode === "grid" ? "max-w-6xl" : "max-w-2xl"}`}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">All Books</h1>
         <Link
@@ -210,11 +214,22 @@ export default async function BooksPage({
             ? `${totalCount} book${totalCount === 1 ? "" : "s"}`
             : `Showing ${results.length} of ${totalCount} book${totalCount === 1 ? "" : "s"}`}
         </p>
-        <form action={setDensity.bind(null, "books", density === "compact" ? "comfortable" : "compact")}>
-          <button type="submit" className="text-link underline">
-            {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
-          </button>
-        </form>
+        <div className="flex flex-wrap items-center gap-4">
+          <form action={setViewMode.bind(null, "books", viewMode === "grid" ? "list" : "grid")}>
+            <button type="submit" className="text-link underline">
+              {viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
+            </button>
+          </form>
+          {viewMode === "list" && (
+            <form
+              action={setDensity.bind(null, "books", density === "compact" ? "comfortable" : "compact")}
+            >
+              <button type="submit" className="text-link underline">
+                {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
 
       {supportsLetterJump && availableLetters.length > 0 && (
@@ -247,11 +262,19 @@ export default async function BooksPage({
         <p className="text-foreground/70">No books found.</p>
       ) : (
         <>
-          <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
-            {results.map((result) => (
-              <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
-            ))}
-          </ul>
+          {viewMode === "grid" ? (
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+              {results.map((result) => (
+                <CoverGridCard key={result.bookId ?? result.title} result={result} />
+              ))}
+            </ul>
+          ) : (
+            <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
+              {results.map((result) => (
+                <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
+              ))}
+            </ul>
+          )}
 
           {canLoadMore && (
             <div className="mt-4 text-center">

@@ -3,6 +3,7 @@ import { getDuplicateGroups, refreshDuplicateGroupsCache } from "@/lib/duplicate
 import { mergeBooks } from "@/lib/actions/duplicates";
 import { MergeButton } from "@/app/books/duplicates/MergeButton";
 import { TicketCard } from "@/components/ui/TicketCard";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -50,24 +51,27 @@ export default async function DuplicateBooksPage() {
             <TicketCard key={group.books.map((book) => book.id).join(",")} className="p-3">
               <ul className="space-y-2">
                 {group.books.map((book) => (
-                  <li key={book.id} className="rounded-lg border border-perforation p-2 text-sm">
-                    <p className="font-medium text-foreground-strong">{book.title}</p>
-                    {book.author && <p className="text-foreground/70">{book.author}</p>}
-                    {book.isbn && <p className="font-mono text-foreground/70">ISBN: {book.isbn}</p>}
-                    <p className="text-foreground/70">
-                      {book.copiesCount} {book.copiesCount === 1 ? "copy" : "copies"}
-                      {book.hasEbook ? ", ebook" : ""}
-                      {book.hasAudiobook ? ", audiobook" : ""}
-                    </p>
-                    <form
-                      action={mergeBooks.bind(
-                        null,
-                        book.id,
-                        group.books.filter((other) => other.id !== book.id).map((other) => other.id),
-                      )}
-                    >
-                      <MergeButton />
-                    </form>
+                  <li key={book.id} className="flex gap-3 rounded-lg border border-perforation p-2 text-sm">
+                    <CoverThumbnail coverImagePath={book.coverImagePath} size="compact" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground-strong">{book.title}</p>
+                      {book.author && <p className="text-foreground/70">{book.author}</p>}
+                      {book.isbn && <p className="font-mono text-foreground/70">ISBN: {book.isbn}</p>}
+                      <p className="text-foreground/70">
+                        {book.copiesCount} {book.copiesCount === 1 ? "copy" : "copies"}
+                        {book.hasEbook ? ", ebook" : ""}
+                        {book.hasAudiobook ? ", audiobook" : ""}
+                      </p>
+                      <form
+                        action={mergeBooks.bind(
+                          null,
+                          book.id,
+                          group.books.filter((other) => other.id !== book.id).map((other) => other.id),
+                        )}
+                      >
+                        <MergeButton />
+                      </form>
+                    </div>
                   </li>
                 ))}
               </ul>

@@ -320,6 +320,30 @@ describe("findDuplicateBookGroups", () => {
     expect(ebook?.copiesCount).toBe(0);
   });
 
+  it("reports each candidate's resolved cover image path", async () => {
+    const withCover = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cover Field Book",
+        copies: { create: { format: "HARDCOVER", coverImagePath: "physical-cover.jpg" } },
+      },
+    });
+    const withoutCover = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cover Field Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-cover-item" } },
+      },
+    });
+
+    const { groups } = await findDuplicateBookGroups();
+    const group = groups.find((g) => g.books.some((book) => book.id === withCover.id));
+
+    const covered = group?.books.find((book) => book.id === withCover.id);
+    const uncovered = group?.books.find((book) => book.id === withoutCover.id);
+    expect(covered?.coverImagePath).toBe("physical-cover.jpg");
+    expect(uncovered?.coverImagePath).toBeNull();
+  });
+
   it("groups two books via genuine tier-2 fuzzy matching when they share no exact titleForms() variant", async () => {
     // "The Way of Kings" vs "The Way of King" -- a one-character typo, not
     // a formatting difference titleForms() normalizes away. Only real
@@ -709,5 +733,27 @@ describe("refreshDuplicateGroupsCache / getDuplicateGroups", () => {
     expect(read.computedAt).toBeNull();
     expect(read.groups).toEqual([]);
     expect(read.truncated).toBe(false);
+  });
+
+  it("getDuplicateGroups also reports each candidate's cover image path", async () => {
+    const withCover = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cached Cover Book",
+        copies: { create: { format: "HARDCOVER", coverImagePath: "cached-cover.jpg" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cached Cover Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-cached-cover-item" } },
+      },
+    });
+
+    await refreshDuplicateGroupsCache();
+    const { groups } = await getDuplicateGroups();
+    const group = groups.find((g) => g.books.some((book) => book.id === withCover.id));
+    const covered = group?.books.find((book) => book.id === withCover.id);
+    expect(covered?.coverImagePath).toBe("cached-cover.jpg");
   });
 });

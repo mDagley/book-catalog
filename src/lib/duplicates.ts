@@ -9,6 +9,7 @@ import {
   DEFAULT_MATCH_THRESHOLD,
 } from "@/lib/matching";
 import { recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { resolveListingCover } from "@/lib/listingCover";
 
 export interface DuplicateCandidate {
   id: string;
@@ -18,6 +19,7 @@ export interface DuplicateCandidate {
   copiesCount: number;
   hasEbook: boolean;
   hasAudiobook: boolean;
+  coverImagePath: string | null;
 }
 
 export interface DuplicateGroup {
@@ -133,6 +135,24 @@ export async function findDuplicateBookGroups(
       hasEbook: true,
       hasAudiobook: true,
       _count: { select: { copies: true } },
+      copies: {
+        where: { coverImagePath: { not: null } },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+        select: { coverImagePath: true },
+      },
+      ebookCopies: {
+        where: { coverImagePath: { not: null } },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+        select: { coverImagePath: true },
+      },
+      audiobookCopies: {
+        where: { coverImagePath: { not: null } },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+        select: { coverImagePath: true },
+      },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -145,6 +165,7 @@ export async function findDuplicateBookGroups(
     copiesCount: book._count.copies,
     hasEbook: book.hasEbook,
     hasAudiobook: book.hasAudiobook,
+    coverImagePath: resolveListingCover(book),
   }));
 
   // Simple union-find: any two books whose titles match (exact-form or
@@ -423,6 +444,24 @@ export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
               hasEbook: true,
               hasAudiobook: true,
               _count: { select: { copies: true } },
+              copies: {
+                where: { coverImagePath: { not: null } },
+                orderBy: { createdAt: "asc" },
+                take: 1,
+                select: { coverImagePath: true },
+              },
+              ebookCopies: {
+                where: { coverImagePath: { not: null } },
+                orderBy: { createdAt: "asc" },
+                take: 1,
+                select: { coverImagePath: true },
+              },
+              audiobookCopies: {
+                where: { coverImagePath: { not: null } },
+                orderBy: { createdAt: "asc" },
+                take: 1,
+                select: { coverImagePath: true },
+              },
             },
           },
         },
@@ -463,6 +502,7 @@ export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
           copiesCount: book._count.copies,
           hasEbook: book.hasEbook,
           hasAudiobook: book.hasAudiobook,
+          coverImagePath: resolveListingCover(book),
         })),
       })),
     truncated: run?.truncated ?? false,
