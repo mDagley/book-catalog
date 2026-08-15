@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { titleMatchScore, titleForms, normalizeTitle, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
 import { recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { resolveListingCover } from "@/lib/listingCover";
 
 export interface DuplicateCandidate {
   id: string;
@@ -10,6 +11,7 @@ export interface DuplicateCandidate {
   copiesCount: number;
   hasEbook: boolean;
   hasAudiobook: boolean;
+  coverImagePath: string | null;
 }
 
 export interface DuplicateGroup {
@@ -101,6 +103,9 @@ export async function findDuplicateBookGroups(
       hasEbook: true,
       hasAudiobook: true,
       _count: { select: { copies: true } },
+      copies: { select: { coverImagePath: true } },
+      ebookCopies: { select: { coverImagePath: true } },
+      audiobookCopies: { select: { coverImagePath: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -113,6 +118,7 @@ export async function findDuplicateBookGroups(
     copiesCount: book._count.copies,
     hasEbook: book.hasEbook,
     hasAudiobook: book.hasAudiobook,
+    coverImagePath: resolveListingCover(book),
   }));
 
   // Simple union-find: any two books whose titles match (exact-form or
