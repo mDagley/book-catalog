@@ -284,7 +284,16 @@ export async function findDuplicateBookGroups(
       const entriesA = formEntriesFor(a);
       const entriesB = formEntriesFor(b);
       let best = 0;
-      for (const fa of entriesA) {
+      // Labeled so a match found partway through this candidate pair's own
+      // form-pairs can stop comparing further forms immediately -- without
+      // this, `best` reaching DEFAULT_MATCH_THRESHOLD from an early form
+      // pair didn't stop later form pairs (still eligible since their
+      // bound could exceed the current `best`) from making another
+      // sequenceMatcherRatio call, and if THAT call was the one to hit
+      // fuzzyCap, `break outer` skipped the union below entirely --
+      // silently dropping a match this run had already found and confirmed
+      // (Copilot review finding on PR #44).
+      formPair: for (const fa of entriesA) {
         for (const fb of entriesB) {
           const bound = scoreUpperBound(fa.form, fa.counts, fb.form, fb.counts);
           if (bound < DEFAULT_MATCH_THRESHOLD || bound <= best) continue;
@@ -295,6 +304,7 @@ export async function findDuplicateBookGroups(
           fuzzyCalls++;
           const score = sequenceMatcherRatio(fa.form, fb.form) * 100;
           if (score > best) best = score;
+          if (best >= DEFAULT_MATCH_THRESHOLD) break formPair;
         }
       }
       if (best >= DEFAULT_MATCH_THRESHOLD) {

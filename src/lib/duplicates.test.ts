@@ -393,6 +393,41 @@ describe("findDuplicateBookGroups", () => {
     expect(truncated).toBe(false);
   });
 
+  it("still unions a pair once its score already hit the threshold, even if a later form-pair for the SAME candidates would exceed the cap", async () => {
+    // Copilot review finding on PR #44: these two titles share NO exact
+    // titleForms() variant (verified directly -- so tier 1 doesn't catch
+    // them for free, forcing an actual tier-2 comparison), but each has
+    // multiple variants (the colon splits both). The FIRST form-pair
+    // scoreUpperBound() lets through already scores ~97.3 (verified
+    // directly, above DEFAULT_MATCH_THRESHOLD), but a later form-pair for
+    // this same (a, b) candidate pair still has a bound above that ~97.3,
+    // so it isn't skipped by `bound <= best` either -- so with the old code
+    // (no early exit once `best` hits the threshold), a cap of exactly 1
+    // would let the first call set best~97.3, then hit the cap on the
+    // second call and `break outer` WITHOUT ever reaching the union below
+    // it, silently dropping a match already confirmed within this very
+    // pair.
+    const a = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Shadows: Rise of the Shadows",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-samepair-cap-ebook" } },
+      },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Rising: Rise of the Shadow",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    const { groups, truncated } = await findDuplicateBookGroups(1);
+
+    expect(truncated).toBe(false);
+    const group = groups.find((g) => g.books.some((book) => book.id === a.id));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
   it("completes quickly at a realistic catalog size (performance regression guard)", async () => {
     // An earlier version of this fixture generated titles as
     // `...Unique Title Number ${i}` -- identical ~48-char strings

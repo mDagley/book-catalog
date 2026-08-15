@@ -36,8 +36,9 @@ export default async function DuplicateBooksPage() {
       </p>
       {truncated && (
         <p className="mb-4 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">
-          The last duplicate scan (at sync time) hit an internal safety limit before finishing —
-          some duplicates may be missing below. This list will be recomputed at the next sync.
+          The last duplicate scan hit an internal safety limit before finishing — some duplicates
+          may be missing below. This list is recomputed automatically whenever a book is added,
+          edited, or synced, so it should resolve itself the next time that happens.
         </p>
       )}
 
