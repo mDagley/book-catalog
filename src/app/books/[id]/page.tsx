@@ -8,6 +8,7 @@ import { TicketCard } from "@/components/ui/TicketCard";
 import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 import { resolveListingCover } from "@/lib/listingCover";
 import { PandaStamp } from "@/components/PandaStamp";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 export default async function BookDetailPage({
   params,
@@ -49,11 +50,11 @@ export default async function BookDetailPage({
         <div className="flex flex-wrap items-start gap-4">
           {heroCoverPath && (
             <div className="relative aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-lg border border-dashed border-perforation bg-surface">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/covers/${encodeURIComponent(heroCoverPath)}`}
+              <CoverThumbnail
+                coverImagePath={heroCoverPath}
+                size="poster"
                 alt="Cover"
-                className="h-full w-full object-cover"
+                className="h-full w-full"
               />
               {book.readStatus === "READ" && (
                 <PandaStamp
