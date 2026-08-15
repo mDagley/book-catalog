@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createBookWithCopyData } from "@/lib/books";
 import { addCopyData, updateCopyData, deleteCopyData } from "@/lib/copies";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
+import { getDuplicateGroups, refreshDuplicateGroupsCache } from "@/lib/duplicates";
 
 const uploadsDir = process.env.UPLOADS_DIR ?? "./uploads";
 const createdBookIds: string[] = [];
@@ -25,6 +26,9 @@ afterEach(async () => {
   savedCoverPaths.length = 0;
   await prisma.goodreadsTbrItem.deleteMany({ where: { id: { in: createdTbrItemIds } } });
   createdTbrItemIds.length = 0;
+  // Book.duplicateGroupId is ON DELETE SET NULL, so book deletions above
+  // can leave now-empty DuplicateGroup rows behind.
+  await prisma.duplicateGroup.deleteMany({ where: { books: { none: {} } } });
 });
 
 async function createTestBook() {
@@ -258,6 +262,48 @@ describe("deleteCopyData", () => {
 
     const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(after.owned).toBe(false);
+  });
+
+  it("removes the book from the persisted duplicate-groups cache when its last copy's removal also deletes the book", async () => {
+    // Created directly via prisma (not createBookWithCopyData): that
+    // function's own fuzzy-match fallback would attach this physical copy
+    // straight onto `other` instead of creating a second Book row -- which
+    // is the correct real-world behavior, but defeats the point of this
+    // test, which needs two distinct Book rows that findDuplicateBookGroups
+    // groups together.
+    const other = await prisma.book.create({
+      data: {
+        title: "Test Copies Dup Title",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-copies-dup-ebook" } },
+      },
+    });
+    createdBookIds.push(other.id);
+
+    const created = await prisma.book.create({
+      data: {
+        title: "Test Copies Dup Title",
+        copies: { create: { format: "PAPERBACK" } },
+      },
+    });
+    createdBookIds.push(created.id);
+
+    await refreshDuplicateGroupsCache();
+    let read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === created.id))).toBe(true);
+
+    const [onlyCopy] = await prisma.physicalCopy.findMany({ where: { bookId: created.id } });
+    const result = await deleteCopyData(onlyCopy.id);
+    expect(result).toEqual({ bookId: created.id, bookDeleted: true });
+    // Remove from cleanup list since it's already gone
+    const idx = createdBookIds.indexOf(created.id);
+    if (idx !== -1) createdBookIds.splice(idx, 1);
+
+    read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === created.id))).toBe(false);
+    // The persisted group should be gone entirely too, not left with just
+    // `other` in it -- getDuplicateGroups() filters groups below 2 books.
+    expect(read.groups.some((g) => g.books.some((book) => book.id === other.id))).toBe(false);
   });
 
   it("leaves a matching TBR item owned when the book survives its last physical copy being removed", async () => {

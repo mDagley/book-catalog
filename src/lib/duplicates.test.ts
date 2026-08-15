@@ -1,6 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { findDuplicateBookGroups, mergeBooksData } from "@/lib/duplicates";
+import {
+  findDuplicateBookGroups,
+  mergeBooksData,
+  refreshDuplicateGroupsCache,
+  getDuplicateGroups,
+} from "@/lib/duplicates";
 import { titleForms } from "@/lib/matching";
 
 afterEach(async () => {
@@ -13,6 +18,10 @@ afterEach(async () => {
   });
   await prisma.book.deleteMany({ where: { title: { startsWith: "Test Duplicates" } } });
   await prisma.goodreadsTbrItem.deleteMany({ where: { title: { startsWith: "Test Duplicates" } } });
+  // Book.duplicateGroupId is ON DELETE SET NULL, so the deleteMany above
+  // leaves the now-empty DuplicateGroup row behind -- clean those up too so
+  // they don't accumulate across test runs.
+  await prisma.duplicateGroup.deleteMany({ where: { books: { none: {} } } });
 });
 
 describe("findDuplicateBookGroups", () => {
@@ -346,19 +355,23 @@ describe("findDuplicateBookGroups", () => {
   });
 
   it("stops attempting further fuzzy comparisons once the cap is hit, and reports truncated", async () => {
-    // Four digitally-owned books with genuinely dissimilar titles (no
-    // shared titleForms() variant, AND all pairwise titleMatchScore well
-    // under DEFAULT_MATCH_THRESHOLD -- verified directly -- so none of
-    // them get unioned along the way, which would otherwise let the
-    // already-grouped skip short-circuit later pairs before the cap is
-    // ever reached). That's 6 pairs, all requiring an actual
-    // titleMatchScore call. A cap of 3 must be hit partway through.
+    // Four digitally-owned books, each sharing enough letters with the
+    // others (same word pool, shuffled) that scoreUpperBound() -- the
+    // lossless O(title length) prefilter tier 2 now runs before the
+    // expensive sequenceMatcherRatio -- cannot reject any of the 6 pairs
+    // (every pairwise bound is >= DEFAULT_MATCH_THRESHOLD, verified
+    // directly). Genuine sequenceMatcherRatio on every pair stays well
+    // under DEFAULT_MATCH_THRESHOLD though (verified directly, max ~65),
+    // so nothing gets unioned along the way -- which would otherwise let
+    // the already-grouped skip short-circuit later pairs before the cap is
+    // ever reached. That's 6 pairs, all requiring an actual
+    // sequenceMatcherRatio call. A cap of 3 must be hit partway through.
     await prisma.book.createMany({
       data: [
-        { title: "Test Duplicates Quantum Circuitry Repair Handbook", hasEbook: true },
-        { title: "Test Duplicates Bicycle Maintenance Companion Guide", hasEbook: true },
-        { title: "Test Duplicates Silent Orchard Evening Memories", hasEbook: true },
-        { title: "Test Duplicates Granite Bridge Construction Journal", hasEbook: true },
+        { title: "Test Duplicates Ember Haven Delta Lunar Pewter Birch", hasEbook: true },
+        { title: "Test Duplicates Pewter Ember Karst Birch Lunar Haven", hasEbook: true },
+        { title: "Test Duplicates Delta Pewter Lunar Cider Moraine Haven", hasEbook: true },
+        { title: "Test Duplicates Nectar Haven Ember Birch Delta Amber", hasEbook: true },
       ],
     });
 
@@ -378,6 +391,41 @@ describe("findDuplicateBookGroups", () => {
     const { truncated } = await findDuplicateBookGroups(3);
 
     expect(truncated).toBe(false);
+  });
+
+  it("still unions a pair once its score already hit the threshold, even if a later form-pair for the SAME candidates would exceed the cap", async () => {
+    // Copilot review finding on PR #44: these two titles share NO exact
+    // titleForms() variant (verified directly -- so tier 1 doesn't catch
+    // them for free, forcing an actual tier-2 comparison), but each has
+    // multiple variants (the colon splits both). The FIRST form-pair
+    // scoreUpperBound() lets through already scores ~97.3 (verified
+    // directly, above DEFAULT_MATCH_THRESHOLD), but a later form-pair for
+    // this same (a, b) candidate pair still has a bound above that ~97.3,
+    // so it isn't skipped by `bound <= best` either -- so with the old code
+    // (no early exit once `best` hits the threshold), a cap of exactly 1
+    // would let the first call set best~97.3, then hit the cap on the
+    // second call and `break outer` WITHOUT ever reaching the union below
+    // it, silently dropping a match already confirmed within this very
+    // pair.
+    const a = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Shadows: Rise of the Shadows",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-samepair-cap-ebook" } },
+      },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Rising: Rise of the Shadow",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+
+    const { groups, truncated } = await findDuplicateBookGroups(1);
+
+    expect(truncated).toBe(false);
+    const group = groups.find((g) => g.books.some((book) => book.id === a.id));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
   });
 
   it("completes quickly at a realistic catalog size (performance regression guard)", async () => {
@@ -408,10 +456,18 @@ describe("findDuplicateBookGroups", () => {
     await prisma.book.createMany({ data });
 
     const start = Date.now();
-    await findDuplicateBookGroups();
+    const { truncated } = await findDuplicateBookGroups();
     const elapsedMs = Date.now() - start;
 
     expect(elapsedMs).toBeLessThan(1000);
+    // Regression guard for the real-world bug this fixture is modeling:
+    // before the scoreUpperBound() prefilter, tier 2 counted every
+    // digitally-relevant PAIR against the cap (not just pairs that reached
+    // an actual sequenceMatcherRatio call), so at this scale (~700 rows,
+    // ~245,000 candidate pairs) the cap was hit almost immediately and this
+    // asserting `false` here would have failed -- silently masking that the
+    // page was truncating on nearly every real visit.
+    expect(truncated).toBe(false);
   });
 });
 
@@ -570,5 +626,88 @@ describe("mergeBooksData", () => {
       include: { copies: true },
     });
     expect(kept.copies).toHaveLength(1);
+  });
+});
+
+describe("refreshDuplicateGroupsCache / getDuplicateGroups", () => {
+  it("persists findDuplicateBookGroups's result so getDuplicateGroups can read it back without recomputing", async () => {
+    const a = await prisma.book.create({
+      data: { title: "Test Duplicates Persisted Group Book", copies: { create: { format: "HARDCOVER" } } },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Persisted Group Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-persist-ebook" } },
+      },
+    });
+
+    const refreshed = await refreshDuplicateGroupsCache();
+    expect(refreshed.truncated).toBe(false);
+
+    const read = await getDuplicateGroups();
+    expect(read.truncated).toBe(false);
+    expect(read.computedAt).not.toBeNull();
+    const group = read.groups.find((g) => g.books.some((book) => book.id === a.id));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("clears a group once refreshed after its books no longer match (e.g. a title edit)", async () => {
+    const a = await prisma.book.create({
+      data: { title: "Test Duplicates Stale Group Book", copies: { create: { format: "HARDCOVER" } } },
+    });
+    const b = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Stale Group Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-stale-ebook" } },
+      },
+    });
+    await refreshDuplicateGroupsCache();
+    let read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === a.id))).toBe(true);
+
+    await prisma.book.update({
+      where: { id: a.id },
+      data: { title: "Test Duplicates Completely Different Title Entirely" },
+    });
+    await refreshDuplicateGroupsCache();
+
+    read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === a.id))).toBe(false);
+    expect(read.groups.some((g) => g.books.some((book) => book.id === b.id))).toBe(false);
+  });
+
+  it("removes a group's persisted row once mergeBooksData resolves it", async () => {
+    const keep = await prisma.book.create({
+      data: { title: "Test Duplicates Merge Refresh Book", copies: { create: { format: "HARDCOVER" } } },
+    });
+    const merge = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Merge Refresh Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-merge-refresh-ebook" } },
+      },
+    });
+    await refreshDuplicateGroupsCache();
+    let read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === keep.id))).toBe(true);
+
+    const result = await mergeBooksData(keep.id, [merge.id]);
+    expect(result).toEqual({ ok: true });
+
+    read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === keep.id))).toBe(false);
+  });
+
+  it("getDuplicateGroups reports computedAt: null before any refresh has ever run", async () => {
+    await prisma.duplicateGroup.deleteMany({});
+    await prisma.duplicateDetectionRun.deleteMany({});
+
+    const read = await getDuplicateGroups();
+
+    expect(read.computedAt).toBeNull();
+    expect(read.groups).toEqual([]);
+    expect(read.truncated).toBe(false);
   });
 });

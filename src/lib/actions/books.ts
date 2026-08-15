@@ -10,6 +10,7 @@ import {
   type BookFormState,
 } from "@/lib/books";
 import { deleteCoverImage, saveCoverImage } from "@/lib/coverStorage";
+import { refreshDuplicateGroupsCache } from "@/lib/duplicates";
 import { stringField, optionalStringField } from "@/lib/formData";
 
 export async function createBookWithCopy(
@@ -30,6 +31,11 @@ export async function createBookWithCopy(
   if ("error" in result) {
     return result;
   }
+
+  // A manually-added physical copy can duplicate an already-owned ebook/
+  // audiobook row -- recompute the persisted duplicate cache before
+  // redirecting, same hook the sync routes use.
+  await refreshDuplicateGroupsCache();
 
   revalidatePath("/books");
   redirect(`/books/${result.bookId}`);
@@ -105,6 +111,11 @@ export async function createBookFromScan(
     }
     return { error: result.error, values };
   }
+
+  // Same duplicate-cache refresh as createBookWithCopy -- this is the
+  // scan-add flow, the exact case findDuplicateBookGroups documents itself
+  // as existing for (a physical scan duplicating an already-owned title).
+  await refreshDuplicateGroupsCache();
 
   const scanAnother = formData.get("scanAnother") === "true";
   revalidatePath("/books");
