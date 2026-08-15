@@ -149,7 +149,7 @@ export default async function BooksPage({
   loadMoreParams.set("limit", String(Math.min(limit + DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)));
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-2xl p-4">
+    <main className={`mx-auto w-full min-w-0 p-4 ${viewMode === "grid" ? "max-w-6xl" : "max-w-2xl"}`}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">All Books</h1>
         <Link
