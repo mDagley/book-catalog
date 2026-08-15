@@ -404,7 +404,14 @@ export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
             },
           },
         },
-        orderBy: { computedAt: "asc" },
+        // computedAt alone isn't a stable sort key: every DuplicateGroup
+        // row created by the same refreshDuplicateGroupsCache() run shares
+        // one transaction-start timestamp (Postgres's now()/
+        // CURRENT_TIMESTAMP is fixed for the whole transaction), so without
+        // a tie-breaker, groups from the same run could reorder between
+        // reads with no underlying data change. `id` (cuid, generated in
+        // creation order) breaks the tie deterministically.
+        orderBy: [{ computedAt: "asc" }, { id: "asc" }],
       }),
       prisma.duplicateDetectionRun.findUnique({ where: { id: "singleton" } }),
     ],
