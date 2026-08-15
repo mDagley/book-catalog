@@ -419,19 +419,30 @@ export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
   );
 
   return {
-    groups: groups.map((group) => ({
-      id: group.id,
-      computedAt: group.computedAt,
-      books: group.books.map((book) => ({
-        id: book.id,
-        title: book.title,
-        author: book.author,
-        isbn: book.isbn,
-        copiesCount: book._count.copies,
-        hasEbook: book.hasEbook,
-        hasAudiobook: book.hasAudiobook,
+    // Every write path that can remove a book from a group (merge, and any
+    // other Book deletion -- see deleteCopyData in copies.ts and
+    // removeStaleAbsLinks in absSync.ts) is expected to call
+    // refreshDuplicateGroupsCache() afterward, which never persists a
+    // group below 2 books (see the filter in findDuplicateBookGroups).
+    // This re-filters at read time anyway as defense-in-depth (Copilot
+    // review finding on PR #44): if a future write path were ever missed,
+    // a stale 1-book "group" would otherwise render a merge action with no
+    // other book to merge into.
+    groups: groups
+      .filter((group) => group.books.length > 1)
+      .map((group) => ({
+        id: group.id,
+        computedAt: group.computedAt,
+        books: group.books.map((book) => ({
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          isbn: book.isbn,
+          copiesCount: book._count.copies,
+          hasEbook: book.hasEbook,
+          hasAudiobook: book.hasAudiobook,
+        })),
       })),
-    })),
     truncated: run?.truncated ?? false,
     computedAt: run?.computedAt ?? null,
   };
