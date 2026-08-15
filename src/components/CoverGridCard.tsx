@@ -4,6 +4,7 @@ import type { SearchResult } from "@/lib/search";
 import { PandaStamp } from "@/components/PandaStamp";
 import { PhysicalBookIcon, EbookIcon, AudiobookIcon } from "@/components/FormatBadgeIcons";
 import { TicketCard } from "@/components/ui/TicketCard";
+import { CoverThumbnail } from "@/components/CoverThumbnail";
 
 interface FormatBadge {
   key: string;
@@ -30,21 +31,12 @@ export function CoverGridCard({ result }: { result: SearchResult }) {
   const card = (
     <TicketCard as="div" className="flex h-full flex-col overflow-hidden p-0">
       <div className="relative aspect-[2/3] w-full bg-surface">
-        {result.coverImagePath ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`/api/covers/${encodeURIComponent(result.coverImagePath)}`}
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center text-3xl text-foreground/40"
-            aria-hidden="true"
-          >
-            📖
-          </div>
-        )}
+        <CoverThumbnail
+          coverImagePath={result.coverImagePath}
+          size="poster"
+          alt=""
+          className="h-full w-full"
+        />
         {result.readStatus === "READ" && (
           <PandaStamp
             title="Read"
