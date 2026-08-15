@@ -734,4 +734,26 @@ describe("refreshDuplicateGroupsCache / getDuplicateGroups", () => {
     expect(read.groups).toEqual([]);
     expect(read.truncated).toBe(false);
   });
+
+  it("getDuplicateGroups also reports each candidate's cover image path", async () => {
+    const withCover = await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cached Cover Book",
+        copies: { create: { format: "HARDCOVER", coverImagePath: "cached-cover.jpg" } },
+      },
+    });
+    await prisma.book.create({
+      data: {
+        title: "Test Duplicates Cached Cover Book",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "dup-test-cached-cover-item" } },
+      },
+    });
+
+    await refreshDuplicateGroupsCache();
+    const { groups } = await getDuplicateGroups();
+    const group = groups.find((g) => g.books.some((book) => book.id === withCover.id));
+    const covered = group?.books.find((book) => book.id === withCover.id);
+    expect(covered?.coverImagePath).toBe("cached-cover.jpg");
+  });
 });
