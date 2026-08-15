@@ -6,6 +6,8 @@ import { deleteCopy } from "@/lib/actions/copies";
 import { FORMAT_LABELS } from "@/components/CopyFormFields";
 import { TicketCard } from "@/components/ui/TicketCard";
 import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
+import { resolveListingCover } from "@/lib/listingCover";
+import { PandaStamp } from "@/components/PandaStamp";
 
 export default async function BookDetailPage({
   params,
@@ -26,6 +28,8 @@ export default async function BookDetailPage({
     notFound();
   }
 
+  const heroCoverPath = resolveListingCover(book);
+
   // Case-insensitive so "The Daevabad Trilogy" and "the daevabad trilogy"
   // group together. Exact equality only -- no fuzzy matching, deliberately,
   // so two genuinely different series with similar names never merge (see
@@ -42,10 +46,28 @@ export default async function BookDetailPage({
   return (
     <main className="mx-auto max-w-2xl p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-foreground-strong">{book.title}</h1>
-          {book.author && <p className="text-foreground/70">{book.author}</p>}
-          {book.isbn && <p className="font-mono text-sm text-foreground/70">ISBN: {book.isbn}</p>}
+        <div className="flex flex-wrap items-start gap-4">
+          {heroCoverPath && (
+            <div className="relative aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-lg border border-dashed border-perforation bg-surface">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/covers/${encodeURIComponent(heroCoverPath)}`}
+                alt="Cover"
+                className="h-full w-full object-cover"
+              />
+              {book.readStatus === "READ" && (
+                <PandaStamp
+                  title="Read"
+                  className="absolute right-2 top-2 h-6 w-6 rounded-full bg-background/80 p-1 text-status-positive"
+                />
+              )}
+            </div>
+          )}
+          <div>
+            <h1 className="font-display text-2xl font-semibold text-foreground-strong">{book.title}</h1>
+            {book.author && <p className="text-foreground/70">{book.author}</p>}
+            {book.isbn && <p className="font-mono text-sm text-foreground/70">ISBN: {book.isbn}</p>}
+          </div>
         </div>
         <Link
           href={`/books/${book.id}/edit`}
