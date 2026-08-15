@@ -352,6 +352,15 @@ export interface GetDuplicateGroupsResult {
 export async function refreshDuplicateGroupsCache(): Promise<FindDuplicateGroupsResult> {
   const result = await findDuplicateBookGroups();
 
+  // Computed once here (not left to each row's own DB-side now() default)
+  // and passed explicitly to every row below -- DuplicateGroup.computedAt
+  // and DuplicateDetectionRun.computedAt must describe the same refresh
+  // run, and pulling one from the DB's clock (now()) while the other used
+  // the app's clock (`new Date()`, as an earlier version of this function
+  // did) risked the two drifting apart under any app/DB clock skew, even
+  // though both are produced by this same call.
+  const computedAt = new Date();
+
   // DuplicateGroup rows are fully disposable derived data (nothing else
   // references them, and Book.duplicateGroupId is ON DELETE SET NULL --
   // see the migration), so the simplest correct update is delete-then-
@@ -360,13 +369,16 @@ export async function refreshDuplicateGroupsCache(): Promise<FindDuplicateGroups
     prisma.duplicateGroup.deleteMany({}),
     ...result.groups.map((group) =>
       prisma.duplicateGroup.create({
-        data: { books: { connect: group.books.map((book) => ({ id: book.id })) } },
+        data: {
+          computedAt,
+          books: { connect: group.books.map((book) => ({ id: book.id })) },
+        },
       }),
     ),
     prisma.duplicateDetectionRun.upsert({
       where: { id: "singleton" },
-      create: { truncated: result.truncated },
-      update: { truncated: result.truncated, computedAt: new Date() },
+      create: { computedAt, truncated: result.truncated },
+      update: { computedAt, truncated: result.truncated },
     }),
   ]);
 
