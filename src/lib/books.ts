@@ -251,29 +251,33 @@ export async function updateBookData(
 
   const existing = await prisma.book.findUniqueOrThrow({
     where: { id: bookId },
-    select: { title: true },
+    select: { title: true, author: true, isbn: true },
   });
+  const author = input.author.trim() || null;
+  const isbn = normalizeIsbn(input.isbn) || null;
 
   await prisma.book.update({
     where: { id: bookId },
-    data: {
-      title,
-      author: input.author.trim() || null,
-      isbn: normalizeIsbn(input.isbn) || null,
-    },
+    data: { title, author, isbn },
   });
 
-  // All three hooks run only on a real title change, and only AFTER the
-  // update commits -- each reads the live Book table, so running any of
-  // them first would still see the old title and no-op. Recheck first
-  // (drop TBR rows the old title was keeping owned), then mark (pick up
-  // rows the new title now covers), then refresh duplicates last -- a
-  // title edit can just as easily create a new duplicate group (edited
-  // into matching another book) as resolve an existing one (edited away
-  // from a false match).
+  // Both hooks run only on a real title change, and only AFTER the update
+  // commits -- recheckOwnedTbrItems reads the live Book table, so running
+  // it first would still see the old title and no-op. Recheck first (drop
+  // TBR rows the old title was keeping owned), then mark (pick up rows
+  // the new title now covers). TBR matching is title-only, so
+  // author/isbn changes don't affect it.
   if (existing.title !== title) {
     await recheckOwnedTbrItems();
     await markTbrItemsOwnedByTitle(title);
+  }
+
+  // Duplicate grouping depends on title, AND (for the narrow
+  // physical-only sync-race case, see authorsMatchNonNull/isbnCompatible
+  // in duplicates.ts) on author and isbn too -- an author/isbn-only edit
+  // with no title change can still flip that case, so this can't be
+  // folded into the title-only guard above.
+  if (existing.title !== title || existing.author !== author || existing.isbn !== isbn) {
     await refreshDuplicateGroupsCache();
   }
 

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import {
   titleForms,
   normalizeTitle,
@@ -375,26 +376,40 @@ export async function refreshDuplicateGroupsCache(): Promise<FindDuplicateGroups
 // Reads the persisted result of the most recent refreshDuplicateGroupsCache()
 // run -- what the duplicates page renders. No titleMatchScore/fuzzy work
 // happens here, just relational reads.
+//
+// The two queries run inside a transaction (not Promise.all) so they see
+// one consistent snapshot -- without this, a refreshDuplicateGroupsCache()
+// commit landing between the two independent queries could pair old
+// DuplicateGroup rows with the new run's computedAt/truncated (or vice
+// versa), showing a `truncated` flag or timestamp that doesn't actually
+// describe the groups rendered alongside it.
 export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
-  const [groups, run] = await Promise.all([
-    prisma.duplicateGroup.findMany({
-      include: {
-        books: {
-          select: {
-            id: true,
-            title: true,
-            author: true,
-            isbn: true,
-            hasEbook: true,
-            hasAudiobook: true,
-            _count: { select: { copies: true } },
+  // Read Committed (Postgres's default) only guarantees each individual
+  // statement its own fresh snapshot, not a snapshot shared across both
+  // statements in this transaction -- RepeatableRead is what actually
+  // pins both reads to the same point in time.
+  const [groups, run] = await prisma.$transaction(
+    [
+      prisma.duplicateGroup.findMany({
+        include: {
+          books: {
+            select: {
+              id: true,
+              title: true,
+              author: true,
+              isbn: true,
+              hasEbook: true,
+              hasAudiobook: true,
+              _count: { select: { copies: true } },
+            },
           },
         },
-      },
-      orderBy: { computedAt: "asc" },
-    }),
-    prisma.duplicateDetectionRun.findUnique({ where: { id: "singleton" } }),
-  ]);
+        orderBy: { computedAt: "asc" },
+      }),
+      prisma.duplicateDetectionRun.findUnique({ where: { id: "singleton" } }),
+    ],
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
 
   return {
     groups: groups.map((group) => ({
@@ -489,11 +504,12 @@ export async function mergeBooksData(
   // titles as owned.
   await recheckOwnedTbrItems();
 
-  // The merged-away rows may have been members of other duplicate groups
-  // too (a book can plausibly duplicate more than one other book), so the
-  // persisted cache needs a full recompute, not just removing the merged
-  // group -- same "recompute after data changes" hook as the sync routes
-  // and book-creation actions use.
+  // The merged-away rows are gone, so their DuplicateGroup row would need
+  // to shrink (or, once it drops below 2 books, disappear entirely) --
+  // recomputing from scratch is simpler and just as cheap as writing
+  // dedicated shrink-or-delete logic for that one group, so this reuses
+  // the same "recompute after data changes" hook the sync routes and
+  // book-creation actions use rather than partially updating in place.
   await refreshDuplicateGroupsCache();
 
   return { ok: true };
