@@ -3,6 +3,7 @@ import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from
 import { findBestTitleMatch } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { refreshDuplicateGroupsCache } from "@/lib/duplicates";
 import { parseSeriesFromTitle } from "@/lib/series";
 
 export interface BookFormState {
@@ -250,26 +251,34 @@ export async function updateBookData(
 
   const existing = await prisma.book.findUniqueOrThrow({
     where: { id: bookId },
-    select: { title: true },
+    select: { title: true, author: true, isbn: true },
   });
+  const author = input.author.trim() || null;
+  const isbn = normalizeIsbn(input.isbn) || null;
 
   await prisma.book.update({
     where: { id: bookId },
-    data: {
-      title,
-      author: input.author.trim() || null,
-      isbn: normalizeIsbn(input.isbn) || null,
-    },
+    data: { title, author, isbn },
   });
 
   // Both hooks run only on a real title change, and only AFTER the update
-  // commits -- recheckOwnedTbrItems reads the live Book table, so running it
-  // first would still see the old title and no-op. Recheck first (drop rows
-  // the old title was keeping owned), then mark (pick up rows the new title
-  // now covers).
+  // commits -- recheckOwnedTbrItems reads the live Book table, so running
+  // it first would still see the old title and no-op. Recheck first (drop
+  // TBR rows the old title was keeping owned), then mark (pick up rows
+  // the new title now covers). TBR matching is title-only, so
+  // author/isbn changes don't affect it.
   if (existing.title !== title) {
     await recheckOwnedTbrItems();
     await markTbrItemsOwnedByTitle(title);
+  }
+
+  // Duplicate grouping depends on title, AND (for the narrow
+  // physical-only sync-race case, see authorsMatchNonNull/isbnCompatible
+  // in duplicates.ts) on author and isbn too -- an author/isbn-only edit
+  // with no title change can still flip that case, so this can't be
+  // folded into the title-only guard above.
+  if (existing.title !== title || existing.author !== author || existing.isbn !== isbn) {
+    await refreshDuplicateGroupsCache();
   }
 
   return { ok: true };

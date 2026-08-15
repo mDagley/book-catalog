@@ -3,6 +3,7 @@ import { parseCopyFields } from "@/lib/books";
 import { resolveCoverUpdate, type CoverSelectionInput } from "@/lib/copyCovers";
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { refreshDuplicateGroupsCache } from "@/lib/duplicates";
 
 export interface CopyFormState {
   error?: string;
@@ -89,6 +90,11 @@ export async function deleteCopyData(
       // only in this branch: a Book that survives hasn't changed which
       // titles exist, so no recheck is warranted then.
       await recheckOwnedTbrItems();
+      // The deleted book may have been a member of a persisted duplicate
+      // group (Copilot review finding on PR #44: without this, the group's
+      // row would still exist referencing one fewer book than it was
+      // computed with, potentially left with only 1 book).
+      await refreshDuplicateGroupsCache();
       return { bookId: copy.bookId, bookDeleted: true };
     }
   }

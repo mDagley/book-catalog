@@ -8,6 +8,7 @@ import {
   updateSeriesData,
   saveCoverFromUrl,
 } from "@/lib/books";
+import { getDuplicateGroups } from "@/lib/duplicates";
 
 const createdBookIds: string[] = [];
 const createdTbrItemIds: string[] = [];
@@ -26,6 +27,10 @@ afterEach(async () => {
 
   await prisma.goodreadsTbrItem.deleteMany({ where: { id: { in: createdTbrItemIds } } });
   createdTbrItemIds.length = 0;
+
+  // Book.duplicateGroupId is ON DELETE SET NULL, so deleting the books
+  // above can leave now-empty DuplicateGroup rows behind.
+  await prisma.duplicateGroup.deleteMany({ where: { books: { none: {} } } });
 });
 
 describe("createBookWithCopyData", () => {
@@ -619,6 +624,87 @@ describe("updateBookData", () => {
 
     const after = await prisma.goodreadsTbrItem.findUniqueOrThrow({ where: { id: tbr.id } });
     expect(after.owned).toBe(true);
+  });
+
+  it("refreshes the persisted duplicate-groups cache when a title edit creates a new match", async () => {
+    const other = await prisma.book.create({
+      data: {
+        title: "Test Books Zeta Preexisting Ebook Title",
+        hasEbook: true,
+        ebookCopies: { create: { absItemId: "test-books-zeta-ebook" } },
+      },
+    });
+    createdBookIds.push(other.id);
+
+    const created = await createBookWithCopyData({
+      title: "Test Books Zeta Unrelated Starting Title",
+      author: "",
+      isbn: "",
+      format: "OTHER",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in created) throw new Error("test setup failed");
+    createdBookIds.push(created.bookId);
+
+    let read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === created.bookId))).toBe(false);
+
+    const result = await updateBookData(created.bookId, {
+      title: "Test Books Zeta Preexisting Ebook Title",
+      author: "",
+      isbn: "",
+    });
+    expect(result).toEqual({ ok: true });
+
+    read = await getDuplicateGroups();
+    const group = read.groups.find((g) => g.books.some((book) => book.id === created.bookId));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([created.bookId, other.id].sort());
+  });
+
+  it("refreshes the persisted duplicate-groups cache on an author-only edit (no title change)", async () => {
+    // Two physical-only books sharing an exact title but no author don't
+    // group -- authorsMatchNonNull (duplicates.ts) requires BOTH sides to
+    // have a matching non-null author before two physical-only rows are
+    // treated as the owned-physical-sync create-race duplicate. Editing
+    // just the author (title untouched) is what flips that, so the
+    // refresh has to fire on an author-only change too, not just a title
+    // change.
+    const other = await prisma.book.create({
+      data: {
+        title: "Test Books Eta Shared Physical Title",
+        author: "Shared Author",
+        copies: { create: { format: "HARDCOVER" } },
+      },
+    });
+    createdBookIds.push(other.id);
+
+    const created = await createBookWithCopyData({
+      title: "Test Books Eta Shared Physical Title",
+      author: "",
+      isbn: "",
+      format: "PAPERBACK",
+      publisher: "",
+      publishYear: "",
+      specialNotes: "",
+    });
+    if ("error" in created) throw new Error("test setup failed");
+    createdBookIds.push(created.bookId);
+
+    let read = await getDuplicateGroups();
+    expect(read.groups.some((g) => g.books.some((book) => book.id === created.bookId))).toBe(false);
+
+    const result = await updateBookData(created.bookId, {
+      title: "Test Books Eta Shared Physical Title",
+      author: "Shared Author",
+      isbn: "",
+    });
+    expect(result).toEqual({ ok: true });
+
+    read = await getDuplicateGroups();
+    const group = read.groups.find((g) => g.books.some((book) => book.id === created.bookId));
+    expect(group?.books.map((book) => book.id).sort()).toEqual([created.bookId, other.id].sort());
   });
 });
 
