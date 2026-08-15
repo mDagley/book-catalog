@@ -35,7 +35,37 @@ model Book {
   seriesPosition Float?
   seriesManual   Boolean @default(false)
 
+  duplicateGroupId String?
+  duplicateGroup   DuplicateGroup? @relation(fields: [duplicateGroupId], references: [id])
+
   @@index([isbn])
+  @@index([duplicateGroupId])
+}
+
+// Persisted output of findDuplicateBookGroups() (src/lib/duplicates.ts),
+// recomputed by refreshDuplicateGroupsCache() at the end of every sync
+// (ABS, owned-physical) and every book-creation/merge flow, rather than
+// recomputed on each /books/duplicates page view -- this data only changes
+// when the underlying Book rows do, matching this project's data
+// freshness model (persist derived state at write time, don't recompute
+// on read). A row only exists for groups of 2+ candidate books; a merge
+// that resolves a group deletes it as part of the next refresh.
+model DuplicateGroup {
+  id         String   @id @default(cuid())
+  computedAt DateTime @default(now())
+  books      Book[]
+}
+
+// Singleton row (fixed id) recording whether the most recent
+// refreshDuplicateGroupsCache() run hit findDuplicateBookGroups's internal
+// fuzzy-comparison safety cap -- kept as defense-in-depth even though the
+// scoreUpperBound() prefilter (see duplicates.ts) makes hitting it very
+// unlikely at real catalog scale. Read by the duplicates page to decide
+// whether to show an "incomplete" notice.
+model DuplicateDetectionRun {
+  id         String   @id @default("singleton")
+  truncated  Boolean  @default(false)
+  computedAt DateTime @default(now())
 }
 
 model PhysicalCopy {

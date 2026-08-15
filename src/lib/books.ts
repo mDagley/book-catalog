@@ -3,6 +3,7 @@ import { saveCoverImage, SAFE_COVER_FILENAME, UnsupportedCoverFormatError } from
 import { findBestTitleMatch } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
 import { markTbrItemsOwnedByTitle, recheckOwnedTbrItems } from "@/lib/tbrGap";
+import { refreshDuplicateGroupsCache } from "@/lib/duplicates";
 import { parseSeriesFromTitle } from "@/lib/series";
 
 export interface BookFormState {
@@ -262,14 +263,18 @@ export async function updateBookData(
     },
   });
 
-  // Both hooks run only on a real title change, and only AFTER the update
-  // commits -- recheckOwnedTbrItems reads the live Book table, so running it
-  // first would still see the old title and no-op. Recheck first (drop rows
-  // the old title was keeping owned), then mark (pick up rows the new title
-  // now covers).
+  // All three hooks run only on a real title change, and only AFTER the
+  // update commits -- each reads the live Book table, so running any of
+  // them first would still see the old title and no-op. Recheck first
+  // (drop TBR rows the old title was keeping owned), then mark (pick up
+  // rows the new title now covers), then refresh duplicates last -- a
+  // title edit can just as easily create a new duplicate group (edited
+  // into matching another book) as resolve an existing one (edited away
+  // from a false match).
   if (existing.title !== title) {
     await recheckOwnedTbrItems();
     await markTbrItemsOwnedByTitle(title);
+    await refreshDuplicateGroupsCache();
   }
 
   return { ok: true };

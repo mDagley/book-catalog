@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { findDuplicateBookGroups } from "@/lib/duplicates";
+import { getDuplicateGroups, refreshDuplicateGroupsCache } from "@/lib/duplicates";
 import { mergeBooks } from "@/lib/actions/duplicates";
 import { MergeButton } from "@/app/books/duplicates/MergeButton";
 import { TicketCard } from "@/components/ui/TicketCard";
@@ -7,7 +7,15 @@ import { TicketCard } from "@/components/ui/TicketCard";
 export const dynamic = "force-dynamic";
 
 export default async function DuplicateBooksPage() {
-  const { groups, truncated } = await findDuplicateBookGroups();
+  // Duplicate groups are computed at sync/create/merge time and persisted
+  // (see refreshDuplicateGroupsCache() in duplicates.ts) rather than
+  // recomputed on every page view. `computedAt === null` only happens once
+  // ever, on the very first visit after this cache was introduced (or a
+  // fresh install) before any sync/create/merge has run yet -- bootstrap it
+  // here so the page doesn't just show an empty result.
+  const cached = await getDuplicateGroups();
+  const { groups, truncated } =
+    cached.computedAt === null ? await refreshDuplicateGroupsCache() : cached;
 
   return (
     <main className="mx-auto max-w-2xl p-4">
@@ -28,8 +36,8 @@ export default async function DuplicateBooksPage() {
       </p>
       {truncated && (
         <p className="mb-4 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">
-          Duplicate detection stopped early to stay fast — some duplicates may not be shown below.
-          Try again later, or run this less often if it keeps happening.
+          The last duplicate scan (at sync time) hit an internal safety limit before finishing —
+          some duplicates may be missing below. This list will be recomputed at the next sync.
         </p>
       )}
 

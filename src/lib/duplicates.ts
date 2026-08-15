@@ -1,5 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { titleMatchScore, titleForms, normalizeTitle, DEFAULT_MATCH_THRESHOLD } from "@/lib/matching";
+import {
+  titleForms,
+  normalizeTitle,
+  charCounts,
+  scoreUpperBound,
+  sequenceMatcherRatio,
+  DEFAULT_MATCH_THRESHOLD,
+} from "@/lib/matching";
 import { recheckOwnedTbrItems } from "@/lib/tbrGap";
 
 export interface DuplicateCandidate {
@@ -21,17 +28,38 @@ export interface FindDuplicateGroupsResult {
   truncated: boolean;
 }
 
-// Hard cap on total titleMatchScore calls per run -- defense-in-depth
-// against the O(n^2) all-pairs shape below. Measured directly against this
-// function (not assumed from the unrelated 2026-07-18 incident's numbers,
-// which turned out not to transfer): ~2,500 titleMatchScore calls/second on
-// this hardware, so 1500 bounds the fuzzy tier's worst case to roughly
-// 0.6s, leaving headroom under the 1-second target even in the degenerate
-// case where tier 1 resolves nothing (see the performance regression test
-// in duplicates.test.ts). Exposed as an optional param (see
+// Hard cap on total sequenceMatcherRatio calls per run -- defense-in-depth
+// against the O(n^2) all-pairs shape below, kept even though
+// scoreUpperBound() prefiltering (see the tier-2 loop) makes it very rare
+// to reach. The original version of this cap counted every
+// titleMatchScore call, i.e. every candidate PAIR that reached tier 2 --
+// at realistic catalog scale (~700 digitally-relevant rows) that's on the
+// order of 245,000 pairs, almost none of which are real duplicates, so the
+// cap (1500) was hit almost immediately and this page was truncating on
+// nearly every visit (see the duplicates page performance design doc's
+// follow-up note).
+//
+// scoreUpperBound() is an O(title length) filter, PROVEN to never exceed
+// the true score (see its own doc comment), so gating the expensive
+// O(len_a * len_b) sequenceMatcherRatio call behind it is lossless -- no
+// pair that could reach DEFAULT_MATCH_THRESHOLD is skipped, only pairs that
+// provably cannot. Measured directly against several 700-row fixtures of
+// varying "how similar do these titles look" density (see
+// duplicates.test.ts's performance regression test and its sibling
+// investigation): a realistic mixed-length catalog produces on the order
+// of tens of real sequenceMatcherRatio calls; a deliberately pathological
+// catalog (700 titles built from a 15-word pool, 5 words each -- far
+// denser overlap than any real library) still only reaches ~3,200 calls,
+// completing in ~100ms. This cap is set well above that pathological case,
+// not tuned to a 1-second budget: unlike the original version, this
+// function is no longer called on every /books/duplicates page view (see
+// refreshDuplicateGroupsCache()) -- it now runs once at the end of each
+// sync/create/merge, alongside operations that already take seconds
+// (network round-trips to ABS/Goodreads), so there's no interactive-page
+// latency to protect. Exposed as an optional param (see
 // findDuplicateBookGroups) purely so tests can exercise the cap without
 // needing thousands of fixture rows.
-const FUZZY_DUPLICATE_CAP = 1500;
+const FUZZY_DUPLICATE_CAP = 50_000;
 
 // Narrow exception to the "never group two physical-only books" rule below,
 // for the specific signature produced by syncOwnedPhysicalBooks's
@@ -81,14 +109,17 @@ function isbnCompatible(a: string | null, b: string | null): boolean {
 //   titleForms() already normalizes into a small set of variant strings.
 //   Two books sharing an exact normalized form are guaranteed to score 100,
 //   so they're unioned directly with zero titleMatchScore calls.
-// - Tier 2 (capped fuzzy fallback): the existing O(n^2) pair iteration
-//   stays (cheap on its own -- plain comparisons over a few hundred rows
-//   are sub-millisecond), but a pair only reaches the expensive
-//   titleMatchScore call if it's digitally-relevant AND not already
-//   unioned by tier 1. This is capped at fuzzyCap total calls; once hit,
-//   remaining pairs are skipped for this run and `truncated: true` is
-//   returned, since this page is human-reviewed and a silently incomplete
-//   result could read as "no more duplicates."
+// - Tier 2 (bound-filtered fuzzy fallback): the existing O(n^2) pair
+//   iteration stays (cheap on its own -- plain comparisons over a few
+//   hundred rows are sub-millisecond), restricted to pairs that are
+//   digitally-relevant AND not already unioned by tier 1. Each such pair is
+//   run through scoreUpperBound() (matching.ts) BEFORE the expensive
+//   sequenceMatcherRatio call -- a proven, lossless upper bound that lets
+//   most non-duplicate pairs be rejected in O(title length) instead of
+//   O(len_a * len_b). A hard cap on actual sequenceMatcherRatio calls
+//   remains as defense-in-depth; once hit, remaining pairs are skipped for
+//   this run and `truncated: true` is returned, since a silently
+//   incomplete result could read as "no more duplicates."
 export async function findDuplicateBookGroups(
   fuzzyCap: number = FUZZY_DUPLICATE_CAP,
 ): Promise<FindDuplicateGroupsResult> {
@@ -200,7 +231,36 @@ export async function findDuplicateBookGroups(
     }
   }
 
+  // Per-candidate titleForms() + per-form character counts, computed lazily
+  // (only for candidates that actually reach a tier-2 comparison) and cached
+  // by id so a candidate compared against many others in the O(n^2) loop
+  // below only pays the titleForms()/charCounts() cost once.
+  interface FormEntry {
+    form: string;
+    counts: Map<string, number>;
+  }
+  const formEntriesById = new Map<string, FormEntry[]>();
+  function formEntriesFor(c: DuplicateCandidate): FormEntry[] {
+    let entries = formEntriesById.get(c.id);
+    if (!entries) {
+      entries = titleForms(c.title).map((form) => ({ form, counts: charCounts(form) }));
+      formEntriesById.set(c.id, entries);
+    }
+    return entries;
+  }
+
   // Tier 2: capped fuzzy fallback for pairs tier 1 didn't already group.
+  //
+  // The O(n^2) pair loop itself stays (cheap on its own), but unlike a
+  // naive version that calls the expensive O(len_a * len_b)
+  // sequenceMatcherRatio for every reachable pair, each form-pair is first
+  // checked against scoreUpperBound() -- an O(len_a + len_b) filter that's
+  // a proven upper bound on the real score (see its doc comment in
+  // matching.ts), so skipping a pair whose bound is already below
+  // DEFAULT_MATCH_THRESHOLD (or below the best score already found for
+  // this candidate pair) never discards a genuine match. This is what
+  // keeps fuzzyCalls -- and therefore real risk of hitting fuzzyCap -- low
+  // even though the loop still visits every candidate pair.
   let fuzzyCalls = 0;
   let truncated = false;
   outer: for (let i = 0; i < candidates.length; i++) {
@@ -219,12 +279,24 @@ export async function findDuplicateBookGroups(
       // Already grouped by tier 1 (or a prior tier-2 match) -- no need to
       // spend a fuzzy comparison confirming what's already known.
       if (find(a.id) === find(b.id)) continue;
-      if (fuzzyCalls >= fuzzyCap) {
-        truncated = true;
-        break outer;
+
+      const entriesA = formEntriesFor(a);
+      const entriesB = formEntriesFor(b);
+      let best = 0;
+      for (const fa of entriesA) {
+        for (const fb of entriesB) {
+          const bound = scoreUpperBound(fa.form, fa.counts, fb.form, fb.counts);
+          if (bound < DEFAULT_MATCH_THRESHOLD || bound <= best) continue;
+          if (fuzzyCalls >= fuzzyCap) {
+            truncated = true;
+            break outer;
+          }
+          fuzzyCalls++;
+          const score = sequenceMatcherRatio(fa.form, fb.form) * 100;
+          if (score > best) best = score;
+        }
       }
-      fuzzyCalls++;
-      if (titleMatchScore(a.title, b.title) >= DEFAULT_MATCH_THRESHOLD) {
+      if (best >= DEFAULT_MATCH_THRESHOLD) {
         union(a.id, b.id);
       }
     }
@@ -249,6 +321,97 @@ export async function findDuplicateBookGroups(
       .filter((group) => group.length > 1)
       .map((books) => ({ books })),
     truncated,
+  };
+}
+
+export interface PersistedDuplicateGroup {
+  id: string;
+  computedAt: Date;
+  books: DuplicateCandidate[];
+}
+
+export interface GetDuplicateGroupsResult {
+  groups: PersistedDuplicateGroup[];
+  truncated: boolean;
+  // null when refreshDuplicateGroupsCache() has never run -- the caller
+  // (the duplicates page) uses this to bootstrap the cache on its very
+  // first-ever visit rather than showing an empty page.
+  computedAt: Date | null;
+}
+
+// Recomputes findDuplicateBookGroups() and persists the result as
+// DuplicateGroup rows, replacing whatever was there before. Called at the
+// end of every flow that can change which books look like duplicates of
+// each other (ABS sync, owned-physical sync, manual book creation, and
+// merge) -- see call sites in absSync.ts's route, ownedPhysicalSync.ts's
+// route, actions/books.ts, and actions/duplicates.ts. The duplicates page
+// itself only reads via getDuplicateGroups(), it never calls this,
+// matching this project's data freshness model (persist derived state at
+// write time, don't recompute on read).
+export async function refreshDuplicateGroupsCache(): Promise<FindDuplicateGroupsResult> {
+  const result = await findDuplicateBookGroups();
+
+  // DuplicateGroup rows are fully disposable derived data (nothing else
+  // references them, and Book.duplicateGroupId is ON DELETE SET NULL --
+  // see the migration), so the simplest correct update is delete-then-
+  // recreate rather than diffing old groups against new ones.
+  await prisma.$transaction([
+    prisma.duplicateGroup.deleteMany({}),
+    ...result.groups.map((group) =>
+      prisma.duplicateGroup.create({
+        data: { books: { connect: group.books.map((book) => ({ id: book.id })) } },
+      }),
+    ),
+    prisma.duplicateDetectionRun.upsert({
+      where: { id: "singleton" },
+      create: { truncated: result.truncated },
+      update: { truncated: result.truncated, computedAt: new Date() },
+    }),
+  ]);
+
+  return result;
+}
+
+// Reads the persisted result of the most recent refreshDuplicateGroupsCache()
+// run -- what the duplicates page renders. No titleMatchScore/fuzzy work
+// happens here, just relational reads.
+export async function getDuplicateGroups(): Promise<GetDuplicateGroupsResult> {
+  const [groups, run] = await Promise.all([
+    prisma.duplicateGroup.findMany({
+      include: {
+        books: {
+          select: {
+            id: true,
+            title: true,
+            author: true,
+            isbn: true,
+            hasEbook: true,
+            hasAudiobook: true,
+            _count: { select: { copies: true } },
+          },
+        },
+      },
+      orderBy: { computedAt: "asc" },
+    }),
+    prisma.duplicateDetectionRun.findUnique({ where: { id: "singleton" } }),
+  ]);
+
+  return {
+    groups: groups.map((group) => ({
+      id: group.id,
+      computedAt: group.computedAt,
+      books: group.books.map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn,
+        copiesCount: book._count.copies,
+        hasEbook: book.hasEbook,
+        hasAudiobook: book.hasAudiobook,
+      })),
+    })),
+    truncated: run?.truncated ?? false,
+    computedAt: run?.computedAt ?? null,
   };
 }
 
@@ -325,6 +488,13 @@ export async function mergeBooksData(
   // post-delete state, not a stale snapshot that still sees the doomed
   // titles as owned.
   await recheckOwnedTbrItems();
+
+  // The merged-away rows may have been members of other duplicate groups
+  // too (a book can plausibly duplicate more than one other book), so the
+  // persisted cache needs a full recompute, not just removing the merged
+  // group -- same "recompute after data changes" hook as the sync routes
+  // and book-creation actions use.
+  await refreshDuplicateGroupsCache();
 
   return { ok: true };
 }
