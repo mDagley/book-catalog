@@ -8,10 +8,13 @@ import {
 } from "@/lib/search";
 import { getDensity } from "@/lib/density";
 import { setDensity } from "@/lib/actions/density";
+import { getViewMode } from "@/lib/viewMode";
+import { setViewMode } from "@/lib/actions/viewMode";
 import { RefreshSyncButton } from "@/components/RefreshSyncButton";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { CatalogResultCard } from "@/components/CatalogResultCard";
 import { CatalogFilters } from "@/components/CatalogFilters";
+import { CoverGridCard } from "@/components/CoverGridCard";
 import { Button } from "@/components/ui/Button";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +44,7 @@ export default async function HomePage({
   const statusMode = parseStatusModeParam(statusModeParam);
 
   const density = await getDensity("home");
+  const viewMode = await getViewMode("home");
   const results = await searchCatalog({ query, types, format, status, statusMode });
   // Whether ANY search input is active (query included) -- used to decide
   // whether "No matches found" is meaningful (an empty, filter-less page
@@ -53,7 +57,7 @@ export default async function HomePage({
   const hasActiveFilterChrome = Boolean(types || format || status);
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-2xl p-4">
+    <main className={`mx-auto w-full min-w-0 p-4 ${viewMode === "grid" ? "max-w-6xl" : "max-w-2xl"}`}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">Book Catalog</h1>
         <RefreshSyncButton />
@@ -88,24 +92,42 @@ export default async function HomePage({
             Library stats
           </Link>
         </div>
-        <form action={setDensity.bind(null, "home", density === "compact" ? "comfortable" : "compact")}>
-          <button type="submit" className="text-link underline">
-            {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
-          </button>
-        </form>
+        <div className="flex flex-wrap items-center gap-4">
+          <form action={setViewMode.bind(null, "home", viewMode === "grid" ? "list" : "grid")}>
+            <button type="submit" className="text-link underline">
+              {viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
+            </button>
+          </form>
+          {viewMode === "list" && (
+            <form
+              action={setDensity.bind(null, "home", density === "compact" ? "comfortable" : "compact")}
+            >
+              <button type="submit" className="text-link underline">
+                {density === "compact" ? "Switch to comfortable view" : "Switch to compact view"}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
 
       {hasActiveSearch && results.length === 0 && (
         <p className="text-foreground/70">No matches found.</p>
       )}
 
-      {results.length > 0 && (
-        <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
-          {results.map((result) => (
-            <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
-          ))}
-        </ul>
-      )}
+      {results.length > 0 &&
+        (viewMode === "grid" ? (
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+            {results.map((result) => (
+              <CoverGridCard key={result.bookId ?? result.title} result={result} />
+            ))}
+          </ul>
+        ) : (
+          <ul className={density === "compact" ? "space-y-1" : "space-y-3"}>
+            {results.map((result) => (
+              <CatalogResultCard key={result.bookId ?? result.title} result={result} density={density} />
+            ))}
+          </ul>
+        ))}
 
       <form action="/api/logout" method="post" className="mt-6">
         <button type="submit" className="text-sm text-link underline">
