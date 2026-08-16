@@ -2,11 +2,11 @@
 
 ## Goal
 
-Surface price drops on TBR gap items (`/tbr`) for libro.fm and Google Play Books — the user's preferred, DRM-free purchase sources — without recompute-on-read: prices are scraped on a daily schedule and persisted, matching this project's data-freshness model.
+Surface price drops on TBR gap items (`/tbr`) for libro.fm and Google Play Books — the user's preferred, DRM-free purchase sources — without recompute-on-read: prices are fetched on a daily schedule and persisted, matching this project's data-freshness model.
 
 ## Background
 
-Neither retailer publishes a deals/sales API. The only source of price data is each book's own product page, so this feature is a scraper, not an API integration — with the reliability trade-offs that implies (page structure can change, requests can be blocked, a "sale" is inferred from price history rather than an explicit flag the retailer provides).
+libro.fm publishes no deals/sales API, so its price comes from scraping the book's own product page — with the reliability trade-offs that implies (page structure can change, requests can be blocked, a "sale" is inferred from price history rather than an explicit flag the retailer provides). Google Play Books' search results page is not reliably scrapable (prices are embedded only in obfuscated JS array literals, not stable HTML/CSS), so that retailer is matched and priced via the Google Books API instead. Both paths land in the same `RetailerMatch`/`PriceObservation` model below.
 
 `GoodreadsTbrItem` (`prisma/schema.prisma`) is the existing source for `/tbr`, surfaced via `getTbrGap`/`groupByInitial` (`src/lib/tbrGap.ts`). This feature adds retailer matching and price history on top of that model without changing it.
 
@@ -34,10 +34,12 @@ model PriceObservation {
   id              String   @id @default(cuid())
   retailerMatchId String
   retailerMatch   RetailerMatch @relation(fields: [retailerMatchId], references: [id])
-  price           Decimal
+  price           Float
   observedAt      DateTime @default(now())
 }
 ```
+
+`price` is `Float`, not `Decimal` — matching this schema's existing precedent for non-integer numeric fields (`Book.seriesPosition`). This feature only ever compares two prices for "did it go down"; `Decimal`'s exact-cents precision isn't worth the added `Prisma.Decimal` handling it would impose on every read site.
 
 - `@@unique([tbrItemId, retailer])` — at most one match per (item, retailer) pair; re-running the matcher against an item that already has a match (confirmed or not) is a no-op, not a duplicate row.
 - `PriceObservation` is append-only. Price history and "did it drop" both fall out of querying the newest two rows per match — no separate "last known price" field to keep in sync, and no schema change needed if the alerting logic ever needs more than a two-point comparison later.
@@ -45,21 +47,23 @@ model PriceObservation {
 
 ## Retailer matching + confirmation
 
-New module `src/lib/priceTracking.ts`, structured like `absSync.ts`/`goodreadsSync.ts`.
+New module `src/lib/priceTracking.ts`, structured like `absSync.ts`/`goodreadsSync.ts`, delegating to a per-retailer adapter (`src/lib/retailers/librofm.ts`, `src/lib/retailers/googleplay.ts`) behind a shared `RetailerAdapter` interface.
 
 `findRetailerMatches()`:
-- For every `GoodreadsTbrItem` with `owned: false` that does not yet have a `RetailerMatch` row for a given retailer, search that retailer by title + author, fetch the results page with `fetch()`, and parse it with `cheerio`.
+- For every `GoodreadsTbrItem` with `owned: false` that does not yet have a `RetailerMatch` row for a given retailer, search that retailer by title + author.
+  - **libro.fm:** fetch the search results page with `fetch()` and parse it with `cheerio`.
+  - **Google Play Books:** query the Google Books API (optionally authenticated via `GOOGLE_BOOKS_API_KEY` for a higher quota) rather than scraping the search page — that page's results are embedded only in obfuscated JS, not stable HTML/CSS.
 - Take the top result and write an unconfirmed `RetailerMatch` (`confirmed: false`), storing the matched title/author so the confirm prompt can show what was actually found.
-- No automatic promotion to `confirmed` — every match needs one manual confirm, regardless of how exact the title match looks. This is a deliberate floor: a wrong silent match would scrape and alert on the wrong book's price indefinitely.
+- No automatic promotion to `confirmed` — every match needs one manual confirm, regardless of how exact the title match looks. This is a deliberate floor: a wrong silent match would fetch and alert on the wrong book's price indefinitely.
 
 Confirmation UI lives on `/tbr` itself (see UI section) via two new server actions, `confirmRetailerMatch(matchId)` and `rejectRetailerMatch(matchId)` (mirroring `setViewMode`'s existing bind-and-submit shape). Reject deletes the `RetailerMatch` row outright — `findRetailerMatches()` will attempt that (item, retailer) pair again on its next run, since the unique constraint no longer blocks it.
 
 ## Price scraping
 
 `scrapePrices()`:
-- For every `RetailerMatch` where `confirmed: true`, fetch `productUrl` and parse the current price with the same fetch+cheerio approach.
-- Insert one `PriceObservation` row per successful scrape. A failed scrape (network error, price element not found — page structure likely changed) is caught, logged with the retailer and `productUrl`, and skipped; it does not insert a row and does not stop the rest of the batch.
-- Only confirmed matches are scraped — this bounds daily scrape volume to books the user has actually vetted, not the full TBR list, and means an unconfirmed match sitting unreviewed costs nothing beyond the one-time matching request.
+- For every `RetailerMatch` where `confirmed: true`, fetch the current price via that retailer's adapter — `productUrl` + fetch/cheerio for libro.fm, the Google Books API for Google Play Books.
+- Insert one `PriceObservation` row per successful fetch. A failure (network error, price not found — page structure or API response likely changed) is caught, logged with the retailer and `productUrl`, and skipped; it does not insert a row and does not stop the rest of the batch.
+- Only confirmed matches are priced — this bounds daily request volume to books the user has actually vetted, not the full TBR list, and means an unconfirmed match sitting unreviewed costs nothing beyond the one-time matching request.
 
 `getPriceDrops(): Promise<PriceDrop[]>`:
 - For each confirmed `RetailerMatch` with at least two `PriceObservation` rows, compares the newest against the previous one.
@@ -97,7 +101,7 @@ Both grid (`CoverGridCard`) and list (`TicketCard`) rendering on `/tbr` gain a p
 
 ## Non-goals
 
-- **No headless browser / JS rendering.** Plain `fetch()` + `cheerio` HTML parsing only. Both target retailers' product/search pages are expected to be server-rendered enough for this to work; if a retailer turns out to require JS rendering for price, that scraper simply fails every run (caught, logged, no observation inserted) until addressed as a follow-up — not a silent wrong price.
+- **No headless browser / JS rendering.** libro.fm uses plain `fetch()` + `cheerio` HTML parsing; Google Play Books uses the Google Books API rather than scraping. If libro.fm's pages turn out to need JS rendering for price, that adapter simply fails every run (caught, logged, no observation inserted) until addressed as a follow-up — not a silent wrong price.
 - **No retry/backoff beyond "try again tomorrow."** A failed scrape or match just waits for the next daily cron run.
 - **No automatic match confirmation**, however exact the title match looks — every `RetailerMatch` requires one manual confirm before it's ever scraped.
 - **No manual "search for matches now" or "rescrape now" button** in this pass — matching and scraping are cron-only. (The existing `RecomputeOwnershipButton` precedent shows this project is comfortable adding manual triggers later if the daily cadence proves too slow in practice.)
