@@ -1,0 +1,71 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { sendPriceDropDigest } from "@/lib/emailDigest";
+import type { PriceDrop } from "@/lib/priceTracking";
+
+const originalFetch = global.fetch;
+const originalKey = process.env.RESEND_API_KEY;
+const originalTo = process.env.PRICE_ALERT_EMAIL;
+
+afterEach(() => {
+  global.fetch = originalFetch;
+  process.env.RESEND_API_KEY = originalKey;
+  process.env.PRICE_ALERT_EMAIL = originalTo;
+  vi.restoreAllMocks();
+});
+
+const SAMPLE_DROPS: PriceDrop[] = [
+  { tbrItemId: "1", tbrItemTitle: "The Way of Kings", retailer: "librofm", previousPrice: 52.49, newPrice: 39.99 },
+];
+
+describe("sendPriceDropDigest", () => {
+  it("sends one email via the Resend API when there are drops", async () => {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.PRICE_ALERT_EMAIL = "me@example.com";
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "abc" }) } as Response);
+
+    await sendPriceDropDigest(SAMPLE_DROPS);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0];
+    expect(url).toBe("https://api.resend.com/emails");
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer test-key" });
+    const body = JSON.parse(init!.body as string);
+    expect(body.to).toEqual(["me@example.com"]);
+    expect(body.html).toContain("The Way of Kings");
+    expect(body.html).toContain("52.49");
+    expect(body.html).toContain("39.99");
+  });
+
+  it("does nothing when there are no drops", async () => {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.PRICE_ALERT_EMAIL = "me@example.com";
+    global.fetch = vi.fn();
+
+    await sendPriceDropDigest([]);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("logs and does not throw when RESEND_API_KEY is unset", async () => {
+    delete process.env.RESEND_API_KEY;
+    process.env.PRICE_ALERT_EMAIL = "me@example.com";
+    global.fetch = vi.fn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(sendPriceDropDigest(SAMPLE_DROPS)).resolves.toBeUndefined();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("catches and logs a send failure instead of throwing", async () => {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.PRICE_ALERT_EMAIL = "me@example.com";
+    global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(sendPriceDropDigest(SAMPLE_DROPS)).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalled();
+  });
+});
