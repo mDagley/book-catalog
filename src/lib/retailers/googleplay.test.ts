@@ -5,7 +5,14 @@ const originalFetch = global.fetch;
 const originalEnv = process.env.GOOGLE_BOOKS_API_KEY;
 afterEach(() => {
   global.fetch = originalFetch;
-  process.env.GOOGLE_BOOKS_API_KEY = originalEnv;
+  // Assigning `undefined` back would set the string "undefined" (process.env
+  // values are always strings), leaking a truthy key into later tests --
+  // delete instead when it was never set.
+  if (originalEnv === undefined) {
+    delete process.env.GOOGLE_BOOKS_API_KEY;
+  } else {
+    process.env.GOOGLE_BOOKS_API_KEY = originalEnv;
+  }
   vi.restoreAllMocks();
 });
 

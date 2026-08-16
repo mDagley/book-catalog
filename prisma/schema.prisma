@@ -141,6 +141,9 @@ model RetailerMatch {
   observations  PriceObservation[]
 
   @@unique([tbrItemId, retailer])
+  // scrapePrices/getPriceDrops both scan for confirmed matches on every
+  // daily run and every /tbr page load respectively.
+  @@index([confirmed])
 }
 
 model PriceObservation {
@@ -154,4 +157,8 @@ model PriceObservation {
   // on every read site.
   price      Float
   observedAt DateTime @default(now())
+
+  // getTbrGap/getPriceDrops both filter by retailerMatchId and take the 2
+  // newest rows by observedAt on every /tbr page load and daily cron run.
+  @@index([retailerMatchId, observedAt])
 }

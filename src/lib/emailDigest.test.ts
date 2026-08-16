@@ -8,8 +8,19 @@ const originalTo = process.env.PRICE_ALERT_EMAIL;
 
 afterEach(() => {
   global.fetch = originalFetch;
-  process.env.RESEND_API_KEY = originalKey;
-  process.env.PRICE_ALERT_EMAIL = originalTo;
+  // Assigning `undefined` back would set the string "undefined" (process.env
+  // values are always strings), leaking a truthy value into later tests --
+  // delete instead when it was never set.
+  if (originalKey === undefined) {
+    delete process.env.RESEND_API_KEY;
+  } else {
+    process.env.RESEND_API_KEY = originalKey;
+  }
+  if (originalTo === undefined) {
+    delete process.env.PRICE_ALERT_EMAIL;
+  } else {
+    process.env.PRICE_ALERT_EMAIL = originalTo;
+  }
   vi.restoreAllMocks();
 });
 

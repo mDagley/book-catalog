@@ -44,7 +44,10 @@ async function fetchPrice(productUrl: string): Promise<number | null> {
   const id = new URL(productUrl).searchParams.get("id");
   if (!id) return null;
 
-  const url = `${API_BASE}/${encodeURIComponent(id)}?${apiKeyParam().replace(/^&/, "")}`;
+  const key = process.env.GOOGLE_BOOKS_API_KEY;
+  const url = key
+    ? `${API_BASE}/${encodeURIComponent(id)}?key=${encodeURIComponent(key)}`
+    : `${API_BASE}/${encodeURIComponent(id)}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Google Books volume fetch failed: HTTP ${response.status}`);
