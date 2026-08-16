@@ -1,5 +1,10 @@
 import type { PriceDrop } from "@/lib/priceTracking";
 
+// The daily cron job that calls this runs with { noOverlap: true } -- a
+// hung fetch with no timeout would block that job indefinitely and prevent
+// every future run, not just fail today's digest.
+const FETCH_TIMEOUT_MS = 15_000;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -41,6 +46,7 @@ export async function sendPriceDropDigest(drops: PriceDrop[]): Promise<void> {
         subject: `${drops.length} TBR price drop${drops.length === 1 ? "" : "s"}`,
         html: renderHtml(drops),
       }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       console.error(`Resend send failed: HTTP ${response.status}`);

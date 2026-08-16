@@ -12,6 +12,11 @@ enum ReadStatus {
   READ
 }
 
+enum Retailer {
+  librofm
+  googleplay
+}
+
 model Book {
   id        String         @id @default(cuid())
   title     String
@@ -132,7 +137,7 @@ model RetailerMatch {
   id            String   @id @default(cuid())
   tbrItemId     String
   tbrItem       GoodreadsTbrItem   @relation(fields: [tbrItemId], references: [id], onDelete: Cascade)
-  retailer      String // "librofm" | "googleplay"
+  retailer      Retailer
   productUrl    String
   matchedTitle  String
   matchedAuthor String?
@@ -141,8 +146,9 @@ model RetailerMatch {
   observations  PriceObservation[]
 
   @@unique([tbrItemId, retailer])
-  // scrapePrices/getPriceDrops both scan for confirmed matches on every
-  // daily run and every /tbr page load respectively.
+  // scrapePrices scans for confirmed matches on every daily cron run, and
+  // getTbrGap's retailerMatches select (src/lib/tbrGap.ts) reads every
+  // match -- confirmed or not -- for an item on every /tbr page load.
   @@index([confirmed])
 }
 

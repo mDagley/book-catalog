@@ -121,6 +121,7 @@ describe("googleplayAdapter.fetchPrice", () => {
     expect(price).toBe(9.99);
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/books/v1/volumes/abc123"),
+      expect.anything(),
     );
   });
 

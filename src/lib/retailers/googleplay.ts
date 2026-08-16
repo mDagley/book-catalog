@@ -19,10 +19,15 @@ function apiKeyParam(): string {
   return key ? `&key=${encodeURIComponent(key)}` : "";
 }
 
+// The daily cron job that calls this adapter runs with { noOverlap: true }
+// -- a hung fetch with no timeout would block that job indefinitely and
+// prevent every future run, not just fail this one item.
+const FETCH_TIMEOUT_MS = 15_000;
+
 async function search(title: string, author: string | null): Promise<RetailerMatchResult | null> {
   const q = author ? `intitle:${title} inauthor:${author}` : `intitle:${title}`;
   const url = `${API_BASE}?q=${encodeURIComponent(q)}&country=US${apiKeyParam()}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Google Books search failed: HTTP ${response.status}`);
   }
@@ -51,7 +56,7 @@ async function fetchPrice(productUrl: string): Promise<number | null> {
   const url = key
     ? `${API_BASE}/${encodeURIComponent(id)}?key=${encodeURIComponent(key)}`
     : `${API_BASE}/${encodeURIComponent(id)}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Google Books volume fetch failed: HTTP ${response.status}`);
   }

@@ -44,7 +44,14 @@ export async function scrapePrices(): Promise<void> {
 
   for (const match of matches) {
     const adapter = adaptersById.get(match.retailer);
-    if (!adapter) continue;
+    if (!adapter) {
+      // Should never happen in practice -- `retailer` is only ever written
+      // from a RetailerAdapter.id -- but a stray/corrupt value would
+      // otherwise silently stop this match from scraping forever with no
+      // signal anywhere that it's happening.
+      console.error(`No adapter registered for retailer "${match.retailer}" (match ${match.id})`);
+      continue;
+    }
 
     try {
       const price = await adapter.fetchPrice(match.productUrl);
