@@ -70,4 +70,18 @@ describe("CoverGridCard", () => {
     expect(html).toContain("Dune");
     expect(html).toContain("Frank Herbert");
   });
+
+  it("renders a minimal (non-SearchResult) item with no badges and no link", () => {
+    // TBR items have no bookId (nowhere to link to) and own nothing (no
+    // readStatus/format fields at all) -- CoverGridCard must accept that
+    // narrower shape structurally, not just a full SearchResult.
+    const html = renderToStaticMarkup(
+      <CoverGridCard
+        result={{ title: "Piranesi", author: "Susanna Clarke", coverImagePath: null }}
+      />,
+    );
+    expect(html).toContain("Piranesi");
+    expect(html).not.toContain("<a");
+    expect(html).not.toContain(">Read<");
+  });
 });

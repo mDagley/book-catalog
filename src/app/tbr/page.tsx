@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
+import { getViewMode } from "@/lib/viewMode";
+import { setViewMode } from "@/lib/actions/viewMode";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
+import { CoverGridCard } from "@/components/CoverGridCard";
 import { RecomputeOwnershipButton } from "@/components/RecomputeOwnershipButton";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { TicketCard } from "@/components/ui/TicketCard";
@@ -24,12 +27,18 @@ export default async function TbrGapPage({
   const query = q?.trim() ?? "";
   const gap = await getTbrGap(query);
   const groups = groupByInitial(gap);
+  const viewMode = await getViewMode("tbr");
 
   return (
-    <main className="mx-auto max-w-2xl p-4">
+    <main className={`mx-auto w-full min-w-0 p-4 ${viewMode === "grid" ? "max-w-6xl" : "max-w-2xl"}`}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-semibold text-foreground-strong">TBR — Not Yet Owned</h1>
         <div className="flex flex-wrap items-center gap-3">
+          <form action={setViewMode.bind(null, "tbr", viewMode === "grid" ? "list" : "grid")}>
+            <button type="submit" className="text-sm text-link underline">
+              {viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
+            </button>
+          </form>
           <RecomputeOwnershipButton />
           <Link href="/" className="text-sm text-link underline">
             Back to search
@@ -71,15 +80,23 @@ export default async function TbrGapPage({
             >
               {group.letter}
             </h2>
-            <ul className="space-y-2">
-              {group.items.map((item) => (
-                <TicketCard key={item.id} className="p-3">
-                  <CoverThumbnail coverImagePath={item.coverImagePath} className="mb-2" />
-                  <p className="font-medium text-foreground-strong">{item.title}</p>
-                  {item.author && <p className="text-sm text-foreground/70">{item.author}</p>}
-                </TicketCard>
-              ))}
-            </ul>
+            {viewMode === "grid" ? (
+              <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+                {group.items.map((item) => (
+                  <CoverGridCard key={item.id} result={item} />
+                ))}
+              </ul>
+            ) : (
+              <ul className="space-y-2">
+                {group.items.map((item) => (
+                  <TicketCard key={item.id} className="p-3">
+                    <CoverThumbnail coverImagePath={item.coverImagePath} className="mb-2" />
+                    <p className="font-medium text-foreground-strong">{item.title}</p>
+                    {item.author && <p className="text-sm text-foreground/70">{item.author}</p>}
+                  </TicketCard>
+                ))}
+              </ul>
+            )}
           </section>
         ))
       )}
