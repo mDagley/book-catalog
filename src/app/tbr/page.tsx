@@ -5,6 +5,7 @@ import { setViewMode } from "@/lib/actions/viewMode";
 import { CoverThumbnail } from "@/components/CoverThumbnail";
 import { CoverGridCard } from "@/components/CoverGridCard";
 import { RecomputeOwnershipButton } from "@/components/RecomputeOwnershipButton";
+import { RetailerPriceBadge } from "@/components/RetailerPriceBadge";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { TicketCard } from "@/components/ui/TicketCard";
 
@@ -83,7 +84,15 @@ export default async function TbrGapPage({
             {viewMode === "grid" ? (
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
                 {group.items.map((item) => (
-                  <CoverGridCard key={item.id} result={item} />
+                  <CoverGridCard key={item.id} result={item}>
+                    {item.retailerMatches.length > 0 && (
+                      <div className="mt-1 space-y-1 px-1">
+                        {item.retailerMatches.map((match) => (
+                          <RetailerPriceBadge key={match.id} match={match} />
+                        ))}
+                      </div>
+                    )}
+                  </CoverGridCard>
                 ))}
               </ul>
             ) : (
@@ -93,6 +102,13 @@ export default async function TbrGapPage({
                     <CoverThumbnail coverImagePath={item.coverImagePath} className="mb-2" />
                     <p className="font-medium text-foreground-strong">{item.title}</p>
                     {item.author && <p className="text-sm text-foreground/70">{item.author}</p>}
+                    {item.retailerMatches.length > 0 && (
+                      <div className="mt-1 space-y-1">
+                        {item.retailerMatches.map((match) => (
+                          <RetailerPriceBadge key={match.id} match={match} />
+                        ))}
+                      </div>
+                    )}
                   </TicketCard>
                 ))}
               </ul>

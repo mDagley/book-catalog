@@ -32,7 +32,13 @@ export interface CoverGridCardData {
 // design spec's "corner badges + minimal text" choice. Ownership/link
 // fields are optional -- when absent (e.g. TBR items), no badges or link
 // render, since there's nothing owned and nowhere to link to.
-export function CoverGridCard({ result }: { result: CoverGridCardData }) {
+export function CoverGridCard({
+  result,
+  children,
+}: {
+  result: CoverGridCardData;
+  children?: ReactNode;
+}) {
   const formatBadges: FormatBadge[] = [
     ...((result.physicalCopies?.length ?? 0) > 0
       ? [{ key: "physical", icon: <PhysicalBookIcon title="Physical copy" className="h-4 w-4" /> }]
@@ -88,6 +94,7 @@ export function CoverGridCard({ result }: { result: CoverGridCardData }) {
       ) : (
         card
       )}
+      {children}
     </li>
   );
 }
