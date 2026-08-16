@@ -1,4 +1,9 @@
-export type RetailerId = "librofm" | "googleplay";
+import type { Retailer } from "@prisma/client";
+
+// Derived from Prisma's generated Retailer enum rather than a hand-written
+// "librofm" | "googleplay" union, so the two can't drift out of sync --
+// adding/removing a retailer only ever needs a schema.prisma change.
+export type RetailerId = Retailer;
 
 export interface RetailerMatchResult {
   matchedTitle: string;
