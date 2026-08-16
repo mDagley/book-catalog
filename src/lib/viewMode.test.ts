@@ -24,6 +24,10 @@ describe("getViewMode", () => {
     expect(await getViewMode("home")).toBe("list");
   });
 
+  it("defaults to grid for the tbr view when no cookie is set", async () => {
+    expect(await getViewMode("tbr")).toBe("grid");
+  });
+
   it("honors a stored cookie value over the default", async () => {
     cookieStore.set(viewModeCookieName("books"), "list");
     expect(await getViewMode("books")).toBe("list");

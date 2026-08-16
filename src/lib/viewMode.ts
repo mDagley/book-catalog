@@ -1,15 +1,16 @@
 import { cookies } from "next/headers";
 
 export type ViewMode = "grid" | "list";
-export type ViewModeView = "books" | "home";
+export type ViewModeView = "books" | "home" | "tbr";
 
-// /books defaults to grid (browsing a large library benefits from covers,
-// matching the reference site's default); / defaults to list (a "do I
-// already own this?" lookup is usually 1-3 results, and the existing
-// comfortable list card already shows a large cover per result).
+// /books and /tbr default to grid (both are browse-a-shelf pages where
+// covers help); / defaults to list (a "do I already own this?" lookup is
+// usually 1-3 results, and the existing comfortable list card already shows
+// a large cover per result).
 const DEFAULTS: Record<ViewModeView, ViewMode> = {
   books: "grid",
   home: "list",
+  tbr: "grid",
 };
 
 export function viewModeCookieName(view: ViewModeView): string {

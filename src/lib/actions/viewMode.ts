@@ -7,6 +7,7 @@ import { viewModeCookieName, type ViewMode, type ViewModeView } from "@/lib/view
 const VIEW_PATHS: Record<ViewModeView, string> = {
   books: "/books",
   home: "/",
+  tbr: "/tbr",
 };
 
 export async function setViewMode(view: ViewModeView, mode: ViewMode): Promise<void> {
