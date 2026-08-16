@@ -1,10 +1,18 @@
 import type { PriceDrop } from "@/lib/priceTracking";
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function renderHtml(drops: PriceDrop[]): string {
   const rows = drops
     .map(
       (d) =>
-        `<li><strong>${d.tbrItemTitle}</strong> (${d.retailer}): $${d.previousPrice.toFixed(2)} → $${d.newPrice.toFixed(2)}</li>`,
+        `<li><strong>${escapeHtml(d.tbrItemTitle)}</strong> (${escapeHtml(d.retailer)}): $${d.previousPrice.toFixed(2)} → $${d.newPrice.toFixed(2)}</li>`,
     )
     .join("");
   return `<p>${drops.length} TBR book${drops.length === 1 ? "" : "s"} dropped in price:</p><ul>${rows}</ul>`;

@@ -36,6 +36,30 @@ describe("sendPriceDropDigest", () => {
     expect(body.html).toContain("39.99");
   });
 
+  it("HTML-escapes book titles and retailer names in the digest body", async () => {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.PRICE_ALERT_EMAIL = "me@example.com";
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "abc" }) } as Response);
+
+    const maliciousDrops: PriceDrop[] = [
+      {
+        tbrItemId: "2",
+        tbrItemTitle: `<script>alert("xss")</script>`,
+        retailer: "Tom & Jerry's <Books>",
+        previousPrice: 19.99,
+        newPrice: 9.99,
+      },
+    ];
+
+    await sendPriceDropDigest(maliciousDrops);
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse(init!.body as string);
+    expect(body.html).not.toContain("<script>alert(\"xss\")</script>");
+    expect(body.html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
+    expect(body.html).toContain("Tom &amp; Jerry's &lt;Books&gt;");
+  });
+
   it("does nothing when there are no drops", async () => {
     process.env.RESEND_API_KEY = "test-key";
     process.env.PRICE_ALERT_EMAIL = "me@example.com";
