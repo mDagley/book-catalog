@@ -211,11 +211,9 @@ describe("groupByInitial", () => {
   });
 
   it("buckets an accented first letter under its unaccented equivalent, not '#'", () => {
-    const groups = groupByInitial([item("One Hundred Years of Solitude", "Gabriel García Márquez")]);
+    const groups = groupByInitial([item("Test Book", "Jane Öztürk")]);
 
-    expect(groups).toEqual([
-      { letter: "M", items: [item("One Hundred Years of Solitude", "Gabriel García Márquez")] },
-    ]);
+    expect(groups).toEqual([{ letter: "O", items: [item("Test Book", "Jane Öztürk")] }]);
   });
 
   it("groups by author last name, not first name", () => {
@@ -240,6 +238,12 @@ describe("groupByInitial", () => {
     const groups = groupByInitial([item("Some Book", "Sanderson, Brandon")]);
 
     expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "Sanderson, Brandon")] }]);
+  });
+
+  it("doesn't mistake a comma before a suffix for 'Last, First' format", () => {
+    const groups = groupByInitial([item("Some Book", "John Smith, Jr.")]);
+
+    expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "John Smith, Jr.")] }]);
   });
 
   it("does not include a letter with zero matching items", () => {

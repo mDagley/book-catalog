@@ -26,17 +26,12 @@ function stripTrailingPeriod(token: string): string {
   return token.endsWith(".") ? token.slice(0, -1) : token;
 }
 
-// Reorders a "First [Middle] Last [Suffix]" author name to lead with the last
-// name (e.g. "Brandon Sanderson" -> "Sanderson Brandon"), so alphabetizing by
-// this string groups and sorts authors by last name -- the way a library
-// shelf does -- rather than by first name. A name already in "Last, First"
-// form is left as-is, since it already leads with the last name.
-function authorSortName(author: string): string {
-  const trimmed = author.trim();
-  if (trimmed.includes(",")) return trimmed;
-
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
-  if (tokens.length <= 1) return trimmed;
+// Reorders "First [Middle] Last [Suffix]" tokens to lead with the last name
+// (e.g. ["Brandon", "Sanderson"] -> "Sanderson Brandon"), stripping a
+// trailing suffix and folding in any name particle immediately before the
+// last name.
+function reorderTokensByLastName(tokens: string[]): string {
+  if (tokens.length <= 1) return tokens.join(" ");
 
   let end = tokens.length;
   while (end > 1 && NAME_SUFFIXES.has(stripTrailingPeriod(tokens[end - 1]).toLowerCase())) {
@@ -51,6 +46,28 @@ function authorSortName(author: string): string {
   const lastName = tokens.slice(start, end).join(" ");
   const rest = [...tokens.slice(0, start), ...tokens.slice(end)].join(" ");
   return rest ? `${lastName} ${rest}` : lastName;
+}
+
+// Reorders a "First [Middle] Last [Suffix]" author name to lead with the last
+// name (e.g. "Brandon Sanderson" -> "Sanderson Brandon"), so alphabetizing by
+// this string groups and sorts authors by last name -- the way a library
+// shelf does -- rather than by first name. A name already in "Last, First"
+// form is left as-is, since it already leads with the last name -- but a
+// comma immediately before a suffix ("John Smith, Jr.") is NOT that form, so
+// it's rejoined into plain tokens and reordered like any other name, rather
+// than being mistaken for "Last, First" and bucketed under "J".
+function authorSortName(author: string): string {
+  const trimmed = author.trim();
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex !== -1) {
+    const before = trimmed.slice(0, commaIndex).trim();
+    const after = trimmed.slice(commaIndex + 1).trim();
+    const afterIsSuffix = NAME_SUFFIXES.has(stripTrailingPeriod(after).toLowerCase());
+    if (!afterIsSuffix) return trimmed;
+    return reorderTokensByLastName(`${before} ${after}`.split(/\s+/).filter(Boolean));
+  }
+
+  return reorderTokensByLastName(trimmed.split(/\s+/).filter(Boolean));
 }
 
 // Author (by last name) if present, else title (trimmed) -- used both to
