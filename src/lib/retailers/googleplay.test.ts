@@ -83,6 +83,26 @@ describe("googleplayAdapter.search", () => {
 
     expect(result).toBeNull();
   });
+
+  it("skips a FOR_SALE result that isn't an ebook (e.g. print-only)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      volumesResponse([
+        {
+          volumeInfo: { title: "Print Only Edition" },
+          saleInfo: {
+            saleability: "FOR_SALE",
+            isEbook: false,
+            retailPrice: { amount: 24.99 },
+            buyLink: "https://play.google.com/store/books/details?id=print123",
+          },
+        },
+      ]),
+    );
+
+    const result = await googleplayAdapter.search("Print Only Edition", null);
+
+    expect(result).toBeNull();
+  });
 });
 
 describe("googleplayAdapter.fetchPrice", () => {
@@ -90,7 +110,7 @@ describe("googleplayAdapter.fetchPrice", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        saleInfo: { saleability: "FOR_SALE", retailPrice: { amount: 9.99 } },
+        saleInfo: { saleability: "FOR_SALE", isEbook: true, retailPrice: { amount: 9.99 } },
       }),
     } as Response);
 
@@ -108,6 +128,21 @@ describe("googleplayAdapter.fetchPrice", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ saleInfo: { saleability: "NOT_FOR_SALE" } }),
+    } as Response);
+
+    const price = await googleplayAdapter.fetchPrice(
+      "https://play.google.com/store/books/details?id=abc123",
+    );
+
+    expect(price).toBeNull();
+  });
+
+  it("returns null when the volume is for sale but is not an ebook (e.g. print-only)", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        saleInfo: { saleability: "FOR_SALE", isEbook: false, retailPrice: { amount: 9.99 } },
+      }),
     } as Response);
 
     const price = await googleplayAdapter.fetchPrice(

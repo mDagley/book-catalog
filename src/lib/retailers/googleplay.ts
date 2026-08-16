@@ -29,7 +29,10 @@ async function search(title: string, author: string | null): Promise<RetailerMat
 
   const data = (await response.json()) as { items?: GoogleBooksVolume[] };
   const forSale = (data.items ?? []).find(
-    (item) => item.saleInfo?.saleability === "FOR_SALE" && item.saleInfo?.buyLink,
+    (item) =>
+      item.saleInfo?.saleability === "FOR_SALE" &&
+      item.saleInfo?.isEbook === true &&
+      item.saleInfo?.buyLink,
   );
   if (!forSale) return null;
 
@@ -54,7 +57,7 @@ async function fetchPrice(productUrl: string): Promise<number | null> {
   }
 
   const data = (await response.json()) as GoogleBooksVolume;
-  if (data.saleInfo?.saleability !== "FOR_SALE") return null;
+  if (data.saleInfo?.saleability !== "FOR_SALE" || data.saleInfo?.isEbook !== true) return null;
   const amount = data.saleInfo?.retailPrice?.amount;
   return typeof amount === "number" ? amount : null;
 }
