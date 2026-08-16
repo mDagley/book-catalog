@@ -125,4 +125,33 @@ model GoodreadsTbrItem {
   coverFetchFailureReason String?
   lastSyncedAt            DateTime  @default(now())
   owned                   Boolean   @default(false)
+  retailerMatches         RetailerMatch[]
+}
+
+model RetailerMatch {
+  id            String   @id @default(cuid())
+  tbrItemId     String
+  tbrItem       GoodreadsTbrItem   @relation(fields: [tbrItemId], references: [id])
+  retailer      String // "librofm" | "googleplay"
+  productUrl    String
+  matchedTitle  String
+  matchedAuthor String?
+  confirmed     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  observations  PriceObservation[]
+
+  @@unique([tbrItemId, retailer])
+}
+
+model PriceObservation {
+  id              String   @id @default(cuid())
+  retailerMatchId String
+  retailerMatch   RetailerMatch @relation(fields: [retailerMatchId], references: [id])
+  // Float, not Decimal, matching this schema's existing precedent for
+  // non-integer numeric fields (Book.seriesPosition) -- this feature only
+  // ever compares two prices for "did it go down", so Decimal's exact-cents
+  // precision isn't worth the added Prisma.Decimal handling it would impose
+  // on every read site.
+  price      Float
+  observedAt DateTime @default(now())
 }
