@@ -181,9 +181,46 @@ describe("getTbrGap", () => {
   });
 });
 
+describe("getTbrGap retailer matches", () => {
+  it("includes each item's retailer matches with their latest price", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Gap Retailer Match Item", owned: false },
+    });
+    const match = await prisma.retailerMatch.create({
+      data: {
+        tbrItemId: item.id,
+        retailer: "librofm",
+        productUrl: "https://libro.fm/x",
+        matchedTitle: "Test TBR Gap Retailer Match Item",
+        confirmed: true,
+      },
+    });
+    await prisma.priceObservation.create({ data: { retailerMatchId: match.id, price: 20, observedAt: new Date("2026-08-14") } });
+    await prisma.priceObservation.create({ data: { retailerMatchId: match.id, price: 15, observedAt: new Date("2026-08-15") } });
+
+    const gap = await getTbrGap();
+    const found = gap.find((i) => i.id === item.id);
+
+    expect(found?.retailerMatches).toEqual([
+      expect.objectContaining({
+        id: match.id,
+        retailer: "librofm",
+        confirmed: true,
+        matchedTitle: "Test TBR Gap Retailer Match Item",
+        currentPrice: 15,
+        previousPrice: 20,
+      }),
+    ]);
+
+    await prisma.priceObservation.deleteMany({ where: { retailerMatchId: match.id } });
+    await prisma.retailerMatch.deleteMany({ where: { tbrItemId: item.id } });
+    await prisma.goodreadsTbrItem.deleteMany({ where: { id: item.id } });
+  });
+});
+
 describe("groupByInitial", () => {
   function item(title: string, author: string | null): TbrGapItem {
-    return { id: title, title, author, coverImagePath: null, isbn: null };
+    return { id: title, title, author, coverImagePath: null, isbn: null, retailerMatches: [] };
   }
 
   it("groups items by the uppercased first character of their sort key", () => {

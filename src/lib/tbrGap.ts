@@ -3,12 +3,22 @@ import { isTitleMatch, normalizeTitle } from "@/lib/matching";
 import { normalizeIsbn } from "@/lib/isbn";
 import { letterBucket, sortLetters } from "@/lib/alphabetize";
 
+export interface TbrGapRetailerMatch {
+  id: string;
+  retailer: string;
+  confirmed: boolean;
+  matchedTitle: string;
+  currentPrice: number | null;
+  previousPrice: number | null;
+}
+
 export interface TbrGapItem {
   id: string;
   title: string;
   author: string | null;
   coverImagePath: string | null;
   isbn: string | null;
+  retailerMatches: TbrGapRetailerMatch[];
 }
 
 // Suffixes stripped off the end of a "First Last Suffix" author name before
@@ -99,7 +109,22 @@ function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
 async function computeTbrGap(): Promise<TbrGapItem[]> {
   const tbrItems = await prisma.goodreadsTbrItem.findMany({
     where: { owned: false },
-    select: { id: true, title: true, author: true, coverImagePath: true, isbn: true },
+    select: {
+      id: true,
+      title: true,
+      author: true,
+      coverImagePath: true,
+      isbn: true,
+      retailerMatches: {
+        select: {
+          id: true,
+          retailer: true,
+          confirmed: true,
+          matchedTitle: true,
+          observations: { orderBy: { observedAt: "desc" }, take: 2, select: { price: true } },
+        },
+      },
+    },
   });
 
   // sortKey does real work now (token splitting/reordering for last-name
@@ -112,6 +137,14 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
       author: tbr.author,
       coverImagePath: tbr.coverImagePath,
       isbn: tbr.isbn,
+      retailerMatches: tbr.retailerMatches.map((m) => ({
+        id: m.id,
+        retailer: m.retailer,
+        confirmed: m.confirmed,
+        matchedTitle: m.matchedTitle,
+        currentPrice: m.observations[0]?.price ?? null,
+        previousPrice: m.observations[1]?.price ?? null,
+      })),
     }))
     .map((item) => ({ item, key: sortKey(item) }))
     .sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: "base" }))
