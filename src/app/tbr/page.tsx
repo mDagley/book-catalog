@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { getTbrGap, groupByInitial } from "@/lib/tbrGap";
 import { getViewMode } from "@/lib/viewMode";
@@ -84,16 +85,16 @@ export default async function TbrGapPage({
             {viewMode === "grid" ? (
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
                 {group.items.map((item) => (
-                  <li key={item.id}>
+                  <Fragment key={item.id}>
                     <CoverGridCard result={item} />
                     {item.retailerMatches.length > 0 && (
-                      <div className="mt-1 space-y-1 px-1">
+                      <div className="col-span-full -mt-3 space-y-1 px-1 text-xs">
                         {item.retailerMatches.map((match) => (
                           <RetailerPriceBadge key={match.id} match={match} />
                         ))}
                       </div>
                     )}
-                  </li>
+                  </Fragment>
                 ))}
               </ul>
             ) : (
