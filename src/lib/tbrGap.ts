@@ -59,19 +59,32 @@ function reorderTokensByLastName(tokens: string[]): string {
 // form is left as-is, since it already leads with the last name -- but a
 // comma immediately before a suffix ("John Smith, Jr.") is NOT that form, so
 // it's rejoined into plain tokens and reordered like any other name, rather
-// than being mistaken for "Last, First" and bucketed under "J".
+// than being mistaken for "Last, First" and bucketed under "J". This also
+// covers MULTIPLE comma-separated suffixes ("John Smith, Jr., Ph.D.") --
+// checking only the text after the FIRST comma as one unit would treat
+// "Jr., Ph.D." as a single non-suffix blob and misclassify the whole name as
+// "Last, First". Every comma-separated segment after the first must be a
+// known suffix for this branch to apply; reorderTokensByLastName's own loop
+// already strips more than one trailing suffix token once they're rejoined.
 function authorSortName(author: string): string {
   const trimmed = author.trim();
   const commaIndex = trimmed.indexOf(",");
-  if (commaIndex !== -1) {
-    const before = trimmed.slice(0, commaIndex).trim();
-    const after = trimmed.slice(commaIndex + 1).trim();
-    const afterIsSuffix = NAME_SUFFIXES.has(normalizeNameToken(after));
-    if (!afterIsSuffix) return trimmed;
-    return reorderTokensByLastName(`${before} ${after}`.split(/\s+/).filter(Boolean));
+  if (commaIndex === -1) {
+    return reorderTokensByLastName(trimmed.split(/\s+/).filter(Boolean));
   }
 
-  return reorderTokensByLastName(trimmed.split(/\s+/).filter(Boolean));
+  const before = trimmed.slice(0, commaIndex).trim();
+  const afterSegments = trimmed
+    .slice(commaIndex + 1)
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const allSuffixes =
+    afterSegments.length > 0 &&
+    afterSegments.every((segment) => NAME_SUFFIXES.has(normalizeNameToken(segment)));
+
+  if (!allSuffixes) return trimmed;
+  return reorderTokensByLastName([before, ...afterSegments].join(" ").split(/\s+/).filter(Boolean));
 }
 
 // Author (by last name) if present, else title (trimmed) -- used both to

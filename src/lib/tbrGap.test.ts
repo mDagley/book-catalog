@@ -252,6 +252,12 @@ describe("groupByInitial", () => {
     expect(groups).toEqual([{ letter: "D", items: [item("Some Book", "Jane Doe Ph.D.")] }]);
   });
 
+  it("handles multiple comma-separated suffixes, not just one", () => {
+    const groups = groupByInitial([item("Some Book", "John Smith, Jr., Ph.D.")]);
+
+    expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "John Smith, Jr., Ph.D.")] }]);
+  });
+
   it("does not include a letter with zero matching items", () => {
     const groups = groupByInitial([item("Elantris", "Brandon Sanderson")]);
 
