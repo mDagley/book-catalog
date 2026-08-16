@@ -280,6 +280,7 @@ export default async function BooksPage({
             <div className="mt-4 text-center">
               <Link
                 href={`/books?${loadMoreParams.toString()}`}
+                scroll={false}
                 className={`inline-block rounded-lg px-3 py-2 text-sm font-medium ${BUTTON_VARIANT_CLASSES.secondary}`}
               >
                 Load more
