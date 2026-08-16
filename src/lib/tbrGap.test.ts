@@ -246,6 +246,12 @@ describe("groupByInitial", () => {
     expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "John Smith, Jr.")] }]);
   });
 
+  it("recognizes a suffix with an internal period, like 'Ph.D.'", () => {
+    const groups = groupByInitial([item("Some Book", "Jane Doe Ph.D.")]);
+
+    expect(groups).toEqual([{ letter: "D", items: [item("Some Book", "Jane Doe Ph.D.")] }]);
+  });
+
   it("does not include a letter with zero matching items", () => {
     const groups = groupByInitial([item("Elantris", "Brandon Sanderson")]);
 

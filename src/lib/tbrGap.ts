@@ -22,8 +22,12 @@ const NAME_PARTICLES = new Set([
   "de", "del", "della", "di", "da", "van", "von", "der", "den", "le", "la", "st", "mac", "mc",
 ]);
 
-function stripTrailingPeriod(token: string): string {
-  return token.endsWith(".") ? token.slice(0, -1) : token;
+// Strips ALL periods (not just a trailing one) before comparing against
+// NAME_SUFFIXES/NAME_PARTICLES -- a suffix like "Ph.D." has an internal
+// period too, and stripping only the trailing one would leave "ph.d", which
+// never matches the "phd" entry in NAME_SUFFIXES.
+function normalizeNameToken(token: string): string {
+  return token.replace(/\./g, "").toLowerCase();
 }
 
 // Reorders "First [Middle] Last [Suffix]" tokens to lead with the last name
@@ -34,12 +38,12 @@ function reorderTokensByLastName(tokens: string[]): string {
   if (tokens.length <= 1) return tokens.join(" ");
 
   let end = tokens.length;
-  while (end > 1 && NAME_SUFFIXES.has(stripTrailingPeriod(tokens[end - 1]).toLowerCase())) {
+  while (end > 1 && NAME_SUFFIXES.has(normalizeNameToken(tokens[end - 1]))) {
     end--;
   }
 
   let start = end - 1;
-  while (start > 0 && NAME_PARTICLES.has(stripTrailingPeriod(tokens[start - 1]).toLowerCase())) {
+  while (start > 0 && NAME_PARTICLES.has(normalizeNameToken(tokens[start - 1]))) {
     start--;
   }
 
@@ -62,7 +66,7 @@ function authorSortName(author: string): string {
   if (commaIndex !== -1) {
     const before = trimmed.slice(0, commaIndex).trim();
     const after = trimmed.slice(commaIndex + 1).trim();
-    const afterIsSuffix = NAME_SUFFIXES.has(stripTrailingPeriod(after).toLowerCase());
+    const afterIsSuffix = NAME_SUFFIXES.has(normalizeNameToken(after));
     if (!afterIsSuffix) return trimmed;
     return reorderTokensByLastName(`${before} ${after}`.split(/\s+/).filter(Boolean));
   }

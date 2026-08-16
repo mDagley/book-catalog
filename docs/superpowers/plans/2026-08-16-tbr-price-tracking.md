@@ -1487,6 +1487,7 @@ git commit -m "feat: add RetailerPriceBadge component"
 
 **Files:**
 - Modify: `src/app/tbr/page.tsx`
+- Modify: `src/components/CoverGridCard.tsx`
 
 - [ ] **Step 1: Add the import**
 
@@ -1513,28 +1514,61 @@ In the list-view `<TicketCard>` block, add the matches after the author line:
 </TicketCard>
 ```
 
-- [ ] **Step 3: Render matches in the grid view**
+- [ ] **Step 3: Render matches in the grid view via a `footer` slot on `CoverGridCard`**
 
-`CoverGridCard` doesn't currently accept extra children below its text block, and per its own file comment it's shared with the catalog's `SearchResult` shape — adding retailer-specific props there would leak this feature into an unrelated component. Instead, wrap it for the `/tbr` grid case only:
+`CoverGridCard` already renders its own `<li data-testid="catalog-grid-item">` (`src/components/CoverGridCard.tsx:83`) as the direct child of the grid's `<ul>`. Wrapping it in a second `<li>` here — the naive approach — would nest `<li>` inside `<li>`, which is invalid HTML outside its own `<ul>/<ol>`. It would also be wrong for a second reason: `CoverGridCard` wraps its whole card in a `<Link>` when `result.bookId` is set (line 85), so any retailer content placed *inside* that card would sit inside the anchor too, making a "Confirm match" button's click register as a navigation instead of a form submit.
+
+Add an optional `footer` slot to `CoverGridCard` instead — generic, not retailer-specific, so the component doesn't need to know this feature exists — rendered inside its existing `<li>` but outside the `<Link>`:
+
+```tsx
+// src/components/CoverGridCard.tsx
+export function CoverGridCard({
+  result,
+  footer,
+}: {
+  result: CoverGridCardData;
+  footer?: ReactNode;
+}) {
+  // ...existing body unchanged...
+
+  return (
+    <li data-testid="catalog-grid-item">
+      {result.bookId ? (
+        <Link href={`/books/${result.bookId}`} aria-label={result.title} className="block h-full">
+          {card}
+        </Link>
+      ) : (
+        card
+      )}
+      {footer}
+    </li>
+  );
+}
+```
+
+Then in `/tbr`'s grid view, pass the retailer badges as that slot rather than wrapping the card:
 
 ```tsx
 <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
   {group.items.map((item) => (
-    <li key={item.id}>
-      <CoverGridCard result={item} />
-      {item.retailerMatches.length > 0 && (
-        <div className="mt-1 space-y-1 px-1">
-          {item.retailerMatches.map((match) => (
-            <RetailerPriceBadge key={match.id} match={match} />
-          ))}
-        </div>
-      )}
-    </li>
+    <CoverGridCard
+      key={item.id}
+      result={item}
+      footer={
+        item.retailerMatches.length > 0 && (
+          <div className="mt-1 space-y-1 px-1">
+            {item.retailerMatches.map((match) => (
+              <RetailerPriceBadge key={match.id} match={match} />
+            ))}
+          </div>
+        )
+      }
+    />
   ))}
 </ul>
 ```
 
-Note this changes the existing `<ul>`'s children from `<CoverGridCard key={item.id} .../>` directly to a wrapping `<li>` — `CoverGridCard` itself still renders its own inner `<li data-testid="catalog-grid-item">`, so this introduces a harmless nested `<li>` (browsers tolerate it, and no test asserts on `/tbr`'s DOM nesting depth). Confirm this by re-running the `/tbr` view-mode tests in Step 5 below.
+The `<ul>`'s children stay exactly what they were before this feature (one `<CoverGridCard>` per item, each rendering its own single `<li>`) — no nesting, and the confirm/reject buttons land outside the `<Link>` so they behave as buttons, not as part of the card's navigation target. Confirm this by re-running the `/tbr` view-mode tests in Step 5 below, plus `CoverGridCard`'s own existing tests (the new `footer` prop is optional, so every existing call site without it must render unchanged).
 
 - [ ] **Step 4: Manually verify in the dev server**
 
