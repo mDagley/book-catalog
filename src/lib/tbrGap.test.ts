@@ -193,8 +193,8 @@ describe("groupByInitial", () => {
     ]);
 
     expect(groups).toEqual([
-      { letter: "B", items: [item("Elantris", "Brandon Sanderson")] },
-      { letter: "U", items: [item("A Wizard of Earthsea", "Ursula K. Le Guin")] },
+      { letter: "L", items: [item("A Wizard of Earthsea", "Ursula K. Le Guin")] },
+      { letter: "S", items: [item("Elantris", "Brandon Sanderson")] },
     ]);
   });
 
@@ -211,9 +211,35 @@ describe("groupByInitial", () => {
   });
 
   it("buckets an accented first letter under its unaccented equivalent, not '#'", () => {
-    const groups = groupByInitial([item("Zola", "Émile Zola")]);
+    const groups = groupByInitial([item("One Hundred Years of Solitude", "Gabriel García Márquez")]);
 
-    expect(groups).toEqual([{ letter: "E", items: [item("Zola", "Émile Zola")] }]);
+    expect(groups).toEqual([
+      { letter: "M", items: [item("One Hundred Years of Solitude", "Gabriel García Márquez")] },
+    ]);
+  });
+
+  it("groups by author last name, not first name", () => {
+    const groups = groupByInitial([item("Elantris", "Brandon Sanderson")]);
+
+    expect(groups).toEqual([{ letter: "S", items: [item("Elantris", "Brandon Sanderson")] }]);
+  });
+
+  it("keeps a name particle attached to the last name it precedes", () => {
+    const groups = groupByInitial([item("A Wizard of Earthsea", "Ursula K. Le Guin")]);
+
+    expect(groups).toEqual([{ letter: "L", items: [item("A Wizard of Earthsea", "Ursula K. Le Guin")] }]);
+  });
+
+  it("buckets a suffixed name by last name, not the suffix", () => {
+    const groups = groupByInitial([item("Some Book", "John Smith Jr.")]);
+
+    expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "John Smith Jr.")] }]);
+  });
+
+  it("treats a 'Last, First' author as already last-name-first", () => {
+    const groups = groupByInitial([item("Some Book", "Sanderson, Brandon")]);
+
+    expect(groups).toEqual([{ letter: "S", items: [item("Some Book", "Sanderson, Brandon")] }]);
   });
 
   it("does not include a letter with zero matching items", () => {

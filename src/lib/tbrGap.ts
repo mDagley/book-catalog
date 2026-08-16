@@ -11,12 +11,55 @@ export interface TbrGapItem {
   isbn: string | null;
 }
 
-// Author (trimmed) if present, else title (trimmed) -- used both to sort the
-// full list and to decide which letter bucket an item falls into in
+// Suffixes stripped off the end of a "First Last Suffix" author name before
+// picking out the last name -- otherwise "John Smith Jr." would bucket under
+// "J" for Jr. instead of "S" for Smith.
+const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "v", "phd", "md", "esq"]);
+
+// Particles that stay attached to the last name they precede (so "Ursula K.
+// Le Guin" buckets under "L" for "Le Guin", not "G" for "Guin").
+const NAME_PARTICLES = new Set([
+  "de", "del", "della", "di", "da", "van", "von", "der", "den", "le", "la", "st", "mac", "mc",
+]);
+
+function stripTrailingPeriod(token: string): string {
+  return token.endsWith(".") ? token.slice(0, -1) : token;
+}
+
+// Reorders a "First [Middle] Last [Suffix]" author name to lead with the last
+// name (e.g. "Brandon Sanderson" -> "Sanderson Brandon"), so alphabetizing by
+// this string groups and sorts authors by last name -- the way a library
+// shelf does -- rather than by first name. A name already in "Last, First"
+// form is left as-is, since it already leads with the last name.
+function authorSortName(author: string): string {
+  const trimmed = author.trim();
+  if (trimmed.includes(",")) return trimmed;
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return trimmed;
+
+  let end = tokens.length;
+  while (end > 1 && NAME_SUFFIXES.has(stripTrailingPeriod(tokens[end - 1]).toLowerCase())) {
+    end--;
+  }
+
+  let start = end - 1;
+  while (start > 0 && NAME_PARTICLES.has(stripTrailingPeriod(tokens[start - 1]).toLowerCase())) {
+    start--;
+  }
+
+  const lastName = tokens.slice(start, end).join(" ");
+  const rest = [...tokens.slice(0, start), ...tokens.slice(end)].join(" ");
+  return rest ? `${lastName} ${rest}` : lastName;
+}
+
+// Author (by last name) if present, else title (trimmed) -- used both to
+// sort the full list and to decide which letter bucket an item falls into in
 // groupByInitial, so the two always agree on what "browsing alphabetically"
 // means for a given item.
 function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
-  return item.author?.trim() || item.title.trim();
+  const author = item.author?.trim();
+  return author ? authorSortName(author) : item.title.trim();
 }
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
