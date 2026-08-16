@@ -84,7 +84,7 @@ Each step is individually try/caught and logged, matching the existing job's per
 
 ## Alerting
 
-New env vars: `RESEND_API_KEY`, `PRICE_ALERT_EMAIL`. Missing either skips the email step with a logged warning — same pattern as `ABS_URL`/`ABS_TOKEN` being unset today — never a crash.
+New env vars this feature introduces: `RESEND_API_KEY` and `PRICE_ALERT_EMAIL` for the email digest (missing either skips the email step with a logged warning — same pattern as `ABS_URL`/`ABS_TOKEN` being unset today — never a crash), plus `GOOGLE_BOOKS_API_KEY` for Google Play Books matching (see Retailer matching above — optional, only raises the free daily quota; matching still works unauthenticated at a lower quota without it).
 
 If `getPriceDrops()` returns any items, one digest email is sent via the Resend API (not one email per drop), listing each dropped item's title, retailer, previous price, and new price. No retry on send failure — it's caught and logged, and the next day's run will naturally re-include the drop if the price is still down (see below).
 

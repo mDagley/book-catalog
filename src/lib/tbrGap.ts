@@ -89,6 +89,9 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
     select: { id: true, title: true, author: true, coverImagePath: true, isbn: true },
   });
 
+  // sortKey does real work now (token splitting/reordering for last-name
+  // sort) -- computed once per item here rather than inside the comparator,
+  // where it would otherwise run O(n log n) times instead of O(n).
   return tbrItems
     .map((tbr) => ({
       id: tbr.id,
@@ -97,7 +100,9 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
       coverImagePath: tbr.coverImagePath,
       isbn: tbr.isbn,
     }))
-    .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
+    .map((item) => ({ item, key: sortKey(item) }))
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: "base" }))
+    .map(({ item }) => item);
 }
 
 // Batch form of markTbrItemsOwnedByTitle -- ONE scan of the unowned TBR items
