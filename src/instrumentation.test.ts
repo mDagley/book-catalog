@@ -34,6 +34,14 @@ vi.mock("@/lib/ownedPhysicalSync", () => ({
     return { synced: 0 };
   }),
 }));
+vi.mock("@/lib/priceTracking", () => ({
+  findRetailerMatches: vi.fn(async () => []),
+  scrapePrices: vi.fn(async () => ({})),
+  getPriceDrops: vi.fn(async () => []),
+}));
+vi.mock("@/lib/emailDigest", () => ({
+  sendPriceDropDigest: vi.fn(async () => {}),
+}));
 
 const originalEnv = { ...process.env };
 
@@ -51,23 +59,32 @@ afterEach(() => {
   vi.resetModules();
 });
 
-// A single cron job now runs all three syncs sequentially. This used to be
-// two separate cron.schedule() calls on offset-but-still-periodic
-// expressions -- an offset only reduces the chance the ABS and Goodreads
-// syncs' heavy sequential DB work overlaps, it doesn't prevent it (e.g. a
-// slow ABS run could still be in progress when the Goodreads job's start
-// time arrives). On the resource-constrained production VPS, that overlap
-// starved the DB connection pool badly enough to fail a transaction
-// outright with Prisma P2028 ("Unable to start a transaction in the given
-// time") -- confirmed in production logs 2026-07-16. Merging into one
-// scheduled task makes concurrent execution structurally impossible
-// instead of merely unlikely.
+// A single cron job runs all three syncs (ABS, Goodreads, owned-physical)
+// sequentially. This used to be two separate cron.schedule() calls on
+// offset-but-still-periodic expressions -- an offset only reduces the
+// chance the ABS and Goodreads syncs' heavy sequential DB work overlaps, it
+// doesn't prevent it (e.g. a slow ABS run could still be in progress when
+// the Goodreads job's start time arrives). On the resource-constrained
+// production VPS, that overlap starved the DB connection pool badly enough
+// to fail a transaction outright with Prisma P2028 ("Unable to start a
+// transaction in the given time") -- confirmed in production logs
+// 2026-07-16. Merging into one scheduled task makes concurrent execution
+// structurally impossible instead of merely unlikely.
+//
+// A second, separate daily cron job handles TBR retailer price tracking
+// (matching, scraping, and the price-drop email digest) -- kept out of the
+// 30-minute job so a slow/failing retailer scrape can never delay or block
+// the ABS/Goodreads syncs, and vice versa. Its own sync/scrape/digest
+// behavior is covered in priceTracking.test.ts and emailDigest.test.ts, so
+// this file only verifies the job is registered with the right schedule.
 describe("register", () => {
-  it("registers exactly one cron job for all three syncs", async () => {
+  it("registers exactly two cron jobs: the 30-minute sync job and the daily price-tracking job", async () => {
     const { register } = await import("@/instrumentation");
     await register();
 
-    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduleMock.mock.calls[0][0]).toBe("*/30 * * * *");
+    expect(scheduleMock.mock.calls[1][0]).toBe("0 6 * * *");
   });
 
   it("runs the ABS, Goodreads, and owned-physical syncs sequentially, never concurrently", async () => {
