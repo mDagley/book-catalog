@@ -36,7 +36,10 @@ export async function findRetailerMatches(): Promise<void> {
 }
 
 export async function scrapePrices(): Promise<void> {
-  const matches = await prisma.retailerMatch.findMany({ where: { confirmed: true } });
+  const matches = await prisma.retailerMatch.findMany({
+    where: { confirmed: true },
+    select: { id: true, retailer: true, productUrl: true },
+  });
   const adaptersById = new Map<string, RetailerAdapter>(ADAPTERS.map((a) => [a.id, a]));
 
   for (const match of matches) {
@@ -66,7 +69,7 @@ export async function getPriceDrops(): Promise<PriceDrop[]> {
     where: { confirmed: true },
     include: {
       tbrItem: { select: { id: true, title: true } },
-      observations: { orderBy: { observedAt: "desc" }, take: 2 },
+      observations: { orderBy: { observedAt: "desc" }, take: 2, select: { price: true } },
     },
   });
 

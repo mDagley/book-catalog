@@ -35,8 +35,8 @@ vi.mock("@/lib/ownedPhysicalSync", () => ({
   }),
 }));
 vi.mock("@/lib/priceTracking", () => ({
-  findRetailerMatches: vi.fn(async () => []),
-  scrapePrices: vi.fn(async () => ({})),
+  findRetailerMatches: vi.fn(async () => undefined),
+  scrapePrices: vi.fn(async () => undefined),
   getPriceDrops: vi.fn(async () => []),
 }));
 vi.mock("@/lib/emailDigest", () => ({
