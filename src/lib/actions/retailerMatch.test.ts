@@ -39,4 +39,19 @@ describe("rejectRetailerMatch", () => {
 
     expect(await prisma.retailerMatch.findUnique({ where: { id: match.id } })).toBeNull();
   });
+
+  it("deletes the match and its price observations without throwing an FK violation", async () => {
+    const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} C`, owned: false } });
+    const match = await prisma.retailerMatch.create({
+      data: { tbrItemId: item.id, retailer: "librofm", productUrl: "https://libro.fm/x", matchedTitle: "x", confirmed: true },
+    });
+    const observation = await prisma.priceObservation.create({
+      data: { retailerMatchId: match.id, price: 9.99 },
+    });
+
+    await expect(rejectRetailerMatch(match.id)).resolves.not.toThrow();
+
+    expect(await prisma.retailerMatch.findUnique({ where: { id: match.id } })).toBeNull();
+    expect(await prisma.priceObservation.findUnique({ where: { id: observation.id } })).toBeNull();
+  });
 });
