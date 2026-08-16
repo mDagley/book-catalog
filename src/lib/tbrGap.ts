@@ -11,12 +11,89 @@ export interface TbrGapItem {
   isbn: string | null;
 }
 
-// Author (trimmed) if present, else title (trimmed) -- used both to sort the
-// full list and to decide which letter bucket an item falls into in
+// Suffixes stripped off the end of a "First Last Suffix" author name before
+// picking out the last name -- otherwise "John Smith Jr." would bucket under
+// "J" for Jr. instead of "S" for Smith.
+const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "v", "phd", "md", "esq"]);
+
+// Particles that stay attached to the last name they precede (so "Ursula K.
+// Le Guin" buckets under "L" for "Le Guin", not "G" for "Guin").
+const NAME_PARTICLES = new Set([
+  "de", "del", "della", "di", "da", "van", "von", "der", "den", "le", "la", "st", "mac", "mc",
+]);
+
+// Strips ALL periods (not just a trailing one) before comparing against
+// NAME_SUFFIXES/NAME_PARTICLES -- a suffix like "Ph.D." has an internal
+// period too, and stripping only the trailing one would leave "ph.d", which
+// never matches the "phd" entry in NAME_SUFFIXES.
+function normalizeNameToken(token: string): string {
+  return token.replace(/\./g, "").toLowerCase();
+}
+
+// Reorders "First [Middle] Last [Suffix]" tokens to lead with the last name
+// (e.g. ["Brandon", "Sanderson"] -> "Sanderson Brandon"), stripping a
+// trailing suffix and folding in any name particle immediately before the
+// last name.
+function reorderTokensByLastName(tokens: string[]): string {
+  if (tokens.length <= 1) return tokens.join(" ");
+
+  let end = tokens.length;
+  while (end > 1 && NAME_SUFFIXES.has(normalizeNameToken(tokens[end - 1]))) {
+    end--;
+  }
+
+  let start = end - 1;
+  while (start > 0 && NAME_PARTICLES.has(normalizeNameToken(tokens[start - 1]))) {
+    start--;
+  }
+
+  const lastName = tokens.slice(start, end).join(" ");
+  const rest = [...tokens.slice(0, start), ...tokens.slice(end)].join(" ");
+  return rest ? `${lastName} ${rest}` : lastName;
+}
+
+// Reorders a "First [Middle] Last [Suffix]" author name to lead with the last
+// name (e.g. "Brandon Sanderson" -> "Sanderson Brandon"), so alphabetizing by
+// this string groups and sorts authors by last name -- the way a library
+// shelf does -- rather than by first name. A name already in "Last, First"
+// form is left as-is, since it already leads with the last name -- but a
+// comma immediately before a suffix ("John Smith, Jr.") is NOT that form, so
+// it's rejoined into plain tokens and reordered like any other name, rather
+// than being mistaken for "Last, First" and bucketed under "J". This also
+// covers MULTIPLE comma-separated suffixes ("John Smith, Jr., Ph.D.") --
+// checking only the text after the FIRST comma as one unit would treat
+// "Jr., Ph.D." as a single non-suffix blob and misclassify the whole name as
+// "Last, First". Every comma-separated segment after the first must be a
+// known suffix for this branch to apply; reorderTokensByLastName's own loop
+// already strips more than one trailing suffix token once they're rejoined.
+function authorSortName(author: string): string {
+  const trimmed = author.trim();
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex === -1) {
+    return reorderTokensByLastName(trimmed.split(/\s+/).filter(Boolean));
+  }
+
+  const before = trimmed.slice(0, commaIndex).trim();
+  const afterSegments = trimmed
+    .slice(commaIndex + 1)
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const allSuffixes =
+    afterSegments.length > 0 &&
+    afterSegments.every((segment) => NAME_SUFFIXES.has(normalizeNameToken(segment)));
+
+  if (!allSuffixes) return trimmed;
+  return reorderTokensByLastName([before, ...afterSegments].join(" ").split(/\s+/).filter(Boolean));
+}
+
+// Author (by last name) if present, else title (trimmed) -- used both to
+// sort the full list and to decide which letter bucket an item falls into in
 // groupByInitial, so the two always agree on what "browsing alphabetically"
 // means for a given item.
 function sortKey(item: Pick<TbrGapItem, "title" | "author">): string {
-  return item.author?.trim() || item.title.trim();
+  const author = item.author?.trim();
+  return author ? authorSortName(author) : item.title.trim();
 }
 
 async function computeTbrGap(): Promise<TbrGapItem[]> {
@@ -25,6 +102,9 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
     select: { id: true, title: true, author: true, coverImagePath: true, isbn: true },
   });
 
+  // sortKey does real work now (token splitting/reordering for last-name
+  // sort) -- computed once per item here rather than inside the comparator,
+  // where it would otherwise run O(n log n) times instead of O(n).
   return tbrItems
     .map((tbr) => ({
       id: tbr.id,
@@ -33,7 +113,9 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
       coverImagePath: tbr.coverImagePath,
       isbn: tbr.isbn,
     }))
-    .sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { sensitivity: "base" }));
+    .map((item) => ({ item, key: sortKey(item) }))
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: "base" }))
+    .map(({ item }) => item);
 }
 
 // Batch form of markTbrItemsOwnedByTitle -- ONE scan of the unowned TBR items
