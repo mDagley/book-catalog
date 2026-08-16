@@ -8,6 +8,8 @@ export async function register() {
   const { syncAbsCache } = await import("@/lib/absSync");
   const { syncGoodreadsTbr } = await import("@/lib/goodreadsSync");
   const { syncOwnedPhysicalBooks } = await import("@/lib/ownedPhysicalSync");
+  const { findRetailerMatches, scrapePrices, getPriceDrops } = await import("@/lib/priceTracking");
+  const { sendPriceDropDigest } = await import("@/lib/emailDigest");
 
   // A single cron job running all three syncs sequentially, every 30
   // minutes -- within the design spec's "every 30-60 minutes" range. This
@@ -60,4 +62,37 @@ export async function register() {
   );
 
   console.log("Registered ABS and Goodreads sync cron job (every 30 minutes)");
+
+  // Separate daily job (not folded into the 30-minute job above) so a slow
+  // or failing retailer scrape can never delay or block the ABS/Goodreads
+  // syncs, and vice versa -- same reasoning that already justifies
+  // { noOverlap: true } on the job above, applied across jobs instead of
+  // within one.
+  cron.schedule(
+    "0 6 * * *",
+    async () => {
+      try {
+        await findRetailerMatches();
+      } catch (error) {
+        console.error("Retailer matching failed:", error);
+      }
+      try {
+        await scrapePrices();
+      } catch (error) {
+        console.error("Price scraping failed:", error);
+      }
+      try {
+        const drops = await getPriceDrops();
+        await sendPriceDropDigest(drops);
+        if (drops.length > 0) {
+          console.log(`Price-drop digest sent: ${drops.length} drop(s)`);
+        }
+      } catch (error) {
+        console.error("Price-drop digest failed:", error);
+      }
+    },
+    { noOverlap: true },
+  );
+
+  console.log("Registered daily TBR price-tracking cron job (06:00)");
 }
