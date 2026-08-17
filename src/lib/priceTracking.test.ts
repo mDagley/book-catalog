@@ -78,6 +78,31 @@ describe("findRetailerMatches", () => {
     expect(matches).toHaveLength(1);
   });
 
+  it("does not re-create a match for a retailer the user already rejected", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: `${TITLE_PREFIX} B2`, owned: false },
+    });
+    await prisma.retailerMatch.create({
+      data: {
+        tbrItemId: item.id,
+        retailer: "librofm",
+        productUrl: "https://libro.fm/audiobooks/wrong-book",
+        matchedTitle: `${TITLE_PREFIX} B2`,
+        confirmed: false,
+        rejected: true,
+      },
+    });
+    vi.mocked(librofmAdapter.search).mockResolvedValue(null);
+    vi.mocked(googleplayAdapter.search).mockResolvedValue(null);
+
+    await findRetailerMatches();
+
+    expect(librofmAdapter.search).not.toHaveBeenCalled();
+    const matches = await prisma.retailerMatch.findMany({ where: { tbrItemId: item.id } });
+    expect(matches).toHaveLength(1);
+    expect(matches[0].rejected).toBe(true);
+  });
+
   it("skips owned items entirely", async () => {
     await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} C`, owned: true } });
     vi.mocked(librofmAdapter.search).mockResolvedValue(null);

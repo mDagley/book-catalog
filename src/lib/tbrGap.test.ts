@@ -216,6 +216,30 @@ describe("getTbrGap retailer matches", () => {
     await prisma.retailerMatch.deleteMany({ where: { tbrItemId: item.id } });
     await prisma.goodreadsTbrItem.deleteMany({ where: { id: item.id } });
   });
+
+  it("excludes a rejected match entirely", async () => {
+    const item = await prisma.goodreadsTbrItem.create({
+      data: { title: "Test TBR Gap Rejected Match Item", owned: false },
+    });
+    await prisma.retailerMatch.create({
+      data: {
+        tbrItemId: item.id,
+        retailer: "librofm",
+        productUrl: "https://libro.fm/x",
+        matchedTitle: "Test TBR Gap Rejected Match Item",
+        confirmed: false,
+        rejected: true,
+      },
+    });
+
+    const gap = await getTbrGap();
+    const found = gap.find((i) => i.id === item.id);
+
+    expect(found?.retailerMatches).toEqual([]);
+
+    await prisma.retailerMatch.deleteMany({ where: { tbrItemId: item.id } });
+    await prisma.goodreadsTbrItem.deleteMany({ where: { id: item.id } });
+  });
 });
 
 describe("groupByInitial", () => {

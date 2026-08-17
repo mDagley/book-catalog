@@ -21,12 +21,14 @@ export async function confirmRetailerMatch(matchId: string): Promise<void> {
   revalidatePath("/tbr");
 }
 
-// Deletes the match outright, rather than marking it rejected -- the unique
-// constraint on (tbrItemId, retailer) means findRetailerMatches will attempt
-// this pair again on its next daily run once the row is gone.
+// Sets `rejected: true` rather than deleting the row -- findRetailerMatches
+// skips any (tbrItemId, retailer) pair that already has a RetailerMatch row,
+// so keeping this row around (instead of deleting it) is what permanently
+// stops that pair from being re-suggested on a future run. A deleted row
+// would look "never matched" and get immediately re-created.
 export async function rejectRetailerMatch(matchId: string): Promise<void> {
   try {
-    await prisma.retailerMatch.delete({ where: { id: matchId } });
+    await prisma.retailerMatch.update({ where: { id: matchId }, data: { rejected: true } });
   } catch (err) {
     if (!isRecordNotFound(err)) throw err;
   }
