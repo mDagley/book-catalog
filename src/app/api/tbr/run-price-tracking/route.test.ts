@@ -59,4 +59,32 @@ describe("POST /api/tbr/run-price-tracking", () => {
     expect(data).toEqual({ success: false, error: "libro.fm unreachable" });
     expect(scrapePrices).not.toHaveBeenCalled();
   });
+
+  it("returns 409 when a run is already in progress, and releases the lock once it finishes", async () => {
+    let resolveFirstRun!: () => void;
+    vi.mocked(findRetailerMatches).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveFirstRun = resolve;
+      }),
+    );
+    vi.mocked(scrapePrices).mockResolvedValue(undefined);
+    vi.mocked(getPriceDrops).mockResolvedValue([]);
+    vi.mocked(sendPriceDropDigest).mockResolvedValue(undefined);
+
+    const firstRun = POST();
+
+    const secondResponse = await POST();
+    const secondData = await secondResponse.json();
+    expect(secondResponse.status).toBe(409);
+    expect(secondData.success).toBe(false);
+
+    resolveFirstRun();
+    const firstResponse = await firstRun;
+    expect(firstResponse.status).toBe(200);
+
+    // The lock was released when the first run finished -- a third call
+    // should succeed rather than also being rejected as "in progress".
+    const thirdResponse = await POST();
+    expect(thirdResponse.status).toBe(200);
+  });
 });
