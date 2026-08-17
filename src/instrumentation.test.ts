@@ -43,11 +43,20 @@ vi.mock("@/lib/emailDigest", () => ({
   sendPriceDropDigest: vi.fn(async () => {}),
 }));
 
+const tryAcquirePriceTrackingLockMock = vi.fn(() => true);
+const releasePriceTrackingLockMock = vi.fn();
+vi.mock("@/lib/priceTrackingLock", () => ({
+  tryAcquirePriceTrackingLock: () => tryAcquirePriceTrackingLockMock(),
+  releasePriceTrackingLock: () => releasePriceTrackingLockMock(),
+}));
+
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
   scheduleMock.mockClear();
   order.length = 0;
+  tryAcquirePriceTrackingLockMock.mockClear().mockReturnValue(true);
+  releasePriceTrackingLockMock.mockClear();
   process.env.NEXT_RUNTIME = "nodejs";
   process.env.ABS_URL = "https://abs.example.com";
   process.env.ABS_TOKEN = "token";
@@ -98,5 +107,32 @@ describe("register", () => {
     // when run in isolation, sequential awaiting means they still complete
     // in call order -- abs, then goodreads, then owned-physical.
     expect(order).toEqual(["abs", "goodreads", "owned-physical"]);
+  });
+
+  it("skips the daily price-tracking run and releases nothing when the shared lock is already held", async () => {
+    tryAcquirePriceTrackingLockMock.mockReturnValue(false);
+
+    const { register } = await import("@/instrumentation");
+    const { findRetailerMatches } = await import("@/lib/priceTracking");
+    await register();
+
+    const [, callback] = scheduleMock.mock.calls[1];
+    await callback();
+
+    expect(findRetailerMatches).not.toHaveBeenCalled();
+    expect(releasePriceTrackingLockMock).not.toHaveBeenCalled();
+  });
+
+  it("acquires and releases the shared lock around a normal daily price-tracking run", async () => {
+    const { register } = await import("@/instrumentation");
+    const { findRetailerMatches } = await import("@/lib/priceTracking");
+    await register();
+
+    const [, callback] = scheduleMock.mock.calls[1];
+    await callback();
+
+    expect(findRetailerMatches).toHaveBeenCalled();
+    expect(tryAcquirePriceTrackingLockMock).toHaveBeenCalled();
+    expect(releasePriceTrackingLockMock).toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import { CoverThumbnail } from "@/components/CoverThumbnail";
 import { CoverGridCard } from "@/components/CoverGridCard";
 import { RecomputeOwnershipButton } from "@/components/RecomputeOwnershipButton";
 import { RetailerPriceBadge } from "@/components/RetailerPriceBadge";
+import { RunPriceTrackingButton } from "@/components/RunPriceTrackingButton";
 import { SearchAutocomplete } from "@/components/SearchAutocomplete";
 import { TicketCard } from "@/components/ui/TicketCard";
 
@@ -41,6 +42,7 @@ export default async function TbrGapPage({
             </button>
           </form>
           <RecomputeOwnershipButton />
+          <RunPriceTrackingButton />
           <Link href="/" className="text-sm text-link underline">
             Back to search
           </Link>

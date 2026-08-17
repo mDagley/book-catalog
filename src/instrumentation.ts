@@ -10,6 +10,9 @@ export async function register() {
   const { syncOwnedPhysicalBooks } = await import("@/lib/ownedPhysicalSync");
   const { findRetailerMatches, scrapePrices, getPriceDrops } = await import("@/lib/priceTracking");
   const { sendPriceDropDigest } = await import("@/lib/emailDigest");
+  const { tryAcquirePriceTrackingLock, releasePriceTrackingLock } = await import(
+    "@/lib/priceTrackingLock"
+  );
 
   // A single cron job running all three syncs sequentially, every 30
   // minutes -- within the design spec's "every 30-60 minutes" range. This
@@ -68,27 +71,40 @@ export async function register() {
   // syncs, and vice versa -- same reasoning that already justifies
   // { noOverlap: true } on the job above, applied across jobs instead of
   // within one.
+  //
+  // Also guarded by priceTrackingLock, shared with the manual "Run price
+  // check" route (src/app/api/tbr/run-price-tracking) -- node-cron's own
+  // { noOverlap: true } only prevents THIS job from overlapping itself, not
+  // a manual click firing while this scheduled run is still in progress.
   cron.schedule(
     "0 6 * * *",
     async () => {
-      try {
-        await findRetailerMatches();
-      } catch (error) {
-        console.error("Retailer matching failed:", error);
+      if (!tryAcquirePriceTrackingLock()) {
+        console.log("Skipping scheduled price-tracking run: a run is already in progress");
+        return;
       }
       try {
-        await scrapePrices();
-      } catch (error) {
-        console.error("Price scraping failed:", error);
-      }
-      try {
-        const drops = await getPriceDrops();
-        await sendPriceDropDigest(drops);
-        if (drops.length > 0) {
-          console.log(`Price-drop digest sent: ${drops.length} drop(s)`);
+        try {
+          await findRetailerMatches();
+        } catch (error) {
+          console.error("Retailer matching failed:", error);
         }
-      } catch (error) {
-        console.error("Price-drop digest failed:", error);
+        try {
+          await scrapePrices();
+        } catch (error) {
+          console.error("Price scraping failed:", error);
+        }
+        try {
+          const drops = await getPriceDrops();
+          await sendPriceDropDigest(drops);
+          if (drops.length > 0) {
+            console.log(`Price-drop digest sent: ${drops.length} drop(s)`);
+          }
+        } catch (error) {
+          console.error("Price-drop digest failed:", error);
+        }
+      } finally {
+        releasePriceTrackingLock();
       }
     },
     { noOverlap: true },
