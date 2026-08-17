@@ -12,7 +12,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "postinstall": "prisma generate",
-    "backfill:tbr-owned": "tsx scripts/backfill-tbr-owned.ts"
+    "backfill:tbr-owned": "tsx scripts/backfill-tbr-owned.ts",
+    "price-tracking:run": "tsx scripts/run-price-tracking.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
