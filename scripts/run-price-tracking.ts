@@ -2,10 +2,15 @@
 // items to retailer listings, scrape/fetch prices for confirmed matches,
 // then send the drop digest email if any drops were found. Same three
 // steps as the daily cron job in src/instrumentation.ts, but NOT identical
-// error handling: the cron job wraps each step in its own try/catch so one
-// failure never blocks the rest, while this script is deliberately
-// fail-fast -- for an interactive run you want to see the first error
-// immediately, not have it silently swallowed while later steps proceed.
+// error handling AT THE STEP BOUNDARY: the cron job wraps each of the three
+// steps in its own try/catch so a failure in one never blocks the next,
+// while this script has no such wrapper -- an uncaught error from one step
+// stops the rest, which is what you want for an interactive run (see the
+// first failure immediately, not have it silently swallowed while later
+// steps proceed). Within a step, per-item errors are still caught and
+// logged exactly as they are in the cron job -- findRetailerMatches and
+// scrapePrices themselves already catch/continue per item; this script
+// doesn't change that.
 //
 // >>> This does NOT run inside the deployed container. <<<
 // Same reasoning as scripts/backfill-tbr-owned.ts: it needs tsx to resolve
