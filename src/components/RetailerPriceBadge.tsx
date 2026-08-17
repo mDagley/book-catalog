@@ -1,5 +1,6 @@
 import type { TbrGapRetailerMatch } from "@/lib/tbrGap";
 import { confirmRetailerMatch, rejectRetailerMatch } from "@/lib/actions/retailerMatch";
+import { BUTTON_VARIANT_CLASSES } from "@/components/ui/Button";
 
 const RETAILER_LABELS: Record<string, string> = {
   librofm: "libro.fm",
@@ -11,17 +12,23 @@ export function RetailerPriceBadge({ match }: { match: TbrGapRetailerMatch }) {
 
   if (!match.confirmed) {
     return (
-      <div className="flex flex-wrap items-center gap-1 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <span className="text-foreground/70">
           Confirm match: &quot;{match.matchedTitle}&quot; on {label}?
         </span>
         <form action={confirmRetailerMatch.bind(null, match.id)}>
-          <button type="submit" className="text-link underline">
+          <button
+            type="submit"
+            className={`rounded-md px-2 py-0.5 text-xs font-medium ${BUTTON_VARIANT_CLASSES.primary}`}
+          >
             Confirm
           </button>
         </form>
         <form action={rejectRetailerMatch.bind(null, match.id)}>
-          <button type="submit" className="text-link underline">
+          <button
+            type="submit"
+            className={`rounded-md px-2 py-0.5 text-xs font-medium ${BUTTON_VARIANT_CLASSES.secondary}`}
+          >
             Reject
           </button>
         </form>
