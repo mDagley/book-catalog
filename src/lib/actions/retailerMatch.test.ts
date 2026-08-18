@@ -41,7 +41,7 @@ describe("rejectRetailerMatch", () => {
     expect(updated.rejected).toBe(true);
   });
 
-  it("does not throw when rejecting a match that has price observations", async () => {
+  it("does not throw when rejecting a match that has price observations, and clears confirmed", async () => {
     const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} C`, owned: false } });
     const match = await prisma.retailerMatch.create({
       data: { tbrItemId: item.id, retailer: "librofm", productUrl: "https://libro.fm/x", matchedTitle: "x", confirmed: true },
@@ -52,5 +52,10 @@ describe("rejectRetailerMatch", () => {
 
     const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
     expect(updated.rejected).toBe(true);
+    // Rejecting a previously-confirmed match must clear `confirmed` too --
+    // scrapePrices/getPriceDrops filter on confirmed alone, so a row left
+    // both confirmed and rejected would keep being scraped and could still
+    // trigger a drop alert for something the user just said was wrong.
+    expect(updated.confirmed).toBe(false);
   });
 });
