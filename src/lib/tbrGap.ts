@@ -117,8 +117,10 @@ async function computeTbrGap(): Promise<TbrGapItem[]> {
       isbn: true,
       retailerMatches: {
         // A rejected match is a settled decision -- it should never render
-        // as a confirm/reject prompt (already decided) or a price badge (it
-        // was never confirmed, so it was never scraped either).
+        // as a confirm/reject prompt (already decided) or a price badge,
+        // regardless of whether it happens to have historical price
+        // observations from before it was rejected (rejectRetailerMatch can
+        // reject a previously-confirmed row, and doesn't delete those rows).
         where: { rejected: false },
         select: {
           id: true,

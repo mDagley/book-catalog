@@ -26,6 +26,26 @@ describe("confirmRetailerMatch", () => {
     const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
     expect(updated.confirmed).toBe(true);
   });
+
+  it("does not confirm a match that has already been rejected", async () => {
+    const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} A2`, owned: false } });
+    const match = await prisma.retailerMatch.create({
+      data: {
+        tbrItemId: item.id,
+        retailer: "librofm",
+        productUrl: "https://libro.fm/x",
+        matchedTitle: "x",
+        confirmed: false,
+        rejected: true,
+      },
+    });
+
+    await confirmRetailerMatch(match.id);
+
+    const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
+    expect(updated.confirmed).toBe(false);
+    expect(updated.rejected).toBe(true);
+  });
 });
 
 describe("rejectRetailerMatch", () => {

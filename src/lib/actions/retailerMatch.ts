@@ -12,12 +12,19 @@ function isRecordNotFound(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025";
 }
 
+// Guarded with `rejected: false` in the where clause (via updateMany, not
+// update) rather than a plain update -- a rejected row is meant to be
+// permanently settled (see rejectRetailerMatch below), so a stale UI or
+// tampered request confirming an already-rejected match must not be able
+// to resurrect it back into confirmed:true && rejected:true, the same
+// invalid state rejectRetailerMatch itself guards against. updateMany
+// matching zero rows (already rejected, or already deleted) is a silent
+// no-op either way -- no error to catch, unlike update's throw-on-missing.
 export async function confirmRetailerMatch(matchId: string): Promise<void> {
-  try {
-    await prisma.retailerMatch.update({ where: { id: matchId }, data: { confirmed: true } });
-  } catch (err) {
-    if (!isRecordNotFound(err)) throw err;
-  }
+  await prisma.retailerMatch.updateMany({
+    where: { id: matchId, rejected: false },
+    data: { confirmed: true },
+  });
   revalidatePath("/tbr");
 }
 
