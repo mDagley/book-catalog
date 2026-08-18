@@ -11,10 +11,11 @@ A rejected retailer match must never be re-suggested for that TBR item/retailer 
 ## Design
 
 - `RetailerMatch` gains `rejected Boolean @default(false)`.
-- `rejectRetailerMatch` sets `rejected: true` instead of deleting the row. `confirmRetailerMatch` is unchanged (still just sets `confirmed: true`; a confirm can only ever apply to a row that hasn't been rejected, since a rejected row is filtered out of the UI entirely — see below).
-- `findRetailerMatches`'s existing "skip if this item already has a `RetailerMatch` row for this retailer" check needs no change — a rejected row still counts as "already has one," so it's never re-created. This is the entire fix; everything downstream follows from it.
-- `getTbrGap`'s `retailerMatches` select gains `where: { rejected: false }` on the relation, so a rejected match is invisible to the UI — no confirm/reject prompt (it's already been decided), no price badge (it was never confirmed, so it was never scraped either).
-- `scrapePrices`/`getPriceDrops` need no change: both already filter `confirmed: true`, and a rejected row is never confirmed.
+- `rejectRetailerMatch` sets `rejected: true` AND `confirmed: false` (not just `rejected: true`) instead of deleting the row. The `confirmed: false` half matters because Reject is reachable on a match that a user had previously confirmed (and which may already have price observations, from before it was rejected) — without clearing `confirmed`, the row would end up both `confirmed: true` and `rejected: true`, and `scrapePrices`/`getPriceDrops` filter on `confirmed` alone, so it would keep being scraped and could still trigger a drop alert despite being "rejected."
+- `confirmRetailerMatch` is guarded symmetrically: it only updates a row where `rejected: false` (via `updateMany`, a silent no-op when the row doesn't match rather than throwing), so a stale UI or tampered request can't resurrect an already-rejected match back into `confirmed: true && rejected: true`.
+- `findRetailerMatches`'s existing "skip if this item already has a `RetailerMatch` row for this retailer" check needs no change — a rejected row still counts as "already has one," so it's never re-created. This is the core of the fix; everything else follows from it.
+- `getTbrGap`'s `retailerMatches` select gains `where: { rejected: false }` on the relation, so a rejected match is invisible to the UI — no confirm/reject prompt (it's already been decided), no price badge, regardless of whether it happens to have historical price observations from before it was rejected.
+- `scrapePrices`/`getPriceDrops` need no code change: both already filter `confirmed: true`, and the two guards above now make "rejected implies not confirmed" hold unconditionally at the data layer, not just as an artifact of which UI states expose Reject.
 
 ## Non-goals
 
