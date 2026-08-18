@@ -85,15 +85,27 @@ export function CoverGridCard({
     </TicketCard>
   );
 
+  // A plain `h-full` on the card, sibling to `children` under one flex
+  // parent, is circular: the card's height depends on the <li>'s height,
+  // but the <li>'s natural (max-content) height -- which CSS grid's
+  // align-items:stretch row-track sizing uses -- includes the badges that
+  // come after the card. Different items in the same grid row can have
+  // different-length titles/badge text, so that circularity resolved
+  // inconsistently per column, visibly clipping/misaligning badges in some
+  // columns of a row but not others. Wrapping the card in its own `flex-1`
+  // child of a flex column <li> sizes it via flex-grow instead of a
+  // percentage, which has no such circular dependency.
   return (
-    <li data-testid="catalog-grid-item">
-      {result.bookId ? (
-        <Link href={`/books/${result.bookId}`} aria-label={result.title} className="block h-full">
-          {card}
-        </Link>
-      ) : (
-        card
-      )}
+    <li data-testid="catalog-grid-item" className="flex flex-col">
+      <div className="flex-1">
+        {result.bookId ? (
+          <Link href={`/books/${result.bookId}`} aria-label={result.title} className="block h-full">
+            {card}
+          </Link>
+        ) : (
+          card
+        )}
+      </div>
       {children}
     </li>
   );

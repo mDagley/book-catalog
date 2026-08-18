@@ -23,13 +23,22 @@ function anchorId(letter: string): string {
 export default async function TbrGapPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; pending?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, pending } = await searchParams;
   const query = q?.trim() ?? "";
-  const gap = await getTbrGap(query);
+  const pendingOnly = pending === "1";
+  const fullGap = await getTbrGap(query);
+  // retailerMatches already excludes rejected matches (see getTbrGap), so
+  // any remaining confirmed:false entry is a genuine pending decision.
+  const gap = pendingOnly
+    ? fullGap.filter((item) => item.retailerMatches.some((match) => !match.confirmed))
+    : fullGap;
   const groups = groupByInitial(gap);
   const viewMode = await getViewMode("tbr");
+  const toggleFilterHref = pendingOnly
+    ? `/tbr${query ? `?q=${encodeURIComponent(query)}` : ""}`
+    : `/tbr?${[query && `q=${encodeURIComponent(query)}`, "pending=1"].filter(Boolean).join("&")}`;
 
   return (
     <main className={`mx-auto w-full min-w-0 p-4 ${viewMode === "grid" ? "max-w-6xl" : "max-w-2xl"}`}>
@@ -43,6 +52,9 @@ export default async function TbrGapPage({
           </form>
           <RecomputeOwnershipButton />
           <RunPriceTrackingButton />
+          <Link href={toggleFilterHref} className="text-sm text-link underline">
+            {pendingOnly ? "Show all items" : "Show pending matches only"}
+          </Link>
           <Link href="/" className="text-sm text-link underline">
             Back to search
           </Link>
@@ -50,6 +62,7 @@ export default async function TbrGapPage({
       </div>
 
       <form action="/tbr" method="get" className="mb-4">
+        {pendingOnly && <input type="hidden" name="pending" value="1" />}
         <SearchAutocomplete
           scope="tbr"
           name="q"
@@ -70,9 +83,13 @@ export default async function TbrGapPage({
 
       {gap.length === 0 ? (
         <p className="text-foreground/70">
-          {query
-            ? "No matches found."
-            : "Everything on your to-read shelf is already owned in some form."}
+          {pendingOnly
+            ? query
+              ? "No matches found with a pending confirmation."
+              : "No items have a pending match confirmation right now."
+            : query
+              ? "No matches found."
+              : "Everything on your to-read shelf is already owned in some form."}
         </p>
       ) : (
         groups.map((group) => (
