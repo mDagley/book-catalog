@@ -26,10 +26,30 @@ describe("confirmRetailerMatch", () => {
     const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
     expect(updated.confirmed).toBe(true);
   });
+
+  it("does not confirm a match that has already been rejected", async () => {
+    const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} A2`, owned: false } });
+    const match = await prisma.retailerMatch.create({
+      data: {
+        tbrItemId: item.id,
+        retailer: "librofm",
+        productUrl: "https://libro.fm/x",
+        matchedTitle: "x",
+        confirmed: false,
+        rejected: true,
+      },
+    });
+
+    await confirmRetailerMatch(match.id);
+
+    const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
+    expect(updated.confirmed).toBe(false);
+    expect(updated.rejected).toBe(true);
+  });
 });
 
 describe("rejectRetailerMatch", () => {
-  it("deletes the match, allowing a future findRetailerMatches run to re-match it", async () => {
+  it("sets rejected to true rather than deleting the row, so the pair is never re-matched", async () => {
     const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} B`, owned: false } });
     const match = await prisma.retailerMatch.create({
       data: { tbrItemId: item.id, retailer: "librofm", productUrl: "https://libro.fm/x", matchedTitle: "x", confirmed: false },
@@ -37,21 +57,25 @@ describe("rejectRetailerMatch", () => {
 
     await rejectRetailerMatch(match.id);
 
-    expect(await prisma.retailerMatch.findUnique({ where: { id: match.id } })).toBeNull();
+    const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
+    expect(updated.rejected).toBe(true);
   });
 
-  it("deletes the match and its price observations without throwing an FK violation", async () => {
+  it("does not throw when rejecting a match that has price observations, and clears confirmed", async () => {
     const item = await prisma.goodreadsTbrItem.create({ data: { title: `${TITLE_PREFIX} C`, owned: false } });
     const match = await prisma.retailerMatch.create({
       data: { tbrItemId: item.id, retailer: "librofm", productUrl: "https://libro.fm/x", matchedTitle: "x", confirmed: true },
     });
-    const observation = await prisma.priceObservation.create({
-      data: { retailerMatchId: match.id, price: 9.99 },
-    });
+    await prisma.priceObservation.create({ data: { retailerMatchId: match.id, price: 9.99 } });
 
     await expect(rejectRetailerMatch(match.id)).resolves.not.toThrow();
 
-    expect(await prisma.retailerMatch.findUnique({ where: { id: match.id } })).toBeNull();
-    expect(await prisma.priceObservation.findUnique({ where: { id: observation.id } })).toBeNull();
+    const updated = await prisma.retailerMatch.findUniqueOrThrow({ where: { id: match.id } });
+    expect(updated.rejected).toBe(true);
+    // Rejecting a previously-confirmed match must clear `confirmed` too --
+    // scrapePrices/getPriceDrops filter on confirmed alone, so a row left
+    // both confirmed and rejected would keep being scraped and could still
+    // trigger a drop alert for something the user just said was wrong.
+    expect(updated.confirmed).toBe(false);
   });
 });
