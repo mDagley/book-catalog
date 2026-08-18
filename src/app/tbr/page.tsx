@@ -62,6 +62,7 @@ export default async function TbrGapPage({
       </div>
 
       <form action="/tbr" method="get" className="mb-4">
+        {pendingOnly && <input type="hidden" name="pending" value="1" />}
         <SearchAutocomplete
           scope="tbr"
           name="q"
