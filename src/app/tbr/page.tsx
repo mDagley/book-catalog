@@ -84,7 +84,9 @@ export default async function TbrGapPage({
       {gap.length === 0 ? (
         <p className="text-foreground/70">
           {pendingOnly
-            ? "No items have a pending match confirmation right now."
+            ? query
+              ? "No matches found with a pending confirmation."
+              : "No items have a pending match confirmation right now."
             : query
               ? "No matches found."
               : "Everything on your to-read shelf is already owned in some form."}
