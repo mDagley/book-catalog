@@ -6,6 +6,13 @@ import { findBestTitleMatch } from "@/lib/matching";
 import { deleteCoverImage, saveCoverImage, UnsupportedCoverFormatError } from "@/lib/coverStorage";
 import { markTbrItemsOwnedByTitles, recheckOwnedTbrItems } from "@/lib/tbrGap";
 import { parseSeriesFromTitle } from "@/lib/series";
+import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
+
+// Per-request limit for calls to the Audiobookshelf server. Generous for a
+// single page of 100 items on a self-hosted box, but short enough that an
+// unresponsive server fails the sync with a clear error instead of hanging
+// until the reverse proxy times the whole refresh request out.
+const ABS_FETCH_TIMEOUT_MS = 30_000;
 
 // True when `err` is specifically a Postgres unique-constraint violation on
 // absItemId -- meaning a concurrent sync run (cron overlapping a manual
@@ -62,9 +69,12 @@ function getMediaTypeForLibrary(libraryName: string): AbsMediaType | null {
 }
 
 export async function fetchAbsLibraries(baseUrl: string, token: string): Promise<AbsLibrary[]> {
-  const response = await fetch(`${baseUrl}/api/libraries`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetchWithTimeout(
+    `${baseUrl}/api/libraries`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    ABS_FETCH_TIMEOUT_MS,
+    "Audiobookshelf",
+  );
   if (!response.ok) {
     throw new Error(`Failed to fetch ABS libraries: HTTP ${response.status}`);
   }
@@ -85,7 +95,7 @@ export async function fetchAbsLibraryItems(
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const url = `${baseUrl}/api/libraries/${libraryId}/items?limit=${PAGE_LIMIT}&page=${page}`;
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers }, ABS_FETCH_TIMEOUT_MS, "Audiobookshelf");
     if (!response.ok) {
       throw new Error(
         `Failed to fetch ABS library items (library ${libraryId}, page ${page}): HTTP ${response.status}`,
@@ -332,9 +342,15 @@ async function fetchAbsCoverAndSave(
   absItemId: string,
 ): Promise<{ coverImagePath: string } | { reason?: "unsupported_format" }> {
   try {
-    const response = await fetch(`${baseUrl}/api/items/${absItemId}/cover`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // A timeout here falls into the catch below like any other cover
+    // failure (the book is kept, just without a cover) -- but without one,
+    // a single hung cover download would stall the entire sync.
+    const response = await fetchWithTimeout(
+      `${baseUrl}/api/items/${absItemId}/cover`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      ABS_FETCH_TIMEOUT_MS,
+      "Audiobookshelf",
+    );
     if (!response.ok) return {};
 
     const arrayBuffer = await response.arrayBuffer();

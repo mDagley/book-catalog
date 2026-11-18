@@ -6,6 +6,7 @@ import { findBestTitleMatch, normalizeTitle, isTitleMatch, createTitleIndex } fr
 import { deleteCoverImage } from "@/lib/coverStorage";
 import { lookupIsbn } from "@/lib/isbnLookup";
 import { saveCoverFromUrl } from "@/lib/books";
+import { fetchWithTimeout, isTimeoutError } from "@/lib/fetchWithTimeout";
 
 export interface GoodreadsBook {
   title: string;
@@ -17,6 +18,10 @@ export interface GoodreadsBook {
 export type GoodreadsShelf = "to-read" | "currently-reading" | "read";
 
 const MAX_PAGES = 100; // matches the audiobook-compare reference script's cap
+
+// Per-request limit for Goodreads RSS pages -- see ABS_FETCH_TIMEOUT_MS in
+// absSync.ts for why the syncs need one at all.
+const GOODREADS_FETCH_TIMEOUT_MS = 30_000;
 
 const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false });
 
@@ -52,12 +57,17 @@ export async function fetchGoodreadsPage(
 
   let response: Response;
   try {
-    response = await fetch(url.toString(), {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    response = await fetchWithTimeout(
+      url.toString(),
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        },
       },
-    });
+      GOODREADS_FETCH_TIMEOUT_MS,
+      "Goodreads",
+    );
   } catch (err) {
     throw new Error(
       `Failed to reach Goodreads for shelf "${shelf}" page ${page}: ${err instanceof Error ? err.message : String(err)}`,
@@ -73,6 +83,11 @@ export async function fetchGoodreadsPage(
   try {
     text = await response.text();
   } catch (err) {
+    if (isTimeoutError(err)) {
+      throw new Error(
+        `Goodreads stopped responding while sending shelf "${shelf}" page ${page} (timed out after ${GOODREADS_FETCH_TIMEOUT_MS / 1000}s)`,
+      );
+    }
     throw new Error(
       `Failed to read Goodreads response body for shelf "${shelf}" page ${page}: ${err instanceof Error ? err.message : String(err)}`,
     );
